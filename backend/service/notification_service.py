@@ -1,14 +1,19 @@
 # backend/service/notification_service.py
 """
 系统通知服务
-macOS 使用 osascript display notification，Windows 使用 win_toast。
+macOS 使用 osascript display notification，Windows 使用 win11toast (WinRT)。
 """
+import os
 import subprocess
 import sys
 
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Windows 桌面应用显示 Toast 所需的应用标识（AUMID）
+_WIN_AUMID = "GradeMonitor.GradeMonitor"
+_win_aumid_registered = False
 
 
 def send_startup_notification(auto_monitor_enabled: bool,
@@ -147,6 +152,57 @@ def send_notification_preview(is_simple: bool) -> str:
     )
 
 
+def _ensure_win_aumid() -> None:
+    """注册 Windows 桌面应用的 AppUserModelID（AUMID）。
+
+    Windows 非 MSIX 打包的桌面应用显示 Toast 通知前，必须存在一个带
+    System.AppUserModel.ID 的「开始菜单」快捷方式，否则 WinRT Toast 不会弹出。
+    这里通过 PowerShell 一次性创建该快捷方式（指向应用本体 exe）。
+    """
+    global _win_aumid_registered
+    if _win_aumid_registered:
+        return
+    # 无论成败只尝试一次，避免每次发通知都重复执行 PowerShell
+    _win_aumid_registered = True
+    try:
+        app_exe = os.environ.get("GRADEMONITOR_APP_PATH", "") or sys.executable
+        app_dir = os.path.dirname(app_exe) or app_exe
+        # 通过环境变量传参，避免 PowerShell 命令行引号转义问题
+        script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$lnkDir=Join-Path $env:APPDATA "
+            "'Microsoft\\Windows\\Start Menu\\Programs';"
+            "$lnkPath=Join-Path $lnkDir 'GradeMonitor.lnk';"
+            "$ws=New-Object -ComObject WScript.Shell;"
+            "$sc=$ws.CreateShortcut($lnkPath);"
+            "$sc.TargetPath=$env:GM_APP_EXE;"
+            "$sc.WorkingDirectory=$env:GM_APP_DIR;"
+            "$sc.Description='GradeMonitor';"
+            "$sc.Save();"
+            "$sh=New-Object -ComObject Shell.Application;"
+            "$folder=$sh.Namespace($lnkDir);"
+            "$item=$folder.ParseName('GradeMonitor.lnk');"
+            "if($item){"
+            "$item.ExtendedProperty('System.AppUserModel.ID').Value=$env:GM_AUMID"
+            "}"
+        )
+        env = os.environ.copy()
+        env["GM_APP_EXE"] = app_exe
+        env["GM_APP_DIR"] = app_dir
+        env["GM_AUMID"] = _WIN_AUMID
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-Command", script],
+            check=False,
+            timeout=15,
+            capture_output=True,
+            env=env,
+        )
+        logger.info(f"Windows AUMID 快捷方式已注册: {_WIN_AUMID}")
+    except Exception as e:
+        logger.warning(f"Windows AUMID 注册失败（通知可能无法显示）: {e}")
+
+
 def _show(title: str, message: str) -> None:
     """发送 macOS/Windows 系统通知。
     注：WebSocket 辅助通道暂时关闭，优先保证稳定性。后续开启时取消 _try_send_via_websocket 注释即可。
@@ -164,11 +220,12 @@ def _show(title: str, message: str) -> None:
             logger.info(f"Notification sent via osascript: {title}")
         elif sys.platform == "win32":
             try:
-                from win10toast import ToastNotifier
-                ToastNotifier().show_toast(title, message, duration=5)
-                logger.info(f"Notification sent via win10toast: {title}")
+                from win11toast import notify
+                _ensure_win_aumid()
+                notify(title, message, app_id=_WIN_AUMID)
+                logger.info(f"Notification sent via win11toast: {title}")
             except ImportError:
-                logger.warning("win10toast not installed")
+                logger.warning("win11toast 未安装，请执行: pip install win11toast")
     except subprocess.CalledProcessError as e:
         logger.error(
             f"osascript 执行失败 (exit code {e.returncode}):\n"

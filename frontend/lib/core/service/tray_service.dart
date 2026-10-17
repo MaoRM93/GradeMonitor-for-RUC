@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import '../logger/app_logger.dart';
@@ -22,45 +21,25 @@ class TrayService {
     _initialized = true;
 
     try {
-      await trayManager.setIcon('assets/tray_icon.png');
+      // setIcon 内部会自动拼接 <exeDir>/data/flutter_assets/ 前缀，
+      // 因此必须传相对 assets 的路径，不能传绝对路径（否则托盘图标失效、
+      // 右键菜单也不可用）。Windows 托盘对 PNG 支持不稳，优先用 ICO。
+      final String iconPath =
+          Platform.isWindows ? 'assets/app_icon.ico' : 'assets/tray_icon.png';
+
+      await trayManager.setIcon(iconPath);
       await trayManager.setToolTip('GradeMonitor');
 
       final menu = Menu(
         items: [
           MenuItem(key: 'show', label: '开启主界面'),
+          MenuItem.separator(),
           MenuItem(key: 'quit', label: '退出程序'),
         ],
       );
       await trayManager.setContextMenu(menu);
 
-      try {
-        trayManager.addListener(_TrayHandler(_log));
-        _log.info('系统托盘事件监听已注册');
-      } catch (e) {
-        _log.warning('托盘事件监听注册失败（尝试备用方案）: $e');
-        try {
-          const channel = MethodChannel('tray_manager');
-          channel.setMethodCallHandler((call) async {
-            if (call.method == 'onTrayIconMouseDown') {
-              await windowManager.show();
-              await windowManager.focus();
-            } else if (call.method == 'onTrayMenuItemClick') {
-              final args = call.arguments as Map?;
-              final key = args?['key'] as String?;
-              if (key == 'show') {
-                await windowManager.show();
-                await windowManager.focus();
-              } else if (key == 'quit') {
-                await _quitApp();
-              }
-            }
-          });
-          _log.info('托盘事件通过 MethodChannel 注册成功');
-        } catch (e2) {
-          _log.warning('托盘事件备用方案也失败: $e2');
-        }
-      }
-
+      trayManager.addListener(_TrayHandler(_log));
       _log.info('系统托盘已初始化（图标 + 右键菜单）');
     } catch (e) {
       _initialized = false;
@@ -94,16 +73,20 @@ class _TrayHandler implements TrayListener {
 
   @override
   void onTrayIconMouseDown() {
-    windowManager.show();
-    windowManager.focus();
-    _log.info('托盘图标左键点击 -> 显示窗口');
+    // 左键也弹菜单：用户只需要右键菜单，不需要左键直接显示主界面
+    trayManager.popUpContextMenu();
+    _log.info('托盘图标左键点击 -> 弹出菜单');
   }
 
   @override
   void onTrayIconMouseUp() {}
 
   @override
-  void onTrayIconRightMouseDown() {}
+  void onTrayIconRightMouseDown() {
+    // Windows 原生端右键抬起只回调本方法，需手动调用 popUpContextMenu 弹出菜单
+    trayManager.popUpContextMenu();
+    _log.info('托盘图标右键点击 -> 弹出菜单');
+  }
 
   @override
   void onTrayIconRightMouseUp() {}

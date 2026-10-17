@@ -2,8 +2,6 @@
 """
 本地数据缓存（成绩、排名）及数据目录管理
 """
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -17,7 +15,12 @@ logger = get_logger(__name__)
 # ---------- 数据存储目录 ----------
 APP_NAME = "GradeMonitor"
 
-if sys.platform == "darwin":
+# 支持通过环境变量 GRADEMONITOR_DATA_DIR 自定义数据目录
+_env_data_dir = os.environ.get("GRADEMONITOR_DATA_DIR", "")
+
+if _env_data_dir:
+    _default_appdata = _env_data_dir
+elif sys.platform == "darwin":
     _default_appdata = os.path.join(
         os.path.expanduser("~"), "Library", "Application Support", APP_NAME
     )
@@ -88,17 +91,18 @@ STATS_FILE = get_data_file_path("stats.json")
 
 
 # ---------- 成绩缓存 ----------
-# 课程对象的字段全为标量（无嵌套 dict/list），`\{[^{}]*\}` 能精确框出每个
-# 完整课程块，完全不依赖外层括号配对——即使文件因手动编辑出现残留括号、
-# 多余逗号或截断，每个本身完整的课程对象仍能被独立提取
+# 课程对象字段均为标量（无嵌套 dict/list），因此可用正则精确匹配每个
+# `{ ... }` 块。相比 raw_decode，正则逐块匹配不依赖整体括号配对，即使
+# 外层 JSON 结构因手动删除课程而损坏，每个完整的课程对象仍能被独立提取。
 _COURSE_BLOCK_RE = re.compile(r"\{[^{}]*\}")
 
 
 def _extract_courses(raw: str) -> dict | None:
-    """从损坏的 JSON 文本中逐块抢救课程对象。
+    """从损坏的 JSON 文本中逐个提取课程对象（按 kth 字段）。
 
-    只认携带非空字符串 kth 字段的对象为课程，其余噪声块丢弃。
-    一个课程都提取不到时返回 None（区别于空 dict {}）。
+    用于处理手动编辑/删除课程时导致的 JSON 损坏（如残留括号、多余逗号、
+    Extra data 等）。不依赖 JSON 整体结构，只要每个课程对象 `{...}` 本身
+    完整，就能被提取出来，从而避免"删除中间一门课却误报其他课程"。
     """
     courses: dict = {}
     for m in _COURSE_BLOCK_RE.finditer(raw):
@@ -117,9 +121,10 @@ def _extract_courses(raw: str) -> dict | None:
 def load_local_grades() -> dict | None:
     """加载缓存的成绩数据。
 
-    返回值语义：
-    - dict（可为空 {}）：合法基准；{} 表示首次运行/无缓存（合法状态）
-    - None：文件损坏且无法修复的哨兵信号，调用方必须跳过本轮对比（绝不误报）
+    返回:
+        dict: 成功加载（可能为空字典，表示无数据）
+        None:  文件存在但彻底无法解析 —— 调用方应跳过本轮对比，
+                避免以空基准误报"全部课程为新增"
     """
     if os.path.exists(LOCAL_GRADES_FILE):
         try:
@@ -134,26 +139,24 @@ def load_local_grades() -> dict | None:
                 logger.info(f"读取成绩缓存: {LOCAL_GRADES_FILE}  ({len(data)} 门)")
                 return data
         except json.JSONDecodeError as e:
-            logger.error(f"JSON 解析失败（可能手动编辑格式错误）: {LOCAL_GRADES_FILE} - {e}")
-            # 二级策略：正则逐块抢救课程对象
+            # 手动编辑常见问题：多余字符/截断。逐个提取课程对象以尽量恢复。
             try:
                 with open(LOCAL_GRADES_FILE, "r", encoding="utf-8") as f:
                     raw = f.read()
                 repaired = _extract_courses(raw)
-                if repaired is not None:
+                if repaired:
                     logger.warning(
-                        f"JSON 损坏，已逐个课程修复（恢复 {len(repaired)} 门），回写缓存文件"
+                        f"JSON 损坏，已逐个提取课程修复（恢复 {len(repaired)} 门）: {e}"
                     )
-                    save_local_grades(repaired)  # 回写修复结果，下次直接正常解析
+                    save_local_grades(repaired)  # 回写修复结果
                     return repaired
-                # 三级策略：彻底无法恢复 → None 哨兵，调用方跳过本轮对比
-                logger.error(
-                    "JSON 彻底损坏且无法提取任何课程，返回 None（跳过本轮成绩对比，零误报）"
-                )
-                return None
-            except Exception as e2:
-                logger.error(f"JSON 损坏修复流程失败: {e2}")
-                return None
+            except Exception:
+                pass
+            logger.error(
+                f"JSON 彻底无法解析，本轮将跳过对比（防止误报全量新增）: "
+                f"{LOCAL_GRADES_FILE} - {e}"
+            )
+            return None
         except Exception as e:
             logger.error(f"Failed to load cached grades: {e}")
             return None
@@ -169,34 +172,32 @@ def save_local_grades(grades_dict: dict) -> None:
 
 
 def _normalize_value(val):
-    """字段值归一化：消除"等价但类型不同"的假变动。
+    """归一化字段值，消除等价值的类型抖动（None、int/float、空白等）。
 
-    - None 保持 None；bool 必须在 int 判断之前（bool 是 int 子类）
-    - 整数值的 float（7.0 → 7），消除 int 7 vs float 7.0 抖动
-    - 字符串去首尾空白
-    - list/dict 转规范化 JSON 字符串再比较
+    例如：绩点字段服务器可能返回 int 7 或 float 7.0，二者业务含义相同，
+    必须视为相等，否则会误报"课程更新"。
     """
     if val is None:
         return None
     if isinstance(val, bool):
         return val
-    if isinstance(val, float):
-        return int(val) if val.is_integer() else val
+    if isinstance(val, float) and val.is_integer():
+        return int(val)
     if isinstance(val, str):
         return val.strip()
     if isinstance(val, (list, dict)):
-        return json.dumps(val, ensure_ascii=False, sort_keys=True)
+        return json.dumps(val, sort_keys=True, ensure_ascii=False)
     return val
 
 
 def diff_grades(old_grades: dict, new_grades: dict) -> tuple:
     """
     对比新旧成绩，返回 (new_courses, changed_courses)
-    - new_courses: 基准中不存在的课程（服务器新增，或用户手动删掉后重新出现）
-    - changed_courses: 任一字段归一化后不等的课程
+    - new_courses: old 中不存在的课程（用户手动删掉后重新出现）
+    - changed_courses: 任一字段真正发生变化的课程
 
-    不变量：严格按课程号 kth 做 dict 键值对比，绝不按顺序/索引——
-    删除中间一门课只会使该门课被判为"新增"，绝不连带其他课程误报。
+    按课程号 (kth) 严格对比，绝不做索引/顺序对比，因此删除中间一门课
+    只会把该门课判为"新增"，不会连带其后课程误报。
     """
     new_courses = []
     changed_courses = []
@@ -207,15 +208,16 @@ def diff_grades(old_grades: dict, new_grades: dict) -> tuple:
             continue
 
         old = old_grades[kth]
-        changed_fields = [
-            f for f in set(old) | set(course)
-            if _normalize_value(old.get(f)) != _normalize_value(course.get(f))
-        ]
+        changed_fields = []
+        for field in set(old) | set(course):
+            if _normalize_value(old.get(field)) != _normalize_value(course.get(field)):
+                changed_fields.append(field)
+
         if changed_fields:
             changed_courses.append(course)
+            course_name = course.get("kcname", "未知")
             logger.info(
-                f"[Diff] {course.get('kcname', '未知')} (kth={kth}) 变动字段: "
-                f"{', '.join(sorted(changed_fields))}"
+                f"[Diff] {course_name} (kth={kth}) 变动字段: {', '.join(sorted(changed_fields))}"
             )
 
     return new_courses, changed_courses

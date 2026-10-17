@@ -1,4 +1,3 @@
-import 'dart:io' show Process;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/service/tray_service.dart';
 import '../../core/service/update_service.dart';
-import '../update/update_dialog.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/monitor_provider.dart';
 import '../../widgets/glass_card.dart';
@@ -44,24 +42,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _prevShowMenubarIcon = true;
   bool _loaded = false;
 
-  // 检查更新
-  bool _isCheckingUpdate = false;
-  String _updateStatus = '';
-  Color? _updateStatusColor;
-  String _appVersion = '';
+  // 检查更新状态
+  _UpdateStatus _updateStatus = _UpdateStatus.idle;
+  String _updateMessage = '';
 
   @override
   void initState() {
     super.initState();
     Future.microtask(_loadSettings);
-    Future.microtask(_loadAppVersion);
-  }
-
-  Future<void> _loadAppVersion() async {
-    final v = await UpdateService().loadCurrentVersion();
-    if (mounted && v.isNotEmpty) {
-      setState(() => _appVersion = v);
-    }
   }
 
   Future<void> _loadSettings() async {
@@ -229,39 +217,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _saveSettings({'hide_unknown_courses': v});
   }
 
-  /// 手动检查更新：检查中 / 检查成功（已最新 / 有更新）/ 检查失败 三态反馈
-  Future<void> _checkUpdate() async {
-    if (_isCheckingUpdate) return;
-    setState(() {
-      _isCheckingUpdate = true;
-      _updateStatus = '检查中…';
-      _updateStatusColor = null;
-    });
-    final result = await UpdateService().check();
-    if (!mounted) return;
-    setState(() => _isCheckingUpdate = false);
-    // 禁用页即将接管全屏，无需提示
-    if (UpdateService().disabled.value) return;
-
-    if (result.success && result.hasUpdate) {
-      setState(() {
-        _updateStatus = '检测到版本更新：${result.latestVersion}';
-        _updateStatusColor = AppTheme.success;
-      });
-      await showUpdateDialog(context, result);
-    } else if (result.success) {
-      setState(() {
-        _updateStatus = '检查成功，当前已经是最新版本 ${result.currentVersion}';
-        _updateStatusColor = AppTheme.success;
-      });
-    } else {
-      setState(() {
-        _updateStatus = '检查失败：${result.message ?? '未知错误'}';
-        _updateStatusColor = AppTheme.error;
-      });
-    }
-  }
-
   Future<void> _testLogin() async {
     setState(() {
       _isLoggingIn = true;
@@ -296,6 +251,114 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     setState(() {
       _isLoggingIn = false;
     });
+  }
+
+  // ── 检查更新 ──
+
+  String get _versionDisplay {
+    final v = UpdateService().currentVersion;
+    return v.isEmpty ? '…' : v;
+  }
+
+  Future<void> _checkUpdate() async {
+    // 程序已被禁用时直接 return
+    if (UpdateService.disabled.value) return;
+
+    setState(() {
+      _updateStatus = _UpdateStatus.checking;
+      _updateMessage = '检查中…';
+    });
+
+    final result = await UpdateService().checkForUpdate();
+    if (!mounted) return;
+
+    setState(() {
+      if (!result.ok) {
+        _updateStatus = _UpdateStatus.failed;
+        _updateMessage = '检查失败：${result.error}';
+      } else if (result.hasUpdate) {
+        _updateStatus = _UpdateStatus.hasUpdate;
+        _updateMessage = '检测到版本更新：${result.latestVersion}';
+      } else {
+        _updateStatus = _UpdateStatus.upToDate;
+        _updateMessage = '检查成功，当前已经是最新版本 $_versionDisplay';
+      }
+    });
+
+    if (result.ok && result.hasUpdate && mounted) {
+      _showUpdateDialog(result);
+    }
+  }
+
+  void _showUpdateDialog(UpdateCheckResult result) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.upgrade_rounded, color: AppTheme.success, size: 24),
+            const SizedBox(width: 10),
+            const Text('发现新版本'),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '新版本 ${result.latestVersion} 已发布，'
+                '当前版本 $_versionDisplay。',
+                style: const TextStyle(fontSize: 14, height: 1.5),
+              ),
+              if (result.releaseNotes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      ctx,
+                    ).colorScheme.surfaceContainerHighest.withValues(alpha: .5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      result.releaseNotes,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: Theme.of(
+                          ctx,
+                        ).colorScheme.onSurface.withValues(alpha: .7),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('稍后再说'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              UpdateService().openInBrowser(
+                '${UpdateService.repoUrl}/releases/latest',
+              );
+            },
+            icon: const Icon(Icons.download_rounded, size: 18),
+            label: const Text('前往下载'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -700,59 +763,71 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       value: _hideUnknownCourses,
                       onChanged: _onHideUnknownChanged,
                     ),
-                    const Divider(height: 24),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '检查更新',
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // ---- ⑥ 检查更新 ----
+              _SectionTitle(
+                title: '检查更新',
+                icon: Icons.system_update_alt_rounded,
+              ),
+              const SizedBox(height: 12),
+              GlassCard(
+                padding: const EdgeInsets.all(20),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.cloud_download_rounded,
+                    color: colorScheme.primary,
+                  ),
+                  title: const Text(
+                    '检查更新',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 3),
+                      Text(
+                        '当前版本 $_versionDisplay',
                         style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                          fontSize: 12,
+                          color: colorScheme.onSurface.withValues(alpha: .5),
                         ),
                       ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '当前版本 '
-                            '${_appVersion.isEmpty ? '…' : _appVersion}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: colorScheme.onSurface.withValues(
-                                alpha: .35,
-                              ),
-                            ),
+                      if (_updateStatus != _UpdateStatus.idle) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _updateMessage,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _updateStatus == _UpdateStatus.checking
+                                ? colorScheme.onSurface.withValues(alpha: .45)
+                                : _updateStatus == _UpdateStatus.failed
+                                ? AppTheme.error
+                                : AppTheme.success,
                           ),
-                          if (_updateStatus.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Text(
-                                _updateStatus,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color:
-                                      _updateStatusColor ??
-                                      colorScheme.onSurface.withValues(
-                                        alpha: .55,
-                                      ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      trailing: _isCheckingUpdate
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : TextButton.icon(
-                              onPressed: _checkUpdate,
-                              icon: const Icon(Icons.refresh_rounded, size: 18),
-                              label: const Text('立即检查'),
-                            ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  trailing: OutlinedButton.icon(
+                    onPressed: _updateStatus == _UpdateStatus.checking
+                        ? null
+                        : _checkUpdate,
+                    icon: _updateStatus == _UpdateStatus.checking
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded, size: 16),
+                    label: Text(
+                      _updateStatus == _UpdateStatus.checking ? '检查中…' : '立即检查',
                     ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
@@ -768,9 +843,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         color: colorScheme.onSurface.withValues(alpha: .25),
                       ),
                       children: [
-                        const TextSpan(text: 'Version: '),
-                        TextSpan(text: _appVersion.isEmpty ? '…' : _appVersion),
-                        const TextSpan(text: ' · '),
+                        TextSpan(text: 'Version: $_versionDisplay · '),
                         const TextSpan(
                           text:
                               'Copyright © 2024-2030 GradeMonitor for RUC. All rights reserved. · ',
@@ -782,9 +855,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             decoration: TextDecoration.underline,
                           ),
                           recognizer: TapGestureRecognizer()
-                            ..onTap = () {
-                              Process.run('open', [UpdateService.repoUrl]);
-                            },
+                            ..onTap = () => UpdateService().openInBrowser(),
                         ),
                       ],
                     ),
@@ -799,6 +870,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 }
+
+/// 检查更新状态（四态 + 空闲初始态）
+enum _UpdateStatus { idle, checking, upToDate, hasUpdate, failed }
 
 /// 分区标题
 class _SectionTitle extends StatelessWidget {

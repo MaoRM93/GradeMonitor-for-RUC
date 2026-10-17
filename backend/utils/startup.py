@@ -1,13 +1,68 @@
 # backend/utils/startup.py
 """
-macOS 开机自启动管理
-使用 AppleScript / System Events 设置登录项，可在「系统设置 → 登录项」中查看和管��
+开机自启动管理
+- macOS: 使用 AppleScript / System Events 设置登录项，可在「系统设置 → 登录项」中查看和管理
+- Windows: 写入当前用户注册表 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
 """
 import os
 import subprocess
 import sys
 
 APP_NAME = "GradeMonitor"
+
+# Windows 自启动：写入当前用户注册表 Run 键（无需管理员权限）
+_WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_WIN_RUN_VALUE = "GradeMonitor"
+
+
+def _get_win_exe_path() -> str:
+    """获取 Windows 应用可执行文件路径"""
+    env_path = os.environ.get("GRADEMONITOR_APP_PATH", "")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    # PyInstaller 打包后（或开发模式下运行 python.exe）
+    return sys.executable
+
+
+def _win_is_startup_enabled() -> bool:
+    """检查 Windows 注册表 Run 键是否包含自启动项"""
+    import winreg
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, _WIN_RUN_KEY, 0, winreg.KEY_QUERY_VALUE
+        )
+    except OSError:
+        return False
+    try:
+        winreg.QueryValueEx(key, _WIN_RUN_VALUE)
+        return True
+    except FileNotFoundError:
+        return False
+    finally:
+        winreg.CloseKey(key)
+
+
+def _win_set_startup(enabled: bool) -> None:
+    """写入/删除 Windows 注册表 Run 键的自启动项"""
+    import winreg
+    exe_path = _get_win_exe_path()
+    if not exe_path:
+        raise Exception("无法确定应用可执行文件路径")
+    # 路径加引号，避免含空格路径无法正确启动
+    value = f'"{exe_path}"'
+    key = winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER, _WIN_RUN_KEY, 0, winreg.KEY_SET_VALUE
+    )
+    try:
+        if enabled:
+            winreg.SetValueEx(key, _WIN_RUN_VALUE, 0, winreg.REG_SZ, value)
+        else:
+            try:
+                winreg.DeleteValue(key, _WIN_RUN_VALUE)
+            except FileNotFoundError:
+                pass
+    finally:
+        winreg.CloseKey(key)
 
 
 def _get_app_path() -> str:
@@ -48,7 +103,9 @@ def _get_app_path() -> str:
 
 
 def is_startup_enabled() -> bool:
-    """检查是否已设置开机自启动（通过 AppleScript 查询）"""
+    """检查是否已设置开机自启动（Windows 查注册表，macOS 查登录项）"""
+    if sys.platform == "win32":
+        return _win_is_startup_enabled()
     if sys.platform != "darwin":
         return False
 
@@ -82,9 +139,12 @@ def is_startup_enabled() -> bool:
 
 
 def set_startup_enabled(enabled: bool) -> None:
-    """设置开机自启动（使用 macOS 原生登录项）"""
+    """设置开机自启动（Windows 写注册表，macOS 写登录项）"""
+    if sys.platform == "win32":
+        _win_set_startup(enabled)
+        return
     if sys.platform != "darwin":
-        raise Exception("This function is only for macOS")
+        raise Exception("开机自启动仅支持 macOS 与 Windows")
 
     app_path = _get_app_path()
 

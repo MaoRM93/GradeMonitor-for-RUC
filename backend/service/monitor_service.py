@@ -49,24 +49,9 @@ class MonitorService:
         self._task: asyncio.Task | None = None
         self._listeners: list[EventListener] = []
         self.last_query_at: datetime | None = None
-        self._fast_interval_count: int = 0
-        self.abuse_detected: bool = False
         self._on_grades_updated: Callable[[dict], None] | None = None
         self._on_rank_updated: Callable[[dict], None] | None = None
         self._on_refresh_cache: Callable[[], None] | None = None
-
-    def _record_interval_usage(self, interval: int) -> None:
-        """防滥用：查询频率低于 10 秒且在该频率下监控超过 2 次时标记滥用"""
-        if interval < 10:
-            self._fast_interval_count += 1
-            if self._fast_interval_count > 2 and not self.abuse_detected:
-                self.abuse_detected = True
-                logger.warning(
-                    f"[防滥用] 查询频率 {interval}s 低于 10 秒，"
-                    f"且已在该频率下监控 {self._fast_interval_count} 次，标记为滥用"
-                )
-        else:
-            self._fast_interval_count = 0
 
     # ---------- 事件订阅 ----------
 
@@ -173,9 +158,6 @@ class MonitorService:
 
                 if queried:
                     increment_query_count()
-                    self._record_interval_usage(
-                        settings.get("interval_seconds", 300)
-                    )
 
                 self.last_query_at = datetime.now()
 
@@ -211,8 +193,8 @@ class MonitorService:
 
             old_grades = load_local_grades()
             if old_grades is None:
-                # JSON 损坏且无法修复：绝不拿空/残缺基准做 diff（零误报）
-                logger.error("[自动监控] 本地JSON损坏且无法修复，跳过本轮成绩对比")
+                # JSON 彻底无法解析：跳过本轮，避免以空基准误报"全部课程新增"
+                logger.warning("[自动监控] 本地JSON损坏且无法修复，跳过本轮成绩对比")
                 return
             logger.info(f"[自动监控] 本地JSON中有 {len(old_grades)} 门课程")
 

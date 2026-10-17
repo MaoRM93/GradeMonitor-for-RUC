@@ -125,19 +125,31 @@ monitor.set_cache_callbacks(
 # ---------- 启动时初始化 ----------
 _init_cache()
 
-# 自动启动监控（如果设置中开启了）
-_settings_on_start = load_settings()
-if _settings_on_start.get("auto_monitor_enabled") or _settings_on_start.get("rank_monitor_enabled"):
-    try:
-        asyncio.ensure_future(monitor.start())
-        logger.info("自动启动监控（设置中 auto_monitor_enabled=True）")
-    except Exception as e:
-        logger.warning(f"自动启动监控失败: {e}")
-
 logger.info("=" * 50)
 logger.info("GradeMonitor Backend 启动")
 logger.info(f"日志目录: {Path(__file__).resolve().parent.parent.parent / 'logs'}")
 logger.info("=" * 50)
+
+
+@app.on_event("startup")
+async def _startup():
+    """应用启动：自动启动监控。
+
+    必须在此处（而非模块导入时）启动，因为 asyncio.create_task 需要一个
+    正在运行的 event loop；模块导入时 loop 尚未运行，会导致监控静默启动失败。
+    """
+    _settings = load_settings()
+    if _settings.get("auto_monitor_enabled") or _settings.get("rank_monitor_enabled"):
+        try:
+            await monitor.start()
+            logger.info("自动启动监控（auto_monitor_enabled=True）")
+        except Exception as e:
+            logger.warning(f"自动启动监控失败: {e}")
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    await monitor.stop()
 
 
 # ---------- 请求 / 响应模型 ----------
@@ -233,7 +245,7 @@ async def update_settings(update: SettingsUpdate):
     save_settings(current)
     logger.info(f"设置已更新: {list(changed.keys())}")
 
-    # 开机自启动设置变更时，同步到 macOS 登录项
+    # 开机自启动设置变更时，同步到系统（macOS 登录项 / Windows 注册表）
     if "auto_start" in changed:
         try:
             from backend.utils.startup import set_startup_enabled
@@ -258,7 +270,6 @@ async def get_monitor_status():
         "is_running": monitor.is_running,
         "last_query_at": last_q.isoformat() if last_q else None,
         "total_queries": load_total_query_count(),
-        "query_abuse_detected": monitor.abuse_detected,
     }
 
 
@@ -356,54 +367,65 @@ async def query_once():
         # 1. 从本地 JSON 文件读取作为对比基准（不是内存缓存）
         old_grades = load_local_grades()
         if old_grades is None:
-            # JSON 损坏且无法修复：仍查询/更新缓存，但绝不拿残缺基准对比误报
-            logger.error("[手动查询] 本地JSON损坏且无法修复，本次仅更新缓存、跳过对比通知")
-            old_grades = None
+            # JSON 彻底无法解析：仍更新缓存，但不做对比通知（防止误报全量新增）
+            logger.warning("[手动查询] 本地JSON损坏且无法修复，跳过成绩对比通知")
+            gs = GradeService(username, password)
+            result = gs.fetch_grade_json()
+            new_dict = {}
+            for course in result.get("data", []):
+                kth = course.get("kth")
+                if kth:
+                    new_dict[kth] = course
+            _update_grades_cache(new_dict)
+            results["grades"] = {
+                "total": len(new_dict),
+                "new_count": 0,
+                "changed_count": 0,
+            }
+            # 继续执行排名查询部分
         else:
             logger.info(f"[手动查询] 本地JSON中有 {len(old_grades)} 门课程")
 
-        # 2. 从服务器获取最新数据
-        gs = GradeService(username, password)
-        result = gs.fetch_grade_json()
-        new_dict = {}
-        for course in result.get("data", []):
-            kth = course.get("kth")
-            if kth:
-                new_dict[kth] = course
-        logger.info(f"[手动查询] 服务器返回 {len(new_dict)} 门课程")
+            # 2. 从服务器获取最新数据
+            gs = GradeService(username, password)
+            result = gs.fetch_grade_json()
+            new_dict = {}
+            for course in result.get("data", []):
+                kth = course.get("kth")
+                if kth:
+                    new_dict[kth] = course
+            logger.info(f"[手动查询] 服务器返回 {len(new_dict)} 门课程")
 
-        # 3. 对比差异（基准损坏时跳过对比，new/changed 保持为空 → 不发通知）
-        new_courses, changed_courses = [], []
-        if old_grades is not None:
+            # 3. 对比差异
             new_courses, changed_courses = diff_grades(old_grades, new_dict)
             logger.info(
                 f"[手动查询] 对比结果: 新增 {len(new_courses)} 门, 变动 {len(changed_courses)} 门"
             )
 
-        # 4. 保存最新数据
-        _update_grades_cache(new_dict)
+            # 4. 保存最新数据
+            _update_grades_cache(new_dict)
 
-        # 5. 有变化则发通知（首次也按统一模板通知）
-        if new_courses or changed_courses:
-            all_changed = new_courses + changed_courses
-            logger.info(
-                f"[手动查询] 发送通知: new_courses={len(new_courses)}, "
-                f"changed_courses={len(changed_courses)}"
-            )
-            send_grades_notification(
-                new_count=len(new_courses),
-                changed_count=len(changed_courses),
-                course_details=all_changed,
-                is_simple=is_simple,
-            )
-            logger.info("[手动查询] 成绩变动通知已发送")
-        else:
-            logger.info("[手动查询] 无成绩变化，跳过通知")
-        results["grades"] = {
-            "total": len(new_dict),
-            "new_count": len(new_courses),
-            "changed_count": len(changed_courses),
-        }
+            # 5. 有变化则发通知（首次也按统一模板通知）
+            if new_courses or changed_courses:
+                all_changed = new_courses + changed_courses
+                logger.info(
+                    f"[手动查询] 发送通知: new_courses={len(new_courses)}, "
+                    f"changed_courses={len(changed_courses)}"
+                )
+                send_grades_notification(
+                    new_count=len(new_courses),
+                    changed_count=len(changed_courses),
+                    course_details=all_changed,
+                    is_simple=is_simple,
+                )
+                logger.info("[手动查询] 成绩变动通知已发送")
+            else:
+                logger.info("[手动查询] 无成绩变化，跳过通知")
+            results["grades"] = {
+                "total": len(new_dict),
+                "new_count": len(new_courses),
+                "changed_count": len(changed_courses),
+            }
     except Exception as e:
         results["grades_error"] = str(e)
         logger.error(f"手动查询成绩失败: {e}")

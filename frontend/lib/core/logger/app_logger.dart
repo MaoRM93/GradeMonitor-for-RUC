@@ -1,6 +1,8 @@
 /// 前端统一日志模块
 ///
-/// - 输出到 /Applications/Projects/GradeDetector_4/logs/frontend.log
+/// - Windows: %APPDATA%\GradeMonitor\logs\frontend.log
+/// - macOS:   ~/Library/Application Support/GradeMonitor/logs/frontend.log
+///           （开发模式下若存在项目 logs/ 目录则优先使用）
 /// - 同时输出到 debugPrint (Flutter 控制台)
 /// - 支持日志级别过滤
 /// - 日志轮转（方案 B）：
@@ -26,17 +28,10 @@ enum LogLevel { debug, info, warning, error }
 
 /// 获取日志目录（绝对路径）
 String _getLogDir() {
-  // 优先使用项目固定路径
-  const projectPath = '/Applications/Projects/GradeDetector_4';
-  final projectLogs = Directory('$projectPath/logs');
-  if (projectLogs.existsSync()) {
-    return projectLogs.path;
-  }
-
-  // 回退：尝试从可执行文件路径推导
+  // 回退：尝试从可执行文件路径推导（开发模式或便携部署时，
+  // 向上查找含 logs/ 目录的项目根，兼容 macOS .app 与 Windows 目录布局）
   try {
     final exeDir = Directory(Platform.resolvedExecutable).parent;
-    // 从 .app/Contents/MacOS/ 向上找
     var dir = exeDir;
     for (int i = 0; i < 6; i++) {
       final logsDir = Directory('${dir.path}/logs');
@@ -47,9 +42,25 @@ String _getLogDir() {
     }
   } catch (_) {}
 
-  // 最终回退：~/Library/Application Support/GradeMonitor/logs
-  final home = Platform.environment['HOME'] ?? '/tmp';
-  return '$home/Library/Application Support/GradeMonitor/logs';
+  // 平台标准应用数据目录
+  if (Platform.isMacOS) {
+    return _homePath('Library/Application Support/GradeMonitor/logs');
+  }
+  // Windows: %APPDATA%\GradeMonitor\logs
+  final appData = Platform.environment['APPDATA'];
+  if (appData != null && appData.isNotEmpty) {
+    return '$appData\\GradeMonitor\\logs';
+  }
+  // 其他平台兜底
+  return _homePath('.grademonitor/logs');
+}
+
+/// 拼接用户主目录下的相对路径
+String _homePath(String relative) {
+  final home = Platform.environment['HOME'] ??
+      Platform.environment['USERPROFILE'] ??
+      Directory.systemTemp.path;
+  return '$home/$relative';
 }
 
 /// 前端日志记录器

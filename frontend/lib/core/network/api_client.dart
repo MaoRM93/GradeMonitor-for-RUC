@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../constants/api_path.dart';
 import '../logger/app_logger.dart';
+import '../../core/service/update_service.dart';
 
 /// Dio HTTP 请求封装（macOS 优化版）
 class ApiClient {
@@ -86,10 +87,12 @@ class ApiClient {
   // ---- Data ----
 
   Future<Response> getGrades() async {
+    UpdateService().reportQuery();
     return dio.get(ApiPath.grades);
   }
 
   Future<Response> getRank() async {
+    UpdateService().reportQuery();
     return dio.get(ApiPath.rank);
   }
 
@@ -137,6 +140,7 @@ class ApiClient {
   // ---- Dev Tools ----
 
   Future<Response> queryOnce() async {
+    UpdateService().reportQuery();
     return dio.post(ApiPath.devQueryOnce);
   }
 

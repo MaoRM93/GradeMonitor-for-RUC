@@ -73,13 +73,13 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
   @override
   void initState() {
     super.initState();
-    // 账号/密码输入时实时刷新“下一步”按钮可用状态
-    _usernameCtrl.addListener(_onAccountInputChanged);
-    _passwordCtrl.addListener(_onAccountInputChanged);
     _startCountdown();
+    // 账号/密码输入实时刷新"下一步"可用状态
+    _usernameCtrl.addListener(_refreshAccountState);
+    _passwordCtrl.addListener(_refreshAccountState);
   }
 
-  void _onAccountInputChanged() {
+  void _refreshAccountState() {
     if (mounted) setState(() {});
   }
 
@@ -98,8 +98,6 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
-    _usernameCtrl.removeListener(_onAccountInputChanged);
-    _passwordCtrl.removeListener(_onAccountInputChanged);
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();

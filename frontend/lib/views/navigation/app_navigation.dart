@@ -1,19 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../../core/service/update_service.dart';
+import 'package:window_manager/window_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../dashboard/dashboard_page.dart';
-import '../disabled/disabled_page.dart';
 import '../grades/grades_page.dart';
 import '../settings/settings_page.dart';
 import '../welcome/welcome_dialog.dart';
+import '../../core/service/update_service.dart';
 import '../../widgets/toast_host.dart';
 
 enum NavDestination {
   dashboard(icon: Icons.dashboard_rounded, label: '仪表板'),
   grades(icon: Icons.school_rounded, label: '成绩单'),
-  settings(icon: Icons.settings_rounded, label: '设置');
+  settings(icon: Icons.settings_rounded, label: '系统设置');
 
   final IconData icon;
   final String label;
@@ -26,21 +26,39 @@ class AppNavigation extends StatefulWidget {
   State<AppNavigation> createState() => _AppNavigationState();
 }
 
-class _AppNavigationState extends State<AppNavigation> {
+class _AppNavigationState extends State<AppNavigation> with WindowListener {
   NavDestination _currentDest = NavDestination.dashboard;
+  bool _isMaximized = false;
   int _versionTapCount = 0;
   DateTime _lastVersionTap = DateTime.now();
+  bool _devShowWelcomeAlways = false;
   bool _welcomeChecked = false;
 
   @override
   void initState() {
     super.initState();
-    // 预加载应用版本号（主页左下角精简显示用）
-    UpdateService().loadCurrentVersion();
+    // 监听窗口事件（同步最大化状态给标题栏按钮图标）
+    windowManager.addListener(this);
     // 首帧渲染后再检查欢迎页，确保 context 可用
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkWelcomeWithRetry();
     });
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMaximize() {
+    if (mounted) setState(() => _isMaximized = true);
+  }
+
+  @override
+  void onWindowUnmaximize() {
+    if (mounted) setState(() => _isMaximized = false);
   }
 
   /// 带重试的欢迎页检查（后端可能需要几秒才启动完毕）
@@ -78,6 +96,72 @@ class _AppNavigationState extends State<AppNavigation> {
     }
   }
 
+  /// 自定义标题栏：拖拽区 + 应用名 + 最小化/最大化/关闭
+  Widget _buildTitleBar(ColorScheme colorScheme) {
+    const barHeight = 36.0;
+    return Container(
+      height: barHeight,
+      color: colorScheme.surface.withValues(alpha: .4),
+      child: Row(
+        children: [
+          // 左侧拖拽区 + 应用名
+          Expanded(
+            child: GestureDetector(
+              onPanStart: (_) => windowManager.startDragging(),
+              onDoubleTap: () async {
+                if (await windowManager.isMaximized()) {
+                  windowManager.unmaximize();
+                } else {
+                  windowManager.maximize();
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'GradeMonitor',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface.withValues(alpha: .55),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 窗口控制按钮（Windows 风格：矩形、无间距）
+          _TitleBarButton(
+            icon: Icons.remove_rounded,
+            tooltip: '最小化',
+            onTap: () => windowManager.minimize(),
+          ),
+          _TitleBarButton(
+            icon: _isMaximized
+                ? Icons.filter_none_rounded
+                : Icons.crop_square_rounded,
+            iconSize: _isMaximized ? 14 : 15,
+            tooltip: _isMaximized ? '还原' : '最大化',
+            onTap: () async {
+              if (await windowManager.isMaximized()) {
+                await windowManager.unmaximize();
+              } else {
+                await windowManager.maximize();
+              }
+            },
+          ),
+          _TitleBarButton(
+            icon: Icons.close_rounded,
+            tooltip: '关闭',
+            isClose: true,
+            onTap: () => windowManager.close(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPage(NavDestination dest) {
     switch (dest) {
       case NavDestination.dashboard:
@@ -110,7 +194,14 @@ class _AppNavigationState extends State<AppNavigation> {
     // 使用独立的 StatefulWidget 避免 builder 闭包中的变量重置问题
     showDialog(
       context: context,
-      builder: (ctx) => _DevToolsDialog(api: api, intervalCtrl: intervalCtrl),
+      builder: (ctx) => _DevToolsDialog(
+        api: api,
+        intervalCtrl: intervalCtrl,
+        devShowWelcomeAlways: _devShowWelcomeAlways,
+        onWelcomeAlwaysChanged: (v) {
+          _devShowWelcomeAlways = v;
+        },
+      ),
     );
   }
 
@@ -119,73 +210,83 @@ class _AppNavigationState extends State<AppNavigation> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      body: Row(
+      body: Column(
         children: [
-          Material(
-            elevation: 0,
-            color: colorScheme.surface.withValues(alpha: .4),
-            child: SizedBox(
-              width: 110,
-              child: Column(
-                children: [
-                  const SizedBox(height: 40),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2, bottom: 12),
-                    child: Icon(
-                      Icons.search_rounded,
-                      size: 28,
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  Text(
-                    'Grade\nMonitor',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  const Divider(indent: 16, endIndent: 16),
-                  const Spacer(),
-                  ...NavDestination.values.map((dest) {
-                    final selected = _currentDest == dest;
-                    return _NavItem(
-                      icon: dest.icon,
-                      label: dest.label,
-                      selected: selected,
-                      onTap: () => setState(() => _currentDest = dest),
-                    );
-                  }),
-                  const Spacer(),
-                  const Divider(indent: 16, endIndent: 16),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16, top: 8),
-                    child: GestureDetector(
-                      onTap: _onVersionTap,
-                      child: Text(
-                        UpdateService.VerStatus.isEmpty
-                            ? '…'
-                            : UpdateService.VerStatus,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: colorScheme.onSurface.withValues(alpha: .3),
+          // 自定义标题栏：拖拽区 + 应用名 + 窗口控制按钮
+          _buildTitleBar(colorScheme),
+          Expanded(
+            child: Row(
+              children: [
+                Material(
+                  elevation: 0,
+                  color: colorScheme.surface.withValues(alpha: .4),
+                  child: SizedBox(
+                    width: 110,
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 40),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2, bottom: 12),
+                          child: Icon(
+                            Icons.search_rounded,
+                            size: 28,
+                            color: colorScheme.primary,
+                          ),
                         ),
-                      ),
+                        Text(
+                          'Grade\nMonitor',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.onSurface,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        const Divider(indent: 16, endIndent: 16),
+                        const Spacer(),
+                        ...NavDestination.values.map((dest) {
+                          final selected = _currentDest == dest;
+                          return _NavItem(
+                            icon: dest.icon,
+                            label: dest.label,
+                            selected: selected,
+                            onTap: () => setState(() => _currentDest = dest),
+                          );
+                        }),
+                        const Spacer(),
+                        const Divider(indent: 16, endIndent: 16),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16, top: 8),
+                          child: GestureDetector(
+                            onTap: _onVersionTap,
+                            child: Text(
+                              UpdateService.VerStatus.isEmpty
+                                  ? '…'
+                                  : UpdateService.VerStatus,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: colorScheme.onSurface.withValues(
+                                  alpha: .3,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+                VerticalDivider(
+                  width: 1,
+                  thickness: .5,
+                  color: colorScheme.outlineVariant,
+                ),
+                Expanded(child: _buildPage(_currentDest)),
+              ],
             ),
           ),
-          VerticalDivider(
-            width: 1,
-            thickness: .5,
-            color: colorScheme.outlineVariant,
-          ),
-          Expanded(child: _buildPage(_currentDest)),
         ],
       ),
     );
@@ -197,8 +298,15 @@ class _AppNavigationState extends State<AppNavigation> {
 class _DevToolsDialog extends StatefulWidget {
   final ApiClient api;
   final TextEditingController intervalCtrl;
+  final bool devShowWelcomeAlways;
+  final ValueChanged<bool> onWelcomeAlwaysChanged;
 
-  const _DevToolsDialog({required this.api, required this.intervalCtrl});
+  const _DevToolsDialog({
+    required this.api,
+    required this.intervalCtrl,
+    required this.devShowWelcomeAlways,
+    required this.onWelcomeAlwaysChanged,
+  });
 
   @override
   State<_DevToolsDialog> createState() => _DevToolsDialogState();
@@ -207,6 +315,47 @@ class _DevToolsDialog extends StatefulWidget {
 class _DevToolsDialogState extends State<_DevToolsDialog> {
   bool _loading = false;
   String? _msg;
+  bool _showWelcomeAlways = false;
+  bool _welcomeLoaded = false;
+
+  // 隐秘触发：1 秒内连续点击 3 次标题红字"开发者工具" → 显示禁用页
+  int _titleTaps = 0;
+  DateTime _lastTitleTap = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _showWelcomeAlways = widget.devShowWelcomeAlways;
+    _loadWelcomeStatus();
+  }
+
+  /// 标题红字三连击：走与远程停用（killSwitch 114.514）相同的链路进入禁用页
+  void _onTitleTap() {
+    final now = DateTime.now();
+    if (now.difference(_lastTitleTap).inMilliseconds > 1000) {
+      _titleTaps = 0;
+    }
+    _lastTitleTap = now;
+    _titleTaps++;
+    if (_titleTaps < 3) return;
+    _titleTaps = 0;
+    Navigator.of(context).pop(); // 先关闭对话框，避免残留在禁用页之上
+    UpdateService.disabled.value = true; // main.dart 监听后自动切换到禁用页
+  }
+
+  Future<void> _loadWelcomeStatus() async {
+    try {
+      final r = await widget.api.getWelcomeStatus();
+      final d = r.data as Map<String, dynamic>;
+      setState(() {
+        _showWelcomeAlways = d['show_welcome_always'] as bool? ?? false;
+        _welcomeLoaded = true;
+      });
+      widget.onWelcomeAlwaysChanged(_showWelcomeAlways);
+    } catch (_) {
+      setState(() => _welcomeLoaded = true);
+    }
+  }
 
   Future<void> _devAction(
     String label,
@@ -286,281 +435,284 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // 底色跟随系统主题：亮色纯白，深色用深底，避免深色模式下刺眼
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Theme(
-      data: isDark ? AppTheme.darkTheme : AppTheme.lightTheme,
-      child: Builder(
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-            title: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 点击“开发者选项”标题可作为禁用页 debug 入口
-                GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const DisabledScreen()),
-                    );
-                  },
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: Text(
-                      '开发者选项',
-                      style: TextStyle(
-                        color: isDark ? Colors.white : Colors.black,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
+    return AlertDialog(
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.construction_rounded,
+                color: AppTheme.error,
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              // 隐秘触发区：1 秒内三连击红字进入禁用页，无任何视觉反馈
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _onTitleTap,
+                child: const Text(
+                  '开发者工具',
+                  style: TextStyle(color: AppTheme.error),
                 ),
-                SizedBox(height: 4),
-                Text(
-                  '下列设置仅允许在开发者的指导下使用，请勿随意修改',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.red.shade300 : AppTheme.error,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Version: '
-                  '${UpdateService().currentVersion.isEmpty ? '…' : UpdateService().currentVersion}',
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
-                ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '仅供开发调试使用',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
             ),
-            content: SizedBox(
-              width: 440,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // ── 基础功能测试 ──
-                    const Text(
-                      '基础功能测试',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey,
-                        letterSpacing: .5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        _devBtn('测试查询功能', Icons.search_rounded, () {
-                          _devAction('测试查询功能', () => widget.api.queryOnce());
-                        }),
-                        _devBtn(
-                          '测试通知功能',
-                          Icons.notifications_active_rounded,
-                          () {
-                            _devAction(
-                              '测试通知功能',
-                              () => widget.api.sendTestNotification(),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    const Divider(height: 1),
-                    const SizedBox(height: 14),
-                    // ── 应用数据 ──
-                    const Text(
-                      '应用数据',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey,
-                        letterSpacing: .5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        _devBtn('打开数据目录', Icons.folder_open_rounded, () {
-                          _devAction('打开目录', () => widget.api.openLogDir());
-                        }),
-                        _devBtn('清理缓存', Icons.cleaning_services_rounded, () {
-                          _devAction('清理缓存', () => widget.api.clearCache());
-                        }),
-                        _devBtnDanger('重置全部数据', Icons.dangerous_rounded, () {
-                          showDialog(
-                            context: context,
-                            builder: (dctx) => AlertDialog(
-                              title: const Text('确认重置'),
-                              content: const Text('此操作将清除所有缓存与设置数据，不可恢复。'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(dctx),
-                                  child: const Text('取消'),
-                                ),
-                                FilledButton(
-                                  onPressed: () {
-                                    Navigator.pop(dctx);
-                                    _devAction(
-                                      '重置数据',
-                                      () => widget.api.clearAllData(),
-                                    );
-                                  },
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.error,
-                                  ),
-                                  child: const Text('确认重置'),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    const Divider(height: 1),
-                    const SizedBox(height: 14),
-                    // ── 轮询设置 ──
-                    const Text(
-                      '自定义轮询间隔',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey,
-                        letterSpacing: .5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 90,
-                          child: TextField(
-                            controller: widget.intervalCtrl,
-                            keyboardType: TextInputType.number,
-                            style: const TextStyle(fontSize: 13),
-                            decoration: const InputDecoration(
-                              hintText: '10-3600',
-                              hintStyle: TextStyle(fontSize: 12),
-                              isDense: true,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 9,
-                              ),
-                              border: OutlineInputBorder(),
-                            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── 快捷操作 ──
+              const Text(
+                '快捷操作',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey,
+                  letterSpacing: .5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _devBtn('立即查询', Icons.rocket_launch_rounded, () {
+                    _devAction('立即查询', () => widget.api.queryOnce());
+                  }),
+                  _devBtn('测试通知', Icons.notifications_active_rounded, () {
+                    _devAction('测试通知', () => widget.api.sendTestNotification());
+                  }),
+                  _devBtn(
+                    '通知预览',
+                    Icons.preview_rounded,
+                    _showNotificationPreview,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Divider(height: 1),
+              const SizedBox(height: 14),
+              // ── 维护操作 ──
+              const Text(
+                '维护操作',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey,
+                  letterSpacing: .5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _devBtn('打开数据目录', Icons.folder_open_rounded, () {
+                    _devAction('打开目录', () => widget.api.openLogDir());
+                  }),
+                  _devBtn('清理缓存', Icons.cleaning_services_rounded, () {
+                    _devAction('清理缓存', () => widget.api.clearCache());
+                  }),
+                  _devBtnDanger('重置全部数据', Icons.dangerous_rounded, () {
+                    showDialog(
+                      context: context,
+                      builder: (dctx) => AlertDialog(
+                        title: const Text('确认重置'),
+                        content: const Text('此操作将清除所有缓存与设置数据，不可恢复。'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dctx),
+                            child: const Text('取消'),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          '秒',
-                          style: TextStyle(fontSize: 13, color: Colors.grey),
-                        ),
-                        const SizedBox(width: 10),
-                        FilledButton.tonalIcon(
-                          onPressed: _applyCustomInterval,
-                          icon: const Icon(Icons.check, size: 16),
-                          label: const Text(
-                            '应用',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    const Divider(height: 1),
-                    const SizedBox(height: 14),
-                    // ── 页面管理 ──
-                    const Text(
-                      '页面管理',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey,
-                        letterSpacing: .5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        _devBtn('WelcomePageTEST', Icons.web_rounded, () {
-                          showDialog(
-                            context: context,
-                            builder: (_) => const WelcomeDialog(),
-                          );
-                        }),
-                        _devBtn(
-                          'DisablePageTEST',
-                          Icons.visibility_off_rounded,
-                          () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const DisabledScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    // ── 状态信息 ──
-                    if (_loading || _msg != null) ...[
-                      const SizedBox(height: 12),
-                      const Divider(height: 1),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          if (_loading)
-                            const Padding(
-                              padding: EdgeInsets.only(right: 8),
-                              child: SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            )
-                          else
-                            Icon(
-                              _msg!.contains('失败')
-                                  ? Icons.error_outline
-                                  : Icons.check_circle_outline,
-                              size: 16,
-                              color: _msg!.contains('失败')
-                                  ? AppTheme.error
-                                  : AppTheme.success,
+                          FilledButton(
+                            onPressed: () {
+                              Navigator.pop(dctx);
+                              _devAction(
+                                '重置数据',
+                                () => widget.api.clearAllData(),
+                              );
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.error,
                             ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              _loading ? '处理中...' : _msg!,
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                            child: const Text('确认重置'),
                           ),
                         ],
                       ),
-                    ],
-                  ],
+                    );
+                  }),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Divider(height: 1),
+              const SizedBox(height: 14),
+              // ── 轮询设置 ──
+              const Text(
+                '自定义轮询间隔（覆盖设置页中设定的间隔时间）',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey,
+                  letterSpacing: .5,
                 ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('关闭'),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  SizedBox(
+                    width: 90,
+                    child: TextField(
+                      controller: widget.intervalCtrl,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(fontSize: 13),
+                      decoration: const InputDecoration(
+                        hintText: '10-300',
+                        hintStyle: TextStyle(fontSize: 12),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 9,
+                        ),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '秒',
+                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton.tonalIcon(
+                    onPressed: _applyCustomInterval,
+                    icon: const Icon(Icons.check, size: 16),
+                    label: const Text('应用', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
               ),
+              const SizedBox(height: 14),
+              const Divider(height: 1),
+              const SizedBox(height: 14),
+              // ── 欢迎页设置 ──
+              const Text(
+                '欢迎页设置',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey,
+                  letterSpacing: .5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('始终在启动时弹出欢迎页：', style: TextStyle(fontSize: 12)),
+                  const Spacer(),
+                  SizedBox(
+                    height: 32,
+                    child: Checkbox(
+                      value: _showWelcomeAlways,
+                      onChanged: _welcomeLoaded
+                          ? (v) =>
+                                setState(() => _showWelcomeAlways = v ?? false)
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonal(
+                    onPressed: () async {
+                      try {
+                        await widget.api.updateSettings({
+                          'show_welcome_always': _showWelcomeAlways,
+                        });
+                        widget.onWelcomeAlwaysChanged(_showWelcomeAlways);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _showWelcomeAlways ? '已开启：每次启动弹欢迎页' : '已关闭',
+                              ),
+                              backgroundColor: AppTheme.success,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('设置失败: $e'),
+                              backgroundColor: AppTheme.error,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('保存', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+              // ── 状态信息 ──
+              if (_loading || _msg != null) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    if (_loading)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 8),
+                        child: SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      Icon(
+                        _msg!.contains('失败')
+                            ? Icons.error_outline
+                            : Icons.check_circle_outline,
+                        size: 16,
+                        color: _msg!.contains('失败')
+                            ? AppTheme.error
+                            : AppTheme.success,
+                      ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _loading ? '处理中...' : _msg!,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
-          );
-        },
+          ),
+        ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
     );
   }
 
@@ -643,6 +795,53 @@ class _NavItem extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Windows 风格标题栏按钮：矩形热区，悬停变色（关闭键悬停变红）
+class _TitleBarButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool isClose;
+  final double iconSize;
+
+  const _TitleBarButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.isClose = false,
+    this.iconSize = 16,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 600),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          hoverColor: isClose
+              ? AppTheme.error
+              : Colors.grey.withValues(alpha: .25),
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          child: SizedBox(
+            width: 44,
+            height: double.infinity,
+            child: Icon(
+              icon,
+              size: iconSize,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: .75),
             ),
           ),
         ),

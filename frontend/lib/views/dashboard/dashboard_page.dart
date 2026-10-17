@@ -19,6 +19,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   String? _lastUsername;
   String _selectedSemester = '全部';
   bool _isQuerying = false;
+  bool _isTogglingMonitor = false;
   bool _showDetailData = true;
 
   @override
@@ -44,7 +45,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     _lastUsername = settings.username;
 
     // 加载缓存数据（后端已在内存中持有）
-    _refreshAll();
+    await _refreshAll();
 
     // 如果开启了自动监控但未运行，自动启动
     if (!mounted) return;
@@ -79,6 +80,50 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       }
     } finally {
       if (mounted) setState(() => _isQuerying = false);
+    }
+  }
+
+  /// 启动/停止监控（带 loading 与结果反馈）
+  Future<void> _toggleMonitor() async {
+    if (_isTogglingMonitor) return;
+    setState(() => _isTogglingMonitor = true);
+    try {
+      final status = ref.read(monitorProvider);
+      final s = ref.read(settingsProvider);
+      if (status.isRunning) {
+        // 停止监控 + 关闭设置中的自动监控开关
+        await ref
+            .read(settingsProvider.notifier)
+            .saveSettings(
+              s.copyWith(autoMonitorEnabled: false, rankMonitorEnabled: false),
+            );
+        await ref.read(monitorProvider.notifier).stopMonitor();
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('监控已停止')));
+        }
+      } else {
+        // 启动监控 + 打开设置中的成绩自动监控开关
+        await ref
+            .read(settingsProvider.notifier)
+            .saveSettings(s.copyWith(autoMonitorEnabled: true));
+        await ref.read(monitorProvider.notifier).startMonitor();
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('监控已启动，将按间隔自动查询')));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('操作失败: $e'), backgroundColor: AppTheme.error),
+        );
+      }
+    } finally {
+      await ref.read(monitorProvider.notifier).fetchStatus();
+      if (mounted) setState(() => _isTogglingMonitor = false);
     }
   }
 
@@ -171,29 +216,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     : Icons.play_arrow_rounded,
                 label: status.isRunning ? '停止监控' : '启动监控',
                 color: status.isRunning ? AppTheme.error : AppTheme.success,
-                onTap: () async {
-                  if (status.isRunning) {
-                    // 停止监控 + 关闭设置中的自动监控开关
-                    final s = ref.read(settingsProvider);
-                    await ref
-                        .read(settingsProvider.notifier)
-                        .saveSettings(
-                          s.copyWith(
-                            autoMonitorEnabled: false,
-                            rankMonitorEnabled: false,
-                          ),
-                        );
-                    await ref.read(monitorProvider.notifier).stopMonitor();
-                  } else {
-                    // 启动监控 + 打开设置中的成绩自动监控开关
-                    final s = ref.read(settingsProvider);
-                    await ref
-                        .read(settingsProvider.notifier)
-                        .saveSettings(s.copyWith(autoMonitorEnabled: true));
-                    await ref.read(monitorProvider.notifier).startMonitor();
-                  }
-                  ref.read(monitorProvider.notifier).fetchStatus();
-                },
+                loading: _isTogglingMonitor,
+                onTap: _isTogglingMonitor ? null : _toggleMonitor,
               ),
             ],
           ),

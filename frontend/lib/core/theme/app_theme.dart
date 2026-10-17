@@ -4,6 +4,13 @@ import 'package:flutter/material.dart';
 class AppTheme {
   AppTheme._();
 
+  // ---- 全局字体 ----
+  /// Windows 默认微软雅黑，macOS 退回苹方/华文黑体
+  static const String fontFamily = 'Microsoft YaHei';
+
+  /// 全局文字缩放系数（整体放大）
+  static const double fontScale = 1.12;
+
   // ---- 品牌色 ----
   static const Color seedColor = Color(0xFF1E88E5);
   static const Color primaryDeep = Color(0xFF1565C0);
@@ -25,6 +32,13 @@ class AppTheme {
   static const Color warning = Color(0xFFF59E0B);
   static const Color error = Color(0xFFEF4444);
 
+  /// M3 的 ThemeData 会剥掉 textTheme 的颜色（M3 设计：组件自行从 colorScheme 取色），
+  /// 但部分组件（TextField 输入文字、未显式指定颜色的 Text）不会兜底，
+  /// 颜色为 null 时会被渲染成白色导致浅色背景下看不清。
+  /// 构造后用 copyWith 重新上色兜底（copyWith 不会再次剥色）。
+  static TextTheme _paint(ThemeData theme, Color color) =>
+      theme.textTheme.apply(displayColor: color, bodyColor: color);
+
   /// 浅色主题
   static ThemeData get lightTheme {
     final colorScheme = ColorScheme.fromSeed(
@@ -38,11 +52,21 @@ class AppTheme {
       outline: lightBorder,
     );
 
-    return ThemeData(
+    // material2021 的 black/white 只有颜色没有 fontSize（几何在 englishLike），
+    // 必须先合并几何再 apply，否则 fontSizeFactor != 1.0 会触发断言崩溃
+    final typography = Typography.material2021();
+
+    final base = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.light,
       scaffoldBackgroundColor: lightBg,
+
+      // 全局字体：微软雅黑 + 整体放大
+      fontFamily: fontFamily,
+      textTheme: typography.black
+          .merge(typography.englishLike)
+          .apply(fontFamily: fontFamily, fontSizeFactor: fontScale),
 
       // AppBar
       appBarTheme: AppBarTheme(
@@ -163,6 +187,8 @@ class AppTheme {
         textStyle: const TextStyle(fontSize: 12, color: Colors.white),
       ),
     );
+    // M3 构造期会剥掉 textTheme 颜色，这里重新上色，避免 null 色文字被渲染成白色
+    return base.copyWith(textTheme: _paint(base, colorScheme.onSurface));
   }
 
   /// 深色主题
@@ -178,11 +204,20 @@ class AppTheme {
       outline: darkBorder,
     );
 
-    return ThemeData(
+    // 同浅色主题：先合并几何再 apply，避免 fontSize 为 null 触发断言
+    final typography = Typography.material2021();
+
+    final base = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.dark,
       scaffoldBackgroundColor: darkBg,
+
+      // 全局字体：微软雅黑 + 整体放大
+      fontFamily: fontFamily,
+      textTheme: typography.white
+          .merge(typography.englishLike)
+          .apply(fontFamily: fontFamily, fontSizeFactor: fontScale),
 
       // AppBar
       appBarTheme: AppBarTheme(
@@ -303,5 +338,7 @@ class AppTheme {
         textStyle: const TextStyle(fontSize: 12, color: Colors.black),
       ),
     );
+    // 同浅色主题：重新上色兜底
+    return base.copyWith(textTheme: _paint(base, colorScheme.onSurface));
   }
 }

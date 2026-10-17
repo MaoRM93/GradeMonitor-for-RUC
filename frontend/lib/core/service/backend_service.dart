@@ -31,8 +31,13 @@ class BackendService {
     // 杀掉可能残留的旧进程（上次非正常退出遗留）
     await _killExistingProcess();
 
-    // 项目根目录：固定绝对路径
-    const workingDir = '/Applications/Projects/GradeDetector_4';
+    // 动态解析项目根目录（包含 backend/ 的目录），兼容 macOS / Windows
+    final workingDir = _resolveBackendRoot();
+    if (workingDir == null) {
+      _log.error('未找到 backend 目录，无法启动后端服务');
+      _started = false;
+      return;
+    }
 
     _log.info('工作目录: $workingDir');
 
@@ -115,18 +120,44 @@ class BackendService {
   /// 杀掉可能残留的旧 Python 后端进程（上次非正常退出时遗留）
   Future<void> _killExistingProcess() async {
     try {
-      final result = await Process.run('lsof', ['-ti', ':18923']);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        final pids = result.stdout.toString().trim().split('\n');
-        for (final pid in pids) {
-          final trimmedPid = pid.trim();
-          if (trimmedPid.isNotEmpty) {
-            _log.warning('发现残留后端进程 PID=$trimmedPid，正在清理...');
-            await Process.run('kill', ['-9', trimmedPid]);
+      if (Platform.isWindows) {
+        // Windows: netstat -ano 查找监听 18923 端口的 PID，再 taskkill 强制结束
+        final result = await Process.run('netstat', ['-ano']);
+        if (result.exitCode != 0) return;
+        final lines = result.stdout.toString().split('\n');
+        final pids = <String>{};
+        for (final line in lines) {
+          if (!line.contains(':18923')) continue;
+          final parts = line.trim().split(RegExp(r'\s+'));
+          if (parts.isEmpty) continue;
+          final pid = parts.last;
+          if (pid.isNotEmpty && int.tryParse(pid) != null && pid != '0') {
+            pids.add(pid);
           }
         }
-        // 等待端口释放
-        await Future.delayed(const Duration(seconds: 1));
+        for (final pid in pids) {
+          _log.warning('发现残留后端进程 PID=$pid，正在清理...');
+          await Process.run('taskkill', ['/F', '/PID', pid]);
+        }
+        if (pids.isNotEmpty) {
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      } else {
+        // macOS / Linux: lsof -ti :18923 再 kill
+        final result = await Process.run('lsof', ['-ti', ':18923']);
+        if (result.exitCode == 0 &&
+            result.stdout.toString().trim().isNotEmpty) {
+          final pids = result.stdout.toString().trim().split('\n');
+          for (final pid in pids) {
+            final trimmedPid = pid.trim();
+            if (trimmedPid.isNotEmpty) {
+              _log.warning('发现残留后端进程 PID=$trimmedPid，正在清理...');
+              await Process.run('kill', ['-9', trimmedPid]);
+            }
+          }
+          // 等待端口释放
+          await Future.delayed(const Duration(seconds: 1));
+        }
       }
     } catch (_) {
       // 无法清理也无妨，uvicorn 启动时会报错，我们可以从错误中恢复
@@ -135,43 +166,77 @@ class BackendService {
 
   /// 查找可用的 Python 解释器
   Future<String?> _findPython() async {
-    const projectRoot = '/Applications/Projects/GradeDetector_4';
+    final root = _resolveBackendRoot() ?? Directory.current.path;
 
-    // 1. 优先使用项目内的 .venv
-    final venvPython = '$projectRoot/.venv/bin/python';
-    if (File(venvPython).existsSync()) {
-      final result = await Process.run(venvPython, [
-        '-c',
-        'import uvicorn; print("ok")',
+    // 候选解释器：Windows 与 macOS/Linux 分别提供
+    final candidates = <String>[];
+    if (Platform.isWindows) {
+      candidates.addAll([
+        '$root\\.venv\\Scripts\\python.exe',
+        '$root\\runtime\\tools\\python.exe', // 项目内便携版 Python
+        'python',
+        'python3',
+        'py',
       ]);
-      if (result.exitCode == 0) {
-        return venvPython;
+    } else {
+      candidates.addAll([
+        '$root/.venv/bin/python',
+        '/opt/homebrew/bin/python3.11',
+        'python3',
+      ]);
+    }
+
+    for (final candidate in candidates) {
+      // 带路径分隔符的候选需要先判断文件是否存在；纯命令名直接交给 PATH 解析
+      final isPath = candidate.contains('/') || candidate.contains('\\');
+      if (isPath && !File(candidate).existsSync()) {
+        continue;
+      }
+      try {
+        final result = await Process.run(candidate, [
+          '-c',
+          'import uvicorn; print("ok")',
+        ]);
+        if (result.exitCode == 0) {
+          return candidate;
+        }
+      } catch (_) {
+        // 该候选不可用，继续尝试下一个
       }
     }
 
-    // 2. 尝试 Homebrew python3.11
-    final brewPython = '/opt/homebrew/bin/python3.11';
-    if (File(brewPython).existsSync()) {
-      final result = await Process.run(brewPython, [
-        '-c',
-        'import uvicorn; print("ok")',
-      ]);
-      if (result.exitCode == 0) {
-        return brewPython;
+    return null;
+  }
+
+  /// 解析包含 backend/ 目录的项目根目录
+  ///
+  /// 从环境变量、开发机项目目录、当前目录、可执行文件位置四个起点向上查找，
+  /// 找到含有 backend/api/app.py 的目录即为后端根目录。
+  String? _resolveBackendRoot() {
+    final candidates = <String>[
+      Platform.environment['GRADEMONITOR_BACKEND_ROOT'] ?? '',
+      // 开发机固定项目路径：打包后的 .app 从 Finder 启动时，
+      // 当前目录与 exe 相对路径都找不到 backend/，以此兜底
+      '/Applications/Projects/GradeDetector_4',
+      Directory.current.path,
+      File(Platform.resolvedExecutable).parent.path,
+    ];
+
+    for (final start in candidates) {
+      if (start.isEmpty) continue;
+      var dir = Directory(start);
+      for (var i = 0; i < 10; i++) {
+        if (File(
+          '${dir.path}${Platform.pathSeparator}backend'
+          '${Platform.pathSeparator}api${Platform.pathSeparator}app.py',
+        ).existsSync()) {
+          return dir.path;
+        }
+        final parent = dir.parent;
+        if (parent.path == dir.path) break;
+        dir = parent;
       }
     }
-
-    // 3. 尝试系统 python3
-    try {
-      final result = await Process.run('python3', [
-        '-c',
-        'import uvicorn; print("ok")',
-      ]);
-      if (result.exitCode == 0) {
-        return 'python3';
-      }
-    } catch (_) {}
-
     return null;
   }
 

@@ -35,9 +35,7 @@ dependencies:
 
   # 工具
   intl: ^0.20.2
-
-  # 读取应用版本号（检查更新用）
-  package_info_plus: ^8.0.0
+  package_info_plus: ^10.2.1
 
 dev_dependencies:
   flutter_test:
@@ -50,3 +48,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/tray_icon.png
+    - assets/app_icon.ico

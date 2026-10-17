@@ -1,12 +1,13 @@
+import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../logger/app_logger.dart';
 
 /// macOS 原生通知服务
 ///
-/// 职责：
-/// 1. 初始化 FlutterLocalNotificationsPlugin
-/// 2. 接收 title + message，调用 macOS UserNotifications 显示
-/// 3. 处理异常并记录日志
+/// 说明：系统通知的实际发送由后端负责（macOS 走 osascript，Windows 走
+/// win11toast）。本服务仅作为 macOS 侧的辅助通道（WebSocket show_notification
+/// 事件触发），当前 flutter_local_notifications v18 不支持 Windows，因此在
+/// Windows 上直接跳过初始化，避免 macOS 专属代码误执行。
 ///
 /// 不负责成绩逻辑、通知内容生成。
 class NotificationService {
@@ -21,19 +22,21 @@ class NotificationService {
   /// 初始化通知插件（仅初始化一次）
   Future<void> init() async {
     if (_initialized) return;
+    if (!Platform.isMacOS) {
+      _log.info('非 macOS 平台，跳过前端通知初始化（由后端负责系统通知）');
+      return;
+    }
     try {
       _plugin = FlutterLocalNotificationsPlugin();
 
       // macOS 初始化设置
       const macOSSettings = DarwinInitializationSettings(
-        requestAlertPermission: false,  // 权限已在 AppDelegate 中请求
+        requestAlertPermission: false, // 权限已在 AppDelegate 中请求
         requestBadgePermission: false,
         requestSoundPermission: false,
       );
 
-      const initSettings = InitializationSettings(
-        macOS: macOSSettings,
-      );
+      const initSettings = InitializationSettings(macOS: macOSSettings);
 
       await _plugin!.initialize(initSettings);
       _initialized = true;
@@ -46,6 +49,10 @@ class NotificationService {
 
   /// 显示 macOS 原生通知
   void show(String title, String message) {
+    if (!Platform.isMacOS) {
+      _log.warning('非 macOS 平台，跳过前端通知: $title');
+      return;
+    }
     if (!_initialized || _plugin == null) {
       _log.warning('通知服务未初始化，跳过通知: $title');
       return;

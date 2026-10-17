@@ -37,7 +37,6 @@ logger = get_logger(__name__)
 app = FastAPI(
     title="GradeMonitor API",
     description="自动查成绩后台服务",
-    version="27G36",
 )
 
 # 允许本地 Flutter 应用跨域请求
@@ -136,7 +135,7 @@ if _settings_on_start.get("auto_monitor_enabled") or _settings_on_start.get("ran
         logger.warning(f"自动启动监控失败: {e}")
 
 logger.info("=" * 50)
-logger.info("GradeMonitor Backend 27G36 启动")
+logger.info("GradeMonitor Backend 启动")
 logger.info(f"日志目录: {Path(__file__).resolve().parent.parent.parent / 'logs'}")
 logger.info("=" * 50)
 
@@ -467,7 +466,7 @@ async def clear_cache():
     _rank_cache = {}
     cleaned = []
     for fname in ["local_grades.json", "local_ranks.json", "stats.json"]:
-        fp = get_data_file_path(fname)
+        fp = Path(get_data_file_path(fname))
         if fp.exists():
             fp.unlink()
             cleaned.append(fname)
@@ -481,7 +480,7 @@ async def clear_all_data():
     _rank_cache = {}
     cleaned = []
     for fname in ["local_grades.json", "local_ranks.json", "settings.json", "stats.json"]:
-        fp = get_data_file_path(fname)
+        fp = Path(get_data_file_path(fname))
         if fp.exists():
             fp.unlink()
             cleaned.append(fname)

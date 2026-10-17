@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/toast_host.dart';
 
 const _termsText = '''免责声明
 
@@ -56,6 +57,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
   final _passwordCtrl = TextEditingController();
   bool _hidePassword = true;
   bool _rememberMe = false;
+  bool _verifying = false;
 
   // ---- Step 3: 监控设置 ----
   bool _autoMonitor = false;
@@ -139,9 +141,28 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
     }
   }
 
+  /// 点击「下一步」：账号登录步（step 1）立即做真实登录验证，
+  /// 凭据无效则弹提示并留在本步，不允许进入后续步骤
+  Future<void> _nextStep() async {
+    if (_step == 1) {
+      setState(() => _verifying = true);
+      final result = await ref
+          .read(settingsProvider.notifier)
+          .login(_usernameCtrl.text.trim(), _passwordCtrl.text);
+      if (!mounted) return;
+      setState(() => _verifying = false);
+      if (!result.success) {
+        ToastHost().show(result.message);
+        return;
+      }
+    }
+    setState(() => _step++);
+  }
+
   Future<void> _finish() async {
     setState(() => _saving = true);
 
+    // 凭据已在账号登录步验证通过，这里只负责保存
     final notifier = ref.read(settingsProvider.notifier);
     final current = ref.read(settingsProvider);
     final updated = current.copyWith(
@@ -159,194 +180,224 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
     await ApiClient().completeWelcome();
 
     if (mounted) {
+      ToastHost().show('设置已保存');
       Navigator.of(context).pop(true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Dialog(
-      insetPadding: const EdgeInsets.all(24),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 标题
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-              child: Row(
+    // 底色跟随系统主题：亮色纯白，深色用深底，避免深色模式下刺眼
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Theme(
+      data: isDark ? AppTheme.darkTheme : AppTheme.lightTheme,
+      child: Builder(
+        builder: (context) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Dialog(
+            backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            insetPadding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.waving_hand_rounded,
-                    color: colorScheme.primary,
-                    size: 24,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    '欢迎使用 GradeMonitor',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
+                  // 标题
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.waving_hand_rounded,
+                          color: colorScheme.primary,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          '欢迎使用 GradeMonitor',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
-            // 步骤指示器 — 四步等距
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: SizedBox(
-                height: 52,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: List.generate(_totalSteps, (i) {
-                    final completed = i < _step;
-                    final active = i == _step;
-                    return Expanded(
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              // 左侧连接线（第一步透明）
-                              Expanded(
-                                child: Container(
-                                  height: 2,
-                                  color: i > 0 && (completed || active)
-                                      ? colorScheme.primary
-                                      : Colors.transparent,
-                                ),
-                              ),
-                              // 圆圈
-                              Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: active
-                                      ? colorScheme.primary
-                                      : completed
-                                          ? colorScheme.primary
-                                              .withValues(alpha: .7)
-                                          : colorScheme.surfaceContainerHighest,
-                                  border: Border.all(
-                                    color: active || completed
-                                        ? colorScheme.primary
-                                        : colorScheme.outlineVariant,
-                                    width: 2,
-                                  ),
-                                ),
-                                alignment: Alignment.center,
-                                child: completed
-                                    ? const Icon(Icons.check,
-                                        size: 16, color: Colors.white)
-                                    : Text(
-                                        '${i + 1}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: active
-                                              ? colorScheme.onPrimary
-                                              : colorScheme.onSurface
-                                                  .withValues(alpha: .5),
+                  // 步骤指示器 — 四步等距
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: SizedBox(
+                      height: 52,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: List.generate(_totalSteps, (i) {
+                          final completed = i < _step;
+                          final active = i == _step;
+                          return Expanded(
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    // 左侧连接线（第一步透明）
+                                    Expanded(
+                                      child: Container(
+                                        height: 2,
+                                        color: i > 0 && (completed || active)
+                                            ? colorScheme.primary
+                                            : Colors.transparent,
+                                      ),
+                                    ),
+                                    // 圆圈
+                                    Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: active
+                                            ? colorScheme.primary
+                                            : completed
+                                            ? colorScheme.primary.withValues(
+                                                alpha: .7,
+                                              )
+                                            : colorScheme
+                                                  .surfaceContainerHighest,
+                                        border: Border.all(
+                                          color: active || completed
+                                              ? colorScheme.primary
+                                              : colorScheme.outlineVariant,
+                                          width: 2,
                                         ),
                                       ),
-                              ),
-                              // 右侧连接线（最后一步透明）
-                              Expanded(
-                                child: Container(
-                                  height: 2,
-                                  color: i < _totalSteps - 1 && completed
-                                      ? colorScheme.primary
-                                      : Colors.transparent,
+                                      alignment: Alignment.center,
+                                      child: completed
+                                          ? const Icon(
+                                              Icons.check,
+                                              size: 16,
+                                              color: Colors.white,
+                                            )
+                                          : Text(
+                                              '${i + 1}',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: active
+                                                    ? colorScheme.onPrimary
+                                                    : colorScheme.onSurface
+                                                          .withValues(
+                                                            alpha: .5,
+                                                          ),
+                                              ),
+                                            ),
+                                    ),
+                                    // 右侧连接线（最后一步透明）
+                                    Expanded(
+                                      child: Container(
+                                        height: 2,
+                                        color: i < _totalSteps - 1 && completed
+                                            ? colorScheme.primary
+                                            : Colors.transparent,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _labels[i],
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight:
-                                  active ? FontWeight.w700 : FontWeight.w500,
-                              color: active
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface
-                                      .withValues(alpha: .5),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _labels[i],
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: active
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    color: active
+                                        ? colorScheme.primary
+                                        : colorScheme.onSurface.withValues(
+                                            alpha: .5,
+                                          ),
+                                  ),
+                                ),
+                              ],
                             ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+
+                  // 步骤内容
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+                      child: _buildStepContent(colorScheme),
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // 底部按钮
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+                    child: Row(
+                      children: [
+                        // 不同意按钮（仅第一步显示）
+                        if (_step == 0)
+                          OutlinedButton(
+                            onPressed: () => exit(0),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.error,
+                              side: const BorderSide(color: AppTheme.error),
+                            ),
+                            child: const Text('不同意'),
+                          ),
+                        if (_step > 0) ...[
+                          OutlinedButton(
+                            onPressed: () => setState(() => _step--),
+                            child: const Text('上一步'),
                           ),
                         ],
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-
-            // 步骤内容
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
-                child: _buildStepContent(colorScheme),
-              ),
-            ),
-
-            const Divider(height: 1),
-
-            // 底部按钮
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
-              child: Row(
-                children: [
-                  // 不同意按钮（仅第一步显示）
-                  if (_step == 0)
-                    OutlinedButton(
-                      onPressed: () => exit(0),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.error,
-                        side: const BorderSide(color: AppTheme.error),
-                      ),
-                      child: const Text('不同意'),
+                        const Spacer(),
+                        if (_step < _totalSteps - 1)
+                          FilledButton(
+                            onPressed: (_canProceed() && !_verifying)
+                                ? _nextStep
+                                : null,
+                            child: _verifying
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text('下一步'),
+                          )
+                        else
+                          FilledButton.icon(
+                            onPressed: (_canProceed() && !_saving)
+                                ? _finish
+                                : null,
+                            icon: _saving
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.check_rounded, size: 18),
+                            label: Text(_saving ? '保存中...' : '同意并开始使用'),
+                          ),
+                      ],
                     ),
-                  if (_step > 0) ...[
-                    OutlinedButton(
-                      onPressed: () => setState(() => _step--),
-                      child: const Text('上一步'),
-                    ),
-                  ],
-                  const Spacer(),
-                  if (_step < _totalSteps - 1)
-                    FilledButton(
-                      onPressed:
-                          _canProceed() ? () => setState(() => _step++) : null,
-                      child: const Text('下一步'),
-                    )
-                  else
-                    FilledButton.icon(
-                      onPressed:
-                          (_canProceed() && !_saving) ? _finish : null,
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.check_rounded, size: 18),
-                      label: Text(_saving ? '保存中...' : '同意并开始使用'),
-                    ),
+                  ),
                 ],
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -367,6 +418,32 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
   }
 
   // ---- Step 1: 协议 ----
+
+  /// 协议正文按空行自动分段，每段独立排版，段间距 5 像素
+  Widget _buildTermsParagraphs(ColorScheme colorScheme) {
+    final paragraphs = _termsText
+        .split('\n\n')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int i = 0; i < paragraphs.length; i++) ...[
+          if (i > 0) const SizedBox(height: 5),
+          Text(
+            paragraphs[i],
+            style: TextStyle(
+              fontSize: 13,
+              color: colorScheme.onSurface.withValues(alpha: .7),
+              height: 1.45,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildAgreementStep(ColorScheme colorScheme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -395,22 +472,27 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
                 padding: const EdgeInsets.all(10),
                 child: Row(
                   children: [
-                    Icon(Icons.description_rounded,
-                        size: 16, color: colorScheme.primary),
+                    Icon(
+                      Icons.description_rounded,
+                      size: 16,
+                      color: colorScheme.primary,
+                    ),
                     const SizedBox(width: 6),
-                    Text('使用协议',
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurface)),
+                    Text(
+                      '使用协议',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
                     const Spacer(),
                     if (_countdown > 0)
                       Text(
                         '${_countdown}s 后可同意',
                         style: TextStyle(
                           fontSize: 11,
-                          color:
-                              colorScheme.onSurface.withValues(alpha: .4),
+                          color: colorScheme.onSurface.withValues(alpha: .4),
                         ),
                       )
                     else
@@ -428,14 +510,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
                 child: Scrollbar(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    child: Text(
-                      _termsText,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurface.withValues(alpha: .7),
-                        height: 1.5,
-                      ),
-                    ),
+                    child: _buildTermsParagraphs(colorScheme),
                   ),
                 ),
               ),
@@ -491,7 +566,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
         ),
         const SizedBox(height: 4),
         Text(
-          '凭据仅保存在本地，不会上传到任何服务器。之后可在系统设置中修改。',
+          '凭据仅保存在本地，不会上传到任何服务器。之后可在设置中修改。',
           style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 16),
@@ -526,8 +601,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
                     : Icons.visibility_rounded,
                 size: 18,
               ),
-              onPressed: () =>
-                  setState(() => _hidePassword = !_hidePassword),
+              onPressed: () => setState(() => _hidePassword = !_hidePassword),
             ),
           ),
         ),
@@ -557,10 +631,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          '之后可在系统设置中修改。',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
-        ),
+        Text('之后可在设置中修改。', style: TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
@@ -574,10 +645,11 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
             children: [
               SwitchListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                title: const Text('成绩自动监控',
-                    style: TextStyle(fontSize: 13)),
-                subtitle: const Text('检测新出成绩或成绩变动',
-                    style: TextStyle(fontSize: 11)),
+                title: const Text('成绩自动监控', style: TextStyle(fontSize: 13)),
+                subtitle: const Text(
+                  '检测新出成绩或成绩变动',
+                  style: TextStyle(fontSize: 11),
+                ),
                 value: _autoMonitor,
                 onChanged: (v) => setState(() => _autoMonitor = v),
                 dense: true,
@@ -585,10 +657,11 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
               const Divider(height: 1, indent: 16, endIndent: 16),
               SwitchListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                title: const Text('排名自动监控',
-                    style: TextStyle(fontSize: 13)),
-                subtitle: const Text('检测专业排名或班级排名变动',
-                    style: TextStyle(fontSize: 11)),
+                title: const Text('排名自动监控', style: TextStyle(fontSize: 13)),
+                subtitle: const Text(
+                  '检测专业排名或班级排名变动',
+                  style: TextStyle(fontSize: 11),
+                ),
                 value: _rankMonitor,
                 onChanged: (v) => setState(() => _rankMonitor = v),
                 dense: true,
@@ -597,11 +670,14 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
           ),
         ),
         const SizedBox(height: 16),
-        Text('监控时间段',
-            style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: colorScheme.onSurface)),
+        Text(
+          '监控时间段',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+        ),
         const SizedBox(height: 6),
         Row(
           children: [
@@ -609,9 +685,13 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('开始', style: TextStyle(fontSize: 12)),
-                trailing: Text(_startTime.format(context),
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600)),
+                trailing: Text(
+                  _startTime.format(context),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 onTap: _pickStartTime,
                 dense: true,
               ),
@@ -621,9 +701,13 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('结束', style: TextStyle(fontSize: 12)),
-                trailing: Text(_endTime.format(context),
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600)),
+                trailing: Text(
+                  _endTime.format(context),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 onTap: _pickEndTime,
                 dense: true,
               ),
@@ -631,11 +715,14 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
           ],
         ),
         const SizedBox(height: 12),
-        Text('通知模式',
-            style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: colorScheme.onSurface)),
+        Text(
+          '通知模式',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+        ),
         const SizedBox(height: 6),
         SegmentedButton<String>(
           segments: const [
@@ -643,8 +730,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
             ButtonSegment(value: '简洁', label: Text('简洁模式')),
           ],
           selected: {_notifyMode},
-          onSelectionChanged: (v) =>
-              setState(() => _notifyMode = v.first),
+          onSelectionChanged: (v) => setState(() => _notifyMode = v.first),
           style: SegmentedButton.styleFrom(
             textStyle: const TextStyle(fontSize: 12),
           ),
@@ -658,8 +744,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
     final monitorDesc = [];
     if (_autoMonitor) monitorDesc.add('成绩监控');
     if (_rankMonitor) monitorDesc.add('排名监控');
-    final monitorText =
-        monitorDesc.isEmpty ? '未开启' : monitorDesc.join(' + ');
+    final monitorText = monitorDesc.isEmpty ? '未开启' : monitorDesc.join(' + ');
     final timeText =
         '${_startTime.format(context)} - ${_endTime.format(context)}';
 
@@ -681,13 +766,11 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
         ),
         const SizedBox(height: 16),
         _confirmRow(colorScheme, '学号', _usernameCtrl.text.trim()),
-        _confirmRow(
-            colorScheme, '密码', '•' * _passwordCtrl.text.length),
+        _confirmRow(colorScheme, '密码', '•' * _passwordCtrl.text.length),
         const SizedBox(height: 8),
         _confirmRow(colorScheme, '自动监控', monitorText),
         _confirmRow(colorScheme, '监控时间', timeText),
-        _confirmRow(colorScheme, '通知模式',
-            _notifyMode == '详细' ? '完整模式' : '简洁模式'),
+        _confirmRow(colorScheme, '通知模式', _notifyMode == '详细' ? '完整模式' : '简洁模式'),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(14),
@@ -700,8 +783,7 @@ class _WelcomeDialogState extends ConsumerState<WelcomeDialog> {
           ),
           child: Row(
             children: [
-              Icon(Icons.info_outline,
-                  size: 18, color: colorScheme.primary),
+              Icon(Icons.info_outline, size: 18, color: colorScheme.primary),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(

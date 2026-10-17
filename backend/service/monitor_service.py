@@ -5,6 +5,7 @@
 使用 asyncio 定时查询成绩/排名，与本地缓存对比，检测变化后通过回调广播事件。
 """
 import asyncio
+import random
 from datetime import datetime, time as dt_time
 from typing import Awaitable, Callable
 
@@ -179,8 +180,19 @@ class MonitorService:
                 self.last_query_at = datetime.now()
 
                 # 等待下一轮
+                # 安全模式（默认开启）：每轮结束后在设定间隔 ±100 秒内重新
+                # 随机取等待时间，降低固定间隔轮询被风控识别的风险
                 interval = settings.get("interval_seconds", 300)
-                await asyncio.sleep(interval)
+                if settings.get("random_interval_enabled", True):
+                    wait_seconds = max(
+                        10, random.randint(interval - 100, interval + 100)
+                    )
+                    logger.info(
+                        f"[自动监控] 安全模式生效，本次实际等待 {wait_seconds}s"
+                    )
+                else:
+                    wait_seconds = interval
+                await asyncio.sleep(wait_seconds)
 
             except asyncio.CancelledError:
                 break

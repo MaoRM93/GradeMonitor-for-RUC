@@ -67,10 +67,20 @@ class ApiClient {
   // ---- Auth ----
 
   Future<Response> login(String username, String password) async {
-    return dio.post(
+    final resp = await dio.post(
       ApiPath.login,
       data: {'username': username, 'password': password},
     );
+    // 全局 validateStatus 放行了 4xx，这里必须手动把失败状态转为异常，
+    // 否则 401（密码错误）会被上层误判为登录成功
+    if (resp.statusCode != null && resp.statusCode! >= 400) {
+      throw DioException(
+        requestOptions: resp.requestOptions,
+        response: resp,
+        type: DioExceptionType.badResponse,
+      );
+    }
+    return resp;
   }
 
   // ---- Data ----

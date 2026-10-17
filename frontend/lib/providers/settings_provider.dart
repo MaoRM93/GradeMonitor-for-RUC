@@ -18,6 +18,7 @@ class AppSettings {
   final bool rankMonitorEnabled;
   final bool showMenubarIcon;
   final bool hideUnknownCourses;
+  final bool randomIntervalEnabled;
   final bool welcomeCompleted;
   final bool showWelcomeAlways;
 
@@ -34,6 +35,7 @@ class AppSettings {
     this.rankMonitorEnabled = false,
     this.showMenubarIcon = true,
     this.hideUnknownCourses = true,
+    this.randomIntervalEnabled = true,
     this.welcomeCompleted = false,
     this.showWelcomeAlways = false,
   });
@@ -52,6 +54,7 @@ class AppSettings {
       rankMonitorEnabled: json['rank_monitor_enabled'] ?? false,
       showMenubarIcon: json['show_menubar_icon'] ?? true,
       hideUnknownCourses: json['hide_unknown_courses'] ?? true,
+      randomIntervalEnabled: json['random_interval_enabled'] ?? true,
       welcomeCompleted: json['welcome_completed'] ?? false,
       showWelcomeAlways: json['show_welcome_always'] ?? false,
     );
@@ -71,6 +74,7 @@ class AppSettings {
       'rank_monitor_enabled': rankMonitorEnabled,
       'show_menubar_icon': showMenubarIcon,
       'hide_unknown_courses': hideUnknownCourses,
+      'random_interval_enabled': randomIntervalEnabled,
       'welcome_completed': welcomeCompleted,
       'show_welcome_always': showWelcomeAlways,
     };
@@ -89,6 +93,7 @@ class AppSettings {
     bool? rankMonitorEnabled,
     bool? showMenubarIcon,
     bool? hideUnknownCourses,
+    bool? randomIntervalEnabled,
     bool? welcomeCompleted,
     bool? showWelcomeAlways,
   }) {
@@ -168,10 +173,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           message: '无法连接后端服务 (127.0.0.1:18923)',
         );
       } else if (e.response?.statusCode == 401) {
-        return LoginResult(
+        return const LoginResult(
           success: false,
-          message:
-              '登录失败：${e.response?.data is Map ? (e.response!.data['detail'] ?? '账号或密码错误') : '账号或密码错误'}',
+          message: '账号或密码错误，请检查您的账号密码是否正确',
         );
       } else {
         return LoginResult(

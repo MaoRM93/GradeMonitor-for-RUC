@@ -34,6 +34,7 @@ DEFAULT_SETTINGS = {
     "show_menubar_icon": True,
     "no_auto_query": False,
     "hide_unknown_courses": True,
+    "random_interval_enabled": True,
     "welcome_completed": False,
     "show_welcome_always": False,
 }

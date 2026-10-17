@@ -10,6 +10,7 @@ import '../update/update_dialog.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/monitor_provider.dart';
 import '../../widgets/glass_card.dart';
+import '../../widgets/toast_host.dart';
 
 /// 系统设置页面（所有开关即时生效）
 class SettingsPage extends ConsumerStatefulWidget {
@@ -26,12 +27,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _hidePassword = true;
   bool _rememberMe = false;
   bool _isLoggingIn = false;
-  String? _loginMsg;
 
   // 监控设置
   bool _autoMonitor = false;
   bool _rankMonitor = false;
   double _intervalValue = 300;
+  bool _safeMode = true;
   TimeOfDay _startTime = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _endTime = const TimeOfDay(hour: 23, minute: 0);
 
@@ -72,6 +73,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _hidePassword = true;
     _autoMonitor = s.autoMonitorEnabled;
     _rankMonitor = s.rankMonitorEnabled;
+    _safeMode = s.randomIntervalEnabled;
     // 设置里可能存有超出滑块范围（300–3600）的值（如测试期间写入的 10 秒），
     // Slider 要求 value 处于 [min, max]，加载时收敛到合法区间
     _intervalValue = s.intervalSeconds.toDouble().clamp(300.0, 3600.0);
@@ -134,6 +136,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         hideUnknownCourses:
             (changes['hide_unknown_courses'] as bool?) ??
             current.hideUnknownCourses,
+        randomIntervalEnabled:
+            (changes['random_interval_enabled'] as bool?) ??
+            current.randomIntervalEnabled,
         welcomeCompleted: current.welcomeCompleted,
         showWelcomeAlways: current.showWelcomeAlways,
       );
@@ -175,6 +180,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   void _onIntervalChangeEnd(double v) {
     _saveSettings({'interval_seconds': v.toInt()});
+  }
+
+  void _onSafeModeChanged(bool v) {
+    _safeMode = v;
+    setState(() {});
+    _saveSettings({'random_interval_enabled': v});
   }
 
   Future<void> _onStartTimeChanged(TimeOfDay t) async {
@@ -254,7 +265,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   Future<void> _testLogin() async {
     setState(() {
       _isLoggingIn = true;
-      _loginMsg = null;
     });
     final result = await ref
         .read(settingsProvider.notifier)
@@ -280,23 +290,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.message),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          duration: Duration(seconds: result.success ? 2 : 4),
-          backgroundColor: result.success ? AppTheme.success : AppTheme.error,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-      );
+      ToastHost().show(result.message);
     }
 
     setState(() {
       _isLoggingIn = false;
-      _loginMsg = result.message;
     });
   }
 
@@ -340,7 +338,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '系统设置',
+                '设置',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
@@ -349,7 +347,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                '所有设置即时生效，无需手动保存',
+                '您可以在此处调整程序的所有配置',
                 style: TextStyle(
                   fontSize: 14,
                   color: colorScheme.onSurface.withValues(alpha: .5),
@@ -439,26 +437,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         ),
                       ],
                     ),
-                    if (_loginMsg != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          _loginMsg!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _loginMsg == '登录成功'
-                                ? AppTheme.success
-                                : AppTheme.error,
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
 
-              // ---- ② 自动监控设置 ----
-              _SectionTitle(title: '自动监控设置', icon: Icons.timer_rounded),
+              // ---- ② 监控内容 ----
+              _SectionTitle(title: '监控内容', icon: Icons.timer_rounded),
               const SizedBox(height: 12),
               GlassCard(
                 padding: const EdgeInsets.all(20),
@@ -487,60 +472,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                       value: _rankMonitor,
                       onChanged: _onRankMonitorChanged,
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        left: 16,
-                        right: 16,
-                        top: 4,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '轮询间隔: ${_intervalValue.toInt()} 秒',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colorScheme.onSurface.withValues(
-                                alpha: .5,
-                              ),
-                            ),
-                          ),
-                          Slider(
-                            value: _intervalValue,
-                            min: 300,
-                            max: 3600,
-                            divisions: 33,
-                            label: '${_intervalValue.toInt()}秒',
-                            onChanged: _onIntervalChanged,
-                            onChangeEnd: _onIntervalChangeEnd,
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                '300s',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: colorScheme.onSurface.withValues(
-                                    alpha: .3,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                '3600s',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: colorScheme.onSurface.withValues(
-                                    alpha: .3,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
                     ),
                   ],
                 ),
@@ -595,19 +526,98 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
+                      '出成绩时间通常为 8:00-18:00；为避免给服务器造成过大压力，轮询间隔仅允许最小设置 300 秒',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colorScheme.onSurface.withValues(alpha: .35),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
                       '非窗口期内监控自动休眠',
                       style: TextStyle(
                         fontSize: 11,
                         color: colorScheme.onSurface.withValues(alpha: .35),
                       ),
                     ),
+                    const Divider(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '轮询间隔: ${_intervalValue.toInt()} 秒',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: colorScheme.onSurface.withValues(
+                                alpha: .5,
+                              ),
+                            ),
+                          ),
+                          Slider(
+                            value: _intervalValue,
+                            min: 300,
+                            max: 3600,
+                            divisions: 33,
+                            label: '${_intervalValue.toInt()}秒',
+                            onChanged: _onIntervalChanged,
+                            onChangeEnd: _onIntervalChangeEnd,
+                          ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '300s',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: colorScheme.onSurface.withValues(
+                                    alpha: .3,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                '3600s',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: colorScheme.onSurface.withValues(
+                                    alpha: .3,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        '安全模式',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '在设定轮询间隔的 ±100 秒范围内随机取值查询，'
+                        '开启以降低账号被风控的风险。',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.onSurface.withValues(alpha: .45),
+                        ),
+                      ),
+                      value: _safeMode,
+                      onChanged: _onSafeModeChanged,
+                    ),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
 
-              // ---- ④ 系统通知偏好 ----
-              _SectionTitle(title: '系统通知偏好', icon: Icons.notifications_rounded),
+              // ---- ④ 通知设置 ----
+              _SectionTitle(title: '通知设置', icon: Icons.notifications_rounded),
               const SizedBox(height: 12),
               GlassCard(
                 padding: const EdgeInsets.all(20),
@@ -704,7 +714,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '每 1 小时自动检查，当前版本 '
+                            '当前版本 '
                             '${_appVersion.isEmpty ? '…' : _appVersion}',
                             style: TextStyle(
                               fontSize: 11,
@@ -763,7 +773,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         const TextSpan(text: ' · '),
                         const TextSpan(
                           text:
-                              'Copyright © 2024-2030 GradeDetector. All rights reserved. · ',
+                              'Copyright © 2024-2030 GradeMonitor for RUC. All rights reserved. · ',
                         ),
                         TextSpan(
                           text: 'Github',
@@ -773,9 +783,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           ),
                           recognizer: TapGestureRecognizer()
                             ..onTap = () {
-                              Process.run('open', [
-                                'https://github.com/MaoRM93/Grade-Detector-NEXT',
-                              ]);
+                              Process.run('open', [UpdateService.repoUrl]);
                             },
                         ),
                       ],

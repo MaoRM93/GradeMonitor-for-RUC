@@ -13,12 +13,13 @@ import 'core/service/update_service.dart';
 import 'views/disabled/disabled_page.dart';
 import 'views/update/update_dialog.dart';
 import 'views/navigation/app_navigation.dart';
+import 'widgets/toast_host.dart';
 
 /// 全局 WebSocket — 用于通知监听，独立于 UI 生命周期
 final _globalWs = WebSocketService();
 
-/// 全局导航器 — 更新弹窗等无 BuildContext 场景使用
-final navigatorKey = GlobalKey<NavigatorState>();
+/// 全局导航器 — 更新弹窗与全局 Toast 等无 BuildContext 场景使用
+final navigatorKey = toastNavigatorKey;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

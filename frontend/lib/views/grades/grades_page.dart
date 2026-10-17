@@ -60,6 +60,19 @@ class _GradesPageState extends ConsumerState<GradesPage> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '查看您的全部成绩，您可以点击表头分别排序每一项指标',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.onSurface.withValues(alpha: .5),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
               child: TextField(
                 controller: _searchController,
                 decoration: InputDecoration(

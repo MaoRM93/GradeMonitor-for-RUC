@@ -64,6 +64,7 @@ GradeMonitor 是一款适配 macOS（Windows 支持 planning 中）的成绩排�
 | 桌面前端 | Flutter（macOS） |
 | 本地后端 | Python FastAPI + uvicorn（`127.0.0.1:18923`） |
 | 更新分发 | GitHub Releases |
+| 源码仓库 | [MaoRM93/GradeMonitor-for-RUC](https://github.com/MaoRM93/GradeMonitor-for-RUC) |
 
 ### 构建前端（.app）
 
@@ -83,8 +84,9 @@ uvicorn backend.api.app:app --host 127.0.0.1 --port 18923
 
 ### 版本号体系
 
-- 完整版本：`107.0.0.115`（`pubspec.yaml` 中 `version: 107.0.0+115`）
-- 界面展示版本：`7.0.2`（`lib/core/service/update_service.dart` 中的 `shortVersion` 常量，发布时手动更新）
+- 完整版本：`107.0.0.135`（`pubspec.yaml` 中 `version: 107.0.0+135`）
+- 发行状态：`Release`（正式版）/ `Beta`（测试版），由 `lib/core/service/update_service.dart` 中的 `VerStatus` 常量控制，发布时手动更新
+- 更新检查指向的仓库：`MaoRM93/GradeMonitor-for-RUC`（同上文件中的 `repoOwner` / `repoName` 常量，GitHub 仓库更名后需同步修改）
 
 ## 系统要求
 

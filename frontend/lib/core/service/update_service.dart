@@ -67,7 +67,7 @@ class UpdateService {
   }
 
   static const String repoOwner = 'MaoRM93';
-  static const String repoName = 'Grade-Detector-NEXT';
+  static const String repoName = 'GradeMonitor-for-RUC';
   static const String repoUrl = 'https://github.com/$repoOwner/$repoName';
 
   /// GitHub API 地址（必须是 api.github.com；github.com 的 releases/latest
@@ -101,9 +101,9 @@ class UpdateService {
 
   String get currentVersion => _currentVersion;
 
-  /// 主页左下角展示的简洁版本号（每次发布手动更新）
-  /// 完整版本 107.0.0.115 → 展示 7.0.2
-  static const String shortVersion = '7.0.2';
+  /// 发行状态：'Release' 正式版 / 'Beta' 测试版（主页左下角展示，发布时手动更新）
+  // ignore: constant_identifier_names
+  static const String VerStatus = 'Release';
 
   /// 加载并缓存当前应用版本（major.minor.patch.build）
   Future<String> loadCurrentVersion() async {

@@ -1,7 +1,7 @@
 name: grademonitor
 description: "GradeMonitor - 自动查成绩桌面小工具"
 publish_to: 'none'
-version: 107.0.0+149
+version: 107.1.0+150
 
 environment:
   sdk: ^3.12.2

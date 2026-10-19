@@ -24,7 +24,7 @@ def send_startup_notification(auto_monitor_enabled: bool,
         message = f"程序将在后台自动按设置监测成绩和排名（监测时段：{start_time}-{end_time}，间隔：{interval}秒）"
     else:
         message = "程序已启动，将按照您的设置进行后台监测"
-    _show("自动查成绩小工具", message)
+    _show("自动查成绩小工具", message, record=False)
 
 
 def send_grades_notification(new_count: int, changed_count: int,
@@ -123,7 +123,7 @@ def send_test_notification(is_simple: bool = False,
                             course_details: list = None) -> None:
     """测试通知：展示详细或简洁模式的实际通知内容"""
     if is_simple:
-        _show("您有成绩或排名更新", "")
+        _show("您有成绩或排名更新", "", record=False)
         return
 
     # 构造模拟数据展示格式
@@ -136,7 +136,7 @@ def send_test_notification(is_simple: bool = False,
         "平时分：90；期末分：82；加权分：85.5\n"
         "平均学分绩点：3.7；班名：3；年名：15"
     )
-    _show(title, message)
+    _show(title, message, record=False)
 
 
 def send_notification_preview(is_simple: bool) -> str:
@@ -203,10 +203,31 @@ def _ensure_win_aumid() -> None:
         logger.warning(f"Windows AUMID 注册失败（通知可能无法显示）: {e}")
 
 
-def _show(title: str, message: str) -> None:
+def _show(title: str, message: str, record: bool = True) -> None:
     """发送 macOS/Windows 系统通知。
     注：WebSocket 辅助通道暂时关闭，优先保证稳定性。后续开启时取消 _try_send_via_websocket 注释即可。
+    [record] 是否持久化到 recent_change.json（仪表板「最新动态」读取汇总），
+    测试/预览通知传 False 避免覆盖真实变动记录。
     """
+    if record:
+        try:
+            import json as _json
+
+            from datetime import datetime
+
+            from backend.storage.cache import get_data_file_path
+
+            _data = {
+                "title": title,
+                "message": message,
+                "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            with open(
+                get_data_file_path("recent_change.json"), "w", encoding="utf-8"
+            ) as _f:
+                _json.dump(_data, _f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.debug(f"记录最近通知失败: {e}")
     try:
         if sys.platform == "darwin":
             escaped_title = title.replace('"', '\\"').replace("'", "\\'")

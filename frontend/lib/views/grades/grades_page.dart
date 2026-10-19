@@ -12,6 +12,7 @@ class GradesPage extends ConsumerStatefulWidget {
 class _GradesPageState extends ConsumerState<GradesPage> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  String _semester = '全部';
   int _sortColumnIndex = 0;
   bool _sortAscending = true;
 
@@ -39,6 +40,19 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final settings = ref.watch(settingsProvider);
     final hideUnknown = settings.hideUnknownCourses;
     final colorScheme = Theme.of(context).colorScheme;
+
+    // 学期筛选选项：来自全部成绩数据的学期集合（降序）
+    final gradesList = gradesAsync.asData?.value ?? const <GradeCourse>[];
+    final semesterSet = <String>{
+      for (final g in gradesList) if (g.xnxq.isNotEmpty) g.xnxq,
+    };
+    final semesterItems = <String>[
+      '全部',
+      ...semesterSet.toList()..sort((a, b) => b.compareTo(a)),
+    ];
+    final semesterValue = semesterItems.contains(_semester)
+        ? _semester
+        : '全部';
 
     return Scaffold(
       body: SafeArea(
@@ -73,22 +87,59 @@ class _GradesPageState extends ConsumerState<GradesPage> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: '搜索课程名称...',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear_rounded, size: 18),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                        )
-                      : null,
-                ),
-                onChanged: (v) => setState(() => _searchQuery = v),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: '搜索课程名称...',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear_rounded, size: 18),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              )
+                            : null,
+                      ),
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '学期：',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurface.withValues(alpha: .6),
+                        ),
+                      ),
+                      DropdownButton<String>(
+                        value: semesterValue,
+                        items: semesterItems
+                            .map(
+                              (s) => DropdownMenuItem(
+                                value: s,
+                                child: Text(
+                                  s,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) =>
+                            setState(() => _semester = v ?? '全部'),
+                        underline: const SizedBox(),
+                        isDense: true,
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
             Expanded(
@@ -97,9 +148,12 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   var list = hideUnknown
                       ? grades.where((g) => g.kcname != '未知课程').toList()
                       : grades;
-                  final filtered = _searchQuery.isEmpty
+                  final bySemester = _semester == '全部'
                       ? list
-                      : list
+                      : list.where((g) => g.xnxq == _semester).toList();
+                  final filtered = _searchQuery.isEmpty
+                      ? bySemester
+                      : bySemester
                             .where(
                               (g) => g.kcname.toLowerCase().contains(
                                 _searchQuery.toLowerCase(),
@@ -108,9 +162,14 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                             .toList();
 
                   if (filtered.isEmpty) {
+                    final emptyText = _searchQuery.isNotEmpty
+                        ? '无匹配结果'
+                        : _semester != '全部'
+                        ? '该学期暂无成绩数据'
+                        : '暂无成绩数据';
                     return Center(
                       child: Text(
-                        _searchQuery.isEmpty ? '暂无成绩数据' : '无匹配结果',
+                        emptyText,
                         style: TextStyle(
                           color: colorScheme.onSurface.withValues(alpha: .35),
                           fontSize: 14,
@@ -176,15 +235,17 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                         ),
                         columnSpacing: 16,
                         horizontalMargin: 12,
+                        // 表头居中：DataTable 会在标签左侧补排序箭头等宽占位，
+                        // 使"学期↑"这类带排序箭头的表头与数据列对中一致
                         columns: [
-                          DataColumn(label: const Center(child: Text('学期')), onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('课程名称')), onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('学分')), numeric: true, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('平时成绩')), numeric: true, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('期末成绩')), numeric: true, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('加权成绩')), numeric: true, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('绩点')), numeric: true, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('平均学分绩点')), numeric: true, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('学期')), headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('课程名称')), headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('学分')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('平时成绩')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('期末成绩')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('加权成绩')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('绩点')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
+                          DataColumn(label: const Center(child: Text('平均学分绩点')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
                         ],
                         rows: sorted
                             .map(
@@ -270,7 +331,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (_, __) => Center(
+                error: (_, _) => Center(
                   child: Text(
                     '加载成绩失败',
                     style: TextStyle(color: colorScheme.error, fontSize: 14),
@@ -288,14 +349,15 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final v = double.tryParse(gpa);
     Color c = cs.onSurface;
     if (v != null) {
-      if (v >= 4.0)
+      if (v >= 4.0) {
         c = const Color(0xFF10B981);
-      else if (v >= 3.3)
+      } else if (v >= 3.3) {
         c = const Color(0xFF3B82F6);
-      else if (v >= 2.0)
+      } else if (v >= 2.0) {
         c = const Color(0xFFF59E0B);
-      else
+      } else {
         c = const Color(0xFFEF4444);
+      }
     }
     return TextStyle(fontWeight: FontWeight.w700, color: c);
   }

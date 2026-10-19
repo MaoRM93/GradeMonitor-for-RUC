@@ -1,7 +1,7 @@
 name: grademonitor
 description: "GradeMonitor - 自动查成绩桌面小工具"
 publish_to: 'none'
-version: 107.0.0+135
+version: 107.0.0+149
 
 environment:
   sdk: ^3.12.2
@@ -49,3 +49,4 @@ flutter:
   assets:
     - assets/tray_icon.png
     - assets/app_icon.ico
+    - assets/app_icon_tb.png

@@ -10,6 +10,7 @@ class ApiPath {
 
   // Data
   static const String grades = '/api/grades';
+  static const String gradesLatestChange = '/api/grades/latest-change';
   static const String rank = '/api/rank';
 
   // Settings

@@ -221,6 +221,27 @@ async def get_grades():
     return {"data": course_list, "errorCode": "success", "errorMessage": None}
 
 
+@app.get("/api/grades/latest-change")
+async def get_latest_change():
+    """最近一次成绩/排名变动的通知内容（仪表板「最新动态」展示用）
+
+    数据由 notification_service._show 在真实通知时自动写入 recent_change.json，
+    测试/预览/启动提示不记录。
+    """
+    import json
+
+    try:
+        from backend.storage.cache import get_data_file_path
+
+        path = get_data_file_path("recent_change.json")
+        if Path(path).exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return {"success": True, "change": json.load(f)}
+    except Exception as e:
+        logger.warning(f"读取最近变动记录失败: {e}")
+    return {"success": True, "change": None}
+
+
 @app.get("/api/rank")
 async def get_rank():
     """获取排名信息（从内存缓存）"""

@@ -17,10 +17,10 @@ class DashboardPage extends ConsumerStatefulWidget {
 class _DashboardPageState extends ConsumerState<DashboardPage> {
   bool _settingsReady = false;
   String? _lastUsername;
-  String _selectedSemester = '全部';
   bool _isQuerying = false;
   bool _isTogglingMonitor = false;
-  bool _showDetailData = true;
+  /// 最近一次成绩/排名变动的通知内容（后端 recent_change.json）
+  Map<String, dynamic>? _latestChange;
 
   @override
   void initState() {
@@ -34,6 +34,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         ref.read(monitorProvider.notifier).fetchStatus();
         ref.read(gradesProvider.notifier).fetchGrades();
         ref.read(rankProvider.notifier).fetchRank();
+        _fetchLatestChange();
       }
     });
   }
@@ -66,6 +67,22 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     await ref.read(monitorProvider.notifier).fetchStatus();
     await ref.read(gradesProvider.notifier).fetchGrades();
     await ref.read(rankProvider.notifier).fetchRank();
+    await _fetchLatestChange();
+  }
+
+  /// 读取后端记录的最近一次变动通知（成绩/排名）
+  Future<void> _fetchLatestChange() async {
+    try {
+      final resp = await ref.read(apiClientProvider).getLatestChange();
+      final data = Map<String, dynamic>.from(resp.data as Map);
+      final change = data['change'];
+      if (!mounted) return;
+      setState(() {
+        _latestChange = change is Map<String, dynamic> ? change : null;
+      });
+    } catch (_) {
+      // 无记录时静默保持空态
+    }
   }
 
   Future<void> _queryOnce() async {
@@ -166,9 +183,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ),
               ),
               const SizedBox(height: 28),
-              _buildMonitorCard(monitorState, rankAsync),
-              const SizedBox(height: 20),
-              _buildGradesSection(gradesAsync),
+              _buildMonitorCard(monitorState),
+              const SizedBox(height: 18),
+              _buildLatestCard(gradesAsync),
+              const SizedBox(height: 18),
+              _buildStatTiles(monitorState, rankAsync),
             ],
           ),
         ),
@@ -176,413 +195,285 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  Widget _buildMonitorCard(
-    MonitorStatus status,
-    AsyncValue<RankData?> rankAsync,
-  ) {
+  /// 监控状态卡（整行）：状态与按钮在同一行垂直居中，按钮靠右
+  Widget _buildMonitorCard(MonitorStatus status) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    return SizedBox(
+      height: 88,
+      child: GlassCard(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Row(
+          children: [
+            PulsingStatusDot(active: status.isRunning),
+            const SizedBox(width: 12),
+            Text(
+              status.isRunning ? '监控运行中' : '监控已停止',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: status.isRunning
+                    ? AppTheme.success
+                    : colorScheme.onSurface.withValues(alpha: .5),
+              ),
+            ),
+            const Spacer(),
+            _ControlButton(
+              icon: _isQuerying ? null : Icons.search_rounded,
+              label: _isQuerying ? '查询中，请稍候' : '立即查询',
+              color: colorScheme.primary,
+              loading: _isQuerying,
+              onTap: _isQuerying ? null : _queryOnce,
+            ),
+            const SizedBox(width: 10),
+            _ControlButton(
+              icon: status.isRunning
+                  ? Icons.stop_rounded
+                  : Icons.play_arrow_rounded,
+              label: status.isRunning ? '停止监控' : '启动监控',
+              color: status.isRunning ? AppTheme.error : AppTheme.success,
+              loading: _isTogglingMonitor,
+              onTap: _isTogglingMonitor ? null : _toggleMonitor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 「最新动态」卡：优先展示最近一次变动（通知模块生成的真实内容）；
+  /// 无变动记录时回退显示最新一门成绩。
+  Widget _buildLatestCard(AsyncValue<List<GradeCourse>> gradesAsync) {
+    final cs = Theme.of(context).colorScheme;
+    final settings = ref.read(settingsProvider);
+    final subColor = cs.onSurface.withValues(alpha: .45);
+    final tinyColor = cs.onSurface.withValues(alpha: .3);
+
+    final change = _latestChange;
+
+    String tagText;
+    Color tagColor;
+    String title;
+    String detail;
+    String at = '';
+
+    if (change != null) {
+      final raw = (change['title'] ?? '').toString();
+      final idx = raw.indexOf('：');
+      tagText = '最新变动';
+      tagColor = AppTheme.success;
+      title = idx >= 0
+          ? raw.substring(idx + 1)
+          : (raw.isEmpty ? '成绩与排名更新' : raw);
+      final msg = (change['message'] ?? '').toString();
+      detail = msg.isEmpty ? '详情见「成绩单」' : msg.replaceAll('\n', '　·　');
+      at = (change['at'] ?? '').toString();
+    } else {
+      final latest = _latestCourse(gradesAsync.asData?.value);
+      if (latest == null) {
+        tagText = '暂无更新';
+        tagColor = subColor;
+        title = settings.username.isEmpty ? '请先在设置中配置账户' : '暂无成绩数据';
+        detail = '完成监控配置后，成绩与排名变动会第一时间展示在这里';
+      } else {
+        tagText = '暂无更新 · 最新一门';
+        tagColor = subColor;
+        title = latest.kcname;
+        detail = '期末 ${latest.cjxm3.isEmpty ? '-' : latest.cjxm3}　·　'
+            '加权 ${latest.zcj.isEmpty ? '-' : latest.zcj}　·　'
+            '绩点 ${latest.jd.isEmpty ? '-' : latest.jd}';
+      }
+    }
+
     return GlassCard(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              PulsingStatusDot(active: status.isRunning),
-              const SizedBox(width: 12),
-              Text(
-                status.isRunning ? '监控运行中' : '监控已停止',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: status.isRunning
-                      ? AppTheme.success
-                      : colorScheme.onSurface.withValues(alpha: .5),
-                ),
-              ),
+              _TagChip(tagText, tagColor),
               const Spacer(),
-              _ControlButton(
-                icon: _isQuerying ? null : Icons.search_rounded,
-                label: _isQuerying ? '查询中，请稍候' : '立即查询',
-                color: colorScheme.primary,
-                loading: _isQuerying,
-                onTap: _isQuerying ? null : _queryOnce,
-              ),
-              const SizedBox(width: 8),
-              _ControlButton(
-                icon: status.isRunning
-                    ? Icons.stop_rounded
-                    : Icons.play_arrow_rounded,
-                label: status.isRunning ? '停止监控' : '启动监控',
-                color: status.isRunning ? AppTheme.error : AppTheme.success,
-                loading: _isTogglingMonitor,
-                onTap: _isTogglingMonitor ? null : _toggleMonitor,
-              ),
+              Text(at, style: TextStyle(fontSize: 11.5, color: tinyColor)),
             ],
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              _StatItem(
-                icon: Icons.refresh_rounded,
-                label: '累计查询',
-                value: '${status.totalQueries} 次',
-              ),
-              const SizedBox(width: 24),
-              _StatItem(
-                icon: Icons.timer_rounded,
-                label: '轮询间隔',
-                value: '${status.intervalSeconds}s',
-              ),
-              const SizedBox(width: 24),
-              if (_showDetailData)
-                rankAsync.when(
-                  data: (rd) => rd != null
-                      ? Expanded(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              _RankChip(
-                                'GPA：${rd.pjxfjd}',
-                                const Color(0xFF8B5CF6),
-                              ),
-                              const SizedBox(width: 8),
-                              _RankChip(
-                                '班级排名：${rd.bjpm}',
-                                const Color(0xFFF59E0B),
-                              ),
-                              const SizedBox(width: 8),
-                              _RankChip(
-                                '专业排名：${rd.pm}',
-                                const Color(0xFF6366F1),
-                              ),
-                              const SizedBox(width: 8),
-                              _RankChip(
-                                '修读课程数量：${rd.countnum}',
-                                const Color(0xFF10B981),
-                              ),
-                            ],
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
-                )
-              else
-                const Spacer(),
-            ],
+          const SizedBox(height: 14),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: cs.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            detail,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 14, color: subColor, height: 1.6),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildGradesSection(AsyncValue<List<GradeCourse>> gradesAsync) {
-    final colorScheme = Theme.of(context).colorScheme;
+  /// 取最新一门成绩：最新学期（xnxq 降序）中后端列表的最后一门
+  GradeCourse? _latestCourse(List<GradeCourse>? grades) {
+    if (grades == null || grades.isEmpty) return null;
     final settings = ref.read(settingsProvider);
-    final hideUnknown = settings.hideUnknownCourses;
+    final list = settings.hideUnknownCourses
+        ? grades.where((g) => g.kcname != '未知课程').toList()
+        : grades.toList();
+    if (list.isEmpty) return null;
 
-    return gradesAsync.when(
-      data: (grades) {
-        var display = hideUnknown
-            ? grades.where((g) => g.kcname != '未知课程').toList()
-            : grades;
-        if (display.isEmpty) {
-          // 仅在没有数据且没有配置凭据时提示
-          if (settings.username.isEmpty) {
-            return GlassCard(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: Text(
-                    '请先在「设置」中登录并保存凭据',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: colorScheme.onSurface.withValues(alpha: .35),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }
-          return GlassCard(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40),
-                child: Text(
-                  '暂无成绩数据',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: colorScheme.onSurface.withValues(alpha: .35),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
+    final latestSem = list
+        .map((g) => g.xnxq)
+        .reduce((a, b) => b.compareTo(a) > 0 ? b : a);
+    GradeCourse? result;
+    for (final g in list) {
+      if (g.xnxq == latestSem) result = g;
+    }
+    return result;
+  }
 
-        final semesters = <String>{'全部'};
-        for (final g in display) {
-          if (g.xnxq.isNotEmpty) semesters.add(g.xnxq);
-        }
-        final semesterList = semesters.toList()..sort((a, b) => b.compareTo(a));
-        final filtered = _selectedSemester == '全部'
-            ? display
-            : display.where((g) => g.xnxq == _selectedSemester).toList();
-
-        return GlassCard(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.auto_stories_rounded,
-                    size: 20,
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    '成绩列表',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  const Spacer(),
-                  const Text('学期：', style: TextStyle(fontSize: 12)),
-                  DropdownButton<String>(
-                    value: semesterList.contains(_selectedSemester)
-                        ? _selectedSemester
-                        : '全部',
-                    items: semesterList
-                        .map(
-                          (s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(
-                              s,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) =>
-                        setState(() => _selectedSemester = v ?? '全部'),
-                    underline: const SizedBox(),
-                    isDense: true,
-                  ),
-                  const SizedBox(width: 8),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        height: 24,
-                        child: Checkbox(
-                          value: _showDetailData,
-                          onChanged: (v) =>
-                              setState(() => _showDetailData = v ?? true),
-                        ),
-                      ),
-                      const Text('显示完整成绩', style: TextStyle(fontSize: 11)),
-                    ],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${filtered.length}门',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurface.withValues(alpha: .5),
-                    ),
-                  ),
-                ],
-              ),
-              if (_showDetailData) ...[
-                const SizedBox(height: 10),
-                LayoutBuilder(
-                  builder: (_, constraints) {
-                    return SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: constraints.maxWidth,
-                        ),
-                        child: DataTable(
-                          headingRowColor: WidgetStateProperty.all(
-                            colorScheme.surfaceContainerHighest.withValues(
-                              alpha: .3,
-                            ),
-                          ),
-                          headingTextStyle: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: colorScheme.onSurface,
-                          ),
-                          dataTextStyle: TextStyle(
-                            fontSize: 12,
-                            color: colorScheme.onSurface,
-                          ),
-                          columnSpacing: constraints.maxWidth > 600 ? 24 : 14,
-                          horizontalMargin: 10,
-                          columns: const [
-                            DataColumn(label: Center(child: Text('学期'))),
-                            DataColumn(label: Center(child: Text('课程'))),
-                            DataColumn(
-                              label: Center(child: Text('平时成绩')),
-                              numeric: true,
-                            ),
-                            DataColumn(
-                              label: Center(child: Text('期末成绩')),
-                              numeric: true,
-                            ),
-                            DataColumn(
-                              label: Center(child: Text('加权成绩')),
-                              numeric: true,
-                            ),
-                            DataColumn(
-                              label: Center(child: Text('绩点')),
-                              numeric: true,
-                            ),
-                            DataColumn(
-                              label: Center(child: Text('平均绩点')),
-                              numeric: true,
-                            ),
-                          ],
-                          rows: filtered
-                              .map(
-                                (course) => DataRow(
-                                  cells: [
-                                    DataCell(
-                                      Center(
-                                        child: Text(
-                                          course.xnxq.isEmpty
-                                              ? '-'
-                                              : course.xnxq,
-                                        ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Center(
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(
-                                            maxWidth: 150,
-                                          ),
-                                          child: Text(
-                                            course.kcname,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Center(
-                                        child: Text(
-                                          course.cjxm1.isEmpty
-                                              ? '-'
-                                              : course.cjxm1,
-                                        ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Center(
-                                        child: Text(
-                                          course.cjxm3.isEmpty
-                                              ? '-'
-                                              : course.cjxm3,
-                                        ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Center(
-                                        child: Text(
-                                          course.zcj.isEmpty ? '-' : course.zcj,
-                                        ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Center(
-                                        child: Text(
-                                          course.jd.isEmpty ? '-' : course.jd,
-                                        ),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      Center(
-                                        child: Text(
-                                          course.avgGpa,
-                                          style: _gpaStyle(
-                                            course.avgGpa,
-                                            colorScheme,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                              .toList(),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-      loading: () => const GlassCard(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(40),
-            child: CircularProgressIndicator(),
-          ),
-        ),
-      ),
-      error: (_, __) => GlassCard(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(40),
-            child: Text(
-              '加载成绩失败',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+  /// 底部统计卡（Lenovo Vantage 风格：左上图标+灰字说明，右下大数字）
+  /// 顺序：GPA → 班级排名 → 专业排名 → 修读课程 → 查询次数
+  Widget _buildStatTiles(MonitorStatus status, AsyncValue<RankData?> rankAsync) {
+    final rd = rankAsync.asData?.value;
+    return SizedBox(
+      height: 200,
+      child: Row(
+        children: [
+          Expanded(
+            child: _statTile(
+              icon: Icons.school_rounded,
+              iconColor: const Color(0xFF8B5CF6),
+              label: 'GPA',
+              value: rd?.pjxfjd ?? 'N/A',
+              decimalSmall: true,
             ),
           ),
-        ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _statTile(
+              icon: Icons.groups_rounded,
+              iconColor: const Color(0xFFF59E0B),
+              label: '班级排名',
+              value: rd?.bjpm ?? 'N/A',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _statTile(
+              icon: Icons.emoji_events_rounded,
+              iconColor: const Color(0xFF6366F1),
+              label: '专业排名',
+              value: rd?.pm ?? 'N/A',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _statTile(
+              icon: Icons.menu_book_rounded,
+              iconColor: const Color(0xFF10B981),
+              label: '修读课程',
+              value: rd?.countnum ?? 'N/A',
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _statTile(
+              icon: Icons.manage_history_rounded,
+              iconColor: const Color(0xFF3B82F6),
+              label: '查询次数',
+              value: '${status.totalQueries}',
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  TextStyle _gpaStyle(String gpa, ColorScheme cs) {
-    final v = double.tryParse(gpa);
-    Color c = cs.onSurface;
-    if (v != null) {
-      if (v >= 4.0)
-        c = const Color(0xFF10B981);
-      else if (v >= 3.3)
-        c = const Color(0xFF3B82F6);
-      else if (v >= 2.0)
-        c = const Color(0xFFF59E0B);
-      else
-        c = const Color(0xFFEF4444);
-    }
-    return TextStyle(fontWeight: FontWeight.w700, color: c);
+  Widget _statTile({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+    bool decimalSmall = false,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final valueStyle = TextStyle(
+      fontSize: 68,
+      fontWeight: FontWeight.w600,
+      height: 1.0,
+      letterSpacing: -1.5,
+      color: cs.onSurface,
+    );
+    final dotIdx = decimalSmall ? value.indexOf('.') : -1;
+
+    return GlassCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 22, color: iconColor),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: cs.onSurface.withValues(alpha: .5),
+            ),
+          ),
+          const Spacer(),
+          Align(
+            alignment: Alignment.centerRight,
+            child: dotIdx >= 0
+                ? Text.rich(
+                    TextSpan(
+                      style: valueStyle,
+                      children: [
+                        TextSpan(text: value.substring(0, dotIdx)),
+                        TextSpan(
+                          text: value.substring(dotIdx),
+                          style: const TextStyle(fontSize: 34),
+                        ),
+                      ],
+                    ),
+                  )
+                : Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: valueStyle,
+                  ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-class _RankChip extends StatelessWidget {
+class _TagChip extends StatelessWidget {
   final String text;
   final Color color;
-  const _RankChip(this.text, this.color);
+  const _TagChip(this.text, this.color);
   @override
-  Widget build(BuildContext c) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
       color: color.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
     ),
     child: Text(
       text,
-      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
+      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
     ),
   );
 }
@@ -639,47 +530,4 @@ class _ControlButton extends StatelessWidget {
       ),
     ),
   );
-}
-
-class _StatItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  const _StatItem({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-  @override
-  Widget build(BuildContext c) {
-    final cs = Theme.of(c).colorScheme;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 14, color: cs.onSurface.withValues(alpha: .35)),
-        const SizedBox(width: 6),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: cs.onSurface.withValues(alpha: .35),
-              ),
-            ),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: cs.onSurface,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
 }

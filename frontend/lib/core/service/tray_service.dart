@@ -27,7 +27,9 @@ class TrayService {
       final String iconPath =
           Platform.isWindows ? 'assets/app_icon.ico' : 'assets/tray_icon.png';
 
-      await trayManager.setIcon(iconPath);
+      // macOS：黑白剪影 + isTemplate 模板图，随系统深浅色自动黑/白切换
+      // （与微信托盘一致）；Windows 保持彩色 ICO。
+      await trayManager.setIcon(iconPath, isTemplate: Platform.isMacOS);
       await trayManager.setToolTip('GradeMonitor');
 
       final menu = Menu(

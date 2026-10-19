@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../core/theme/app_theme.dart';
@@ -6,7 +7,7 @@ import '../../core/network/api_client.dart';
 import '../dashboard/dashboard_page.dart';
 import '../grades/grades_page.dart';
 import '../settings/settings_page.dart';
-import '../welcome/welcome_dialog.dart';
+import '../welcome/welcome_flow.dart';
 import '../../core/service/update_service.dart';
 import '../../widgets/toast_host.dart';
 
@@ -33,6 +34,10 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   DateTime _lastVersionTap = DateTime.now();
   bool _devShowWelcomeAlways = false;
   bool _welcomeChecked = false;
+
+  /// 欢迎流程阶段：checking=检查中（用同色底遮挡主界面防闪烁），
+  /// welcome=欢迎向导展示中，main=进入主界面
+  String _welcomePhase = 'checking';
 
   @override
   void initState() {
@@ -77,14 +82,12 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
 
         _welcomeChecked = true;
 
-        if (!welcomeCompleted || showWelcomeAlways) {
-          if (mounted) {
-            await showDialog<bool>(
-              context: context,
-              barrierDismissible: false,
-              builder: (_) => const WelcomeDialog(),
-            );
-          }
+        if (mounted) {
+          // 检查完成后一次性决定去向，避免主界面先渲染再被欢迎页覆盖
+          setState(() {
+            _welcomePhase =
+                (!welcomeCompleted || showWelcomeAlways) ? 'welcome' : 'main';
+          });
         }
         return; // 成功，退出重试
       } catch (_) {
@@ -94,10 +97,17 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
         }
       }
     }
+    // 后端始终未就绪：按主界面继续（与旧行为一致）
+    if (mounted) setState(() => _welcomePhase = 'main');
   }
 
   /// 自定义标题栏：拖拽区 + 应用名 + 最小化/最大化/关闭
   Widget _buildTitleBar(ColorScheme colorScheme) {
+    // 自定义标题栏（最小化/最大化/关闭）仅供 Windows：
+    // macOS 由系统提供原生红绿灯与拖拽，不渲染 Windows 风格按钮
+    if (!Platform.isWindows) {
+      return const SizedBox.shrink();
+    }
     const barHeight = 36.0;
     return Container(
       height: barHeight,
@@ -215,7 +225,21 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
           // 自定义标题栏：拖拽区 + 应用名 + 窗口控制按钮
           _buildTitleBar(colorScheme),
           Expanded(
-            child: Row(
+            child: _welcomePhase == 'checking'
+                ? Container(
+                    // 检查中：与欢迎页同色底遮盖主区域，
+                    // 避免仪表板先渲染再被欢迎页覆盖造成闪烁
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF1C1C1E)
+                        : Colors.white,
+                    width: double.infinity,
+                  )
+                : _welcomePhase == 'welcome'
+                // 欢迎向导占满标题栏以下整个窗口（iPhone 激活式逐页设置）
+                ? WelcomeFlow(
+                    onCompleted: () => setState(() => _welcomePhase = 'main'),
+                  )
+                : Row(
               children: [
                 Material(
                   elevation: 0,

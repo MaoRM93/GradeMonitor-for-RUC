@@ -96,6 +96,11 @@ class ApiClient {
     return dio.get(ApiPath.rank);
   }
 
+  /// 最近一次成绩/排名变动的通知内容（仪表板「最新动态」）
+  Future<Response> getLatestChange() async {
+    return dio.get(ApiPath.gradesLatestChange);
+  }
+
   // ---- Settings ----
 
   Future<Response> getSettings() async {

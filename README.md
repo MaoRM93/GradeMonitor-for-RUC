@@ -1,49 +1,64 @@
-# GradeMonitor — 适用于 RUC 教学系统的成绩自动监控工具
+# GradeMonitor — 适用于 RUC 教务系统的成绩自动监控工具
 
-**Bug说明：用户反馈在 macOS 15.6 及更低版本的系统下无法弹出通知，这是因为您没有更新最新版本的 macOS 。请您前往 设置 - 通用 - 软件更新 中检查并安装系统更新。目前 macOS 26 和 27 均无此问题。
-用户反馈在 Windows 10 上会偶发第一次启动应用时前台界面无法及时拉起后端服务的情况，这可能与您的操作系统版本有关。请更新到 Windows 11 以解决此问题。**
+现已推出：macOS端的2026年秋季更新 108.0.0.100 版本。Windows 端正在开发中，敬请期待。
+相较于以前的 6.0 和 107.0 系列版本，这一大版本重新构思了程序设计，优化了用户体验，并增加了一系列实用工具。
 
-GradeMonitor（原名 Grade Detector） 是一款适配 **macOS 与 Windows** 的成绩排名自动检测工具，安装后根据你的设置默默在后台工作，出分了就发通知告诉你，省下大把刷网页的时间。
+GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测工具，安装后根据你的设置在后台工作，出分了就发通知告诉你，省下大把刷网页的时间。
+并且，程序可以帮助您整理分析和排列各个科目、各个学期的成绩，并支持按规则一键筛选出“核心绩”。
 
-<img width="700" height="200" alt="image" src="https://github.com/user-attachments/assets/c174b384-67ee-4865-87a5-0dbb89d0fa63" />
 
-## 它是怎么工作的？
+## 系统要求
 
-本程序会按照你设定的时间间隔，自动登录教务系统查询成绩和排名。
+- macOS 13 及以上（仅 Apple Silicon / M 系列芯片）；推荐使用最新版：macOS 27
+- Windows 10 64位，版本 1809 及以上（x64）；推荐最新版：Windows 11 26H2
 
-一旦检测到**新出成绩**或**排名变化**，立即通过系统原生通知推送到你的桌面。
 
-也支持简洁模式！仅提示「您有成绩或排名更新」这几个字，保护隐私，保护心灵。
+## 程序功能一览
 
-## 核心功能一览
+### 全新的设置引导
+<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/38f9726a-7310-42c8-9195-dad9084b2c6a" />
+优化了所有的设置流程，更加简洁清晰。
+<img width="1270" height="1152" alt="image" src="https://github.com/user-attachments/assets/0d5317b0-5dc8-4717-ace6-8e24c8cfa010" />
+适配数智化建设最新平台，但我们不卡顿。
 
-### 自动监测
+### 仪表板显示更直观
+- 在首页简单、直观地显示各项数据指标与最新的一门成绩，界面美观清晰
+- <img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/d385ae01-13de-4bac-bb69-6eb1d45dd45a" />
+
+### 自动监测更科学
 - 支持**成绩监测**和**排名监测**，可独立开关
 - 可设定监测时间窗口（如 08:00–23:00），深夜不打扰，窗口外自动休眠
 - 监测间隔可自定义（300–3600 秒），避免对学校服务器造成过大负担
-
 <img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/525e0980-2d22-42c4-8350-cc2c9baa640e" />
+- 支持添加随机查询，降低账号风险
 
-### 通知推送
+### 通知推送更贴心
 - **详细模式**：直接在通知中显示课程名、绩点、专业排名、班级排名变化
+<img width="706" height="648" alt="image" src="https://github.com/user-attachments/assets/f63c681b-0d24-4a2c-94b4-a415e69991e9" />
 - **简洁模式**：仅提示「您有成绩或排名更新」，保护隐私
+<img width="1214" height="1050" alt="image" src="https://github.com/user-attachments/assets/d6d9a54d-a8f9-4d17-a3d5-5106a1706b85" />
 
-### 排名可视化
-主界面实时展示**专业排名**和**班级排名**，无需登录教务系统即可查看。
+### 数据管理更直接
+- 用户可以一键筛选所需要的各种属性的科目成绩，并且支持按照各种方式排序。
+<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/01fe69de-f617-4297-bc86-32223f0e7ed6" />
 
-### 更新检查
-内置应用更新检查（在设置页手动触发），发现新版本时提示并引导前往 GitHub Releases 下载。启动时的静默联网检查仅用于获取远程可用性开关，不会上传任何数据。
+### 更新检查更稳定
+- 我们优化了内置的应用更新检查和安装组件。现在，它可以正确解析 md 格式的语法，并支持直接在程序内下载对应客户端的更新包。
+
+### 升学规划更触达
+- 新增了方案计算模块，允许用户选择 811 或 82 方案计算用于升学的核心成绩。
+<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/8805e2b7-e8ea-430a-a425-7ab790d27edd" />
 
 ### 其他特性
-- **托盘图标**：在系统托盘（Windows）或顶部菜单栏（macOS）显示小图标，点击可快速打开主界面或退出程序，可在设置中开关
+- **托盘图标**：在系统托盘（Windows）或顶部菜单栏（macOS）显示小图标，点击可快速打开主界面或退出程序。新版本更优化了该部分的设计。
 - **深色模式适配**：自动跟随系统深色/浅色模式切换，夜间使用不刺眼
-- **开机自启动**：macOS 通过系统登录项实现（可在「系统设置 → 通用 → 登录项与扩展」中管理）
-
+- **开机自启动**
+  
 ## 如何使用？
 
 ### Windows 端
 
-1. 下载最新版安装程序 `GradeMonitor_107.0.0.xxx_Windows_x64.zip`，解压后双击运行exe安装包，按向导完成安装（无需管理员权限）
+1. 下载最新版安装程序 `GradeMonitor_108.0.0.xxx_Windows_x64.zip`，解压后双击运行exe安装包，按向导完成安装（无需管理员权限）
 2. 启动 GradeMonitor，在设置页填写学号和密码（可勾选记住密码）
 3. 勾选需要监测的项目，设置时间范围和间隔
 4. 点击「启动自动监控」，然后关闭窗口——程序会在后台默默工作
@@ -52,7 +67,7 @@ GradeMonitor（原名 Grade Detector） 是一款适配 **macOS 与 Windows** �
 
 ### macOS 端
 
-1. 下载 `GradeMonitor_107.0.0.xxx_macOS_AppleSilicon.zip`，解压后将 `GradeMonitor.app` 拖入「应用程序」文件夹
+1. 下载 `GradeMonitor_108.0.0.xxx_macOS_arm64.zip`，解压后将 `GradeMonitor.app` 拖入「应用程序」文件夹
 2. 首次打开，请打开「应用程序」文件夹或 启动台 ，右键点击 App → 选择「打开」，确认运行
 3. 在界面上方填写学号和密码（可勾选记住密码）
 4. 勾选需要监测的项目，设置时间范围和间隔
@@ -60,51 +75,6 @@ GradeMonitor（原名 Grade Detector） 是一款适配 **macOS 与 Windows** �
 6. 等待通知
 > 关闭窗口不会退出程序。如需彻底退出，请通过菜单栏图标选择「退出」或按 `Command + Q`。
 
-## 源码
-
-本仓库为 **Windows / macOS 双平台单代码库**：`frontend/lib` 与 `backend` 为两端共享，平台差异分别位于 `frontend/windows` 与 `frontend/macos`。
-
-### 技术栈
-
-| 层 | 技术 |
-|---|---|
-| 桌面前端 | Flutter（Windows / macOS 共享一套 `frontend/lib`） |
-| 本地后端 | Python FastAPI + uvicorn（`127.0.0.1:18923`） |
-| 更新分发 | GitHub Releases |
-| 源码仓库 | [MaoRM93/GradeMonitor-for-RUC](https://github.com/MaoRM93/GradeMonitor-for-RUC) |
-
-### 构建前端
-
-```bash
-# macOS（.app）
-cd frontend
-flutter pub get
-flutter build macos --release
-# 产物：build/macos/Build/Products/Release/GradeMonitor.app
-
-# Windows（需在 Windows 机器上构建）
-flutter build windows --release
-# 产物：build/windows/x64/runner/Release/
-# Inno Setup 打包脚本见 .data/prepare_staging.py + .data/setup.iss
-```
-
-### 启动后端（本地开发）
-
-```bash
-pip install -r backend/requirements.txt
-uvicorn backend.api.app:app --host 127.0.0.1 --port 18923
-```
-
-### 版本号体系
-
-- 完整版本：`107.0.0.135`（`frontend/pubspec.yaml` 中 `version: 107.0.0+135`）
-- 发行状态：`Release`（正式版）/ `Beta`（测试版），由 `frontend/lib/core/service/update_service.dart` 中的 `VerStatus` 常量控制，发布时手动更新
-- 更新检查指向的仓库：`MaoRM93/GradeMonitor-for-RUC`（同上文件中的 `repoOwner` / `repoName` / `repoUrl` 常量，GitHub 仓库更名后需同步修改）
-
-## 系统要求
-
-- macOS 13 及以上（仅 Apple Silicon / M 系列芯片）；推荐最新版：macOS 27.0.1
-- Windows 10 64位，版本 1809 及以上（x64）；推荐最新版：Windows 11 26H2
 
 ## 注意事项与免责声明
 

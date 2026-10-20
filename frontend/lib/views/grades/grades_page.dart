@@ -59,7 +59,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(28, 28, 28, 6),
+              padding: const EdgeInsets.fromLTRB(28, 44, 28, 6),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(

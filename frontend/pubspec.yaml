@@ -37,6 +37,9 @@ dependencies:
   intl: ^0.20.2
   package_info_plus: ^10.2.1
 
+  # Markdown 更新日志渲染（flutter_markdown 官方停维后的社区延续版）
+  flutter_markdown_plus: ^1.0.12
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

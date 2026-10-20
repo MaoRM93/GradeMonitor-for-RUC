@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, Process;
+import 'dart:io' show Directory, File, Platform, Process;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +8,20 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/constants/api_path.dart';
 import '../logger/app_logger.dart';
+
+/// GitHub Release 的安装包资源
+class ReleaseAsset {
+  /// 资源文件名（如 GradeMonitor-107.0.0.149-macOS.zip）
+  final String name;
+
+  /// 浏览器下载地址（browser_download_url）
+  final String url;
+
+  /// 文件大小（字节）
+  final int size;
+
+  const ReleaseAsset({required this.name, required this.url, required this.size});
+}
 
 /// 检查更新结果
 class UpdateCheckResult {
@@ -23,6 +37,9 @@ class UpdateCheckResult {
   /// 更新说明（release body）
   final String releaseNotes;
 
+  /// 该 Release 附带的安装包资源列表
+  final List<ReleaseAsset> assets;
+
   /// 失败原因（手动检查时提示用户）
   final String? error;
 
@@ -31,6 +48,7 @@ class UpdateCheckResult {
     this.hasUpdate = false,
     this.latestVersion = '',
     this.releaseNotes = '',
+    this.assets = const [],
     this.error,
   });
 }
@@ -227,6 +245,16 @@ class UpdateService {
           }
           final latestVersion = _normalizeVersion(tag);
           final releaseNotes = (data['body'] as String? ?? '').trim();
+          final assets = <ReleaseAsset>[
+            for (final raw in (data['assets'] as List<Object?>? ?? const []))
+              if (raw is Map<String, dynamic>)
+                if ((raw['browser_download_url'] ?? '').toString().isNotEmpty)
+                  ReleaseAsset(
+                    name: (raw['name'] ?? '').toString(),
+                    url: (raw['browser_download_url'] ?? '').toString(),
+                    size: (raw['size'] is int) ? raw['size'] as int : 0,
+                  ),
+          ];
 
           // 远程停用开关：最新 Release tag 等于 killSwitchVersion 时
           // 全屏禁用应用（main.dart 监听 disabled 自动切换禁用页）
@@ -245,6 +273,7 @@ class UpdateService {
             hasUpdate: hasUpdate,
             latestVersion: latestVersion,
             releaseNotes: releaseNotes,
+            assets: assets,
           );
         } catch (e) {
           lastError = e;
@@ -276,6 +305,144 @@ class UpdateService {
       }
     } catch (e) {
       _log.warning('打开链接失败: $e');
+    }
+  }
+
+  // ---- 应用内直接下载 ----
+
+  /// 按当前平台从 Release 资源中挑选合适的安装包；找不到返回 null。
+  ///
+  /// mac → 名称含 "mac";  windows → 含 "windows"（优先 x64）
+  ReleaseAsset? pickPlatformAsset(List<ReleaseAsset> assets) {
+    if (assets.isEmpty) return null;
+    final bool isMac = Platform.isMacOS;
+    final bool isWin = Platform.isWindows;
+    ReleaseAsset? fallback;
+    for (final a in assets) {
+      final n = a.name.toLowerCase();
+      if (isMac) {
+        if (n.contains('mac')) return a;
+      } else if (isWin) {
+        if (n.contains('windows')) {
+          if (n.contains('x64')) return a;
+          fallback ??= a;
+        }
+      }
+    }
+    return fallback;
+  }
+
+  /// 用户「下载」文件夹路径
+  String _downloadsDir() {
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    if (home == null || home.isEmpty) {
+      return Directory.systemTemp.path;
+    }
+    final sep = Platform.pathSeparator;
+    return '$home${sep}Downloads';
+  }
+
+  /// 直接下载安装包到「下载」文件夹（不跳浏览器）。
+  ///
+  /// - 独立下载用 Dio 实例：不继承检查更新的 20 秒超时（大文件会超时中断）
+  /// - 下载过程中写入 `*.part` 临时文件，成功后原子重命名，避免半截文件
+  /// - 目标同名文件已存在时按 `文件名 (2).zip` 顺延，不覆盖旧下载
+  /// - 回调 [onProgress] 上报 (已接收字节, 总字节)；总大小未知时 total ≤ 0
+  Future<String> downloadRelease(
+    ReleaseAsset asset, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final dirPath = _downloadsDir();
+    final dir = Directory(dirPath);
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+
+    // 从 URL 推导文件名，异常时用时间戳兜底
+    String name;
+    try {
+      final segments = Uri.parse(asset.url).pathSegments;
+      name = segments.isNotEmpty ? segments.last : '';
+    } catch (_) {
+      name = '';
+    }
+    if (name.trim().isEmpty || name.contains('/')) {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      name = 'GradeMonitor-update-$ts.zip';
+    }
+
+    // 同名顺延，避免覆盖
+    String targetPath = _join(dirPath, name);
+    if (File(targetPath).existsSync()) {
+      final dot = name.lastIndexOf('.');
+      final stem = dot > 0 ? name.substring(0, dot) : name;
+      final ext = dot > 0 ? name.substring(dot) : '';
+      for (int i = 2; i < 100; i++) {
+        final candidate = _join(dirPath, '$stem ($i)$ext');
+        if (!File(candidate).existsSync()) {
+          targetPath = candidate;
+          break;
+        }
+      }
+    }
+
+    // 临时文件：下载完成后改为正式名
+    final tmpPath = '$targetPath.part';
+    final tmpFile = File(tmpPath);
+
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 30),
+        headers: {'User-Agent': 'GradeMonitor-UpdateDownload'},
+        followRedirects: true,
+        validateStatus: (status) => status != null && status < 400,
+      ),
+    );
+    try {
+      await dio.download(
+        asset.url,
+        tmpPath,
+        onReceiveProgress: onProgress,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final tmp = File(tmpPath);
+      if (!tmp.existsSync()) {
+        throw Exception('下载未完成（临时文件丢失）');
+      }
+      tmp.renameSync(targetPath);
+      _log.info('更新包已下载: $targetPath');
+      return targetPath;
+    } catch (e) {
+      if (tmpFile.existsSync()) {
+        try {
+          tmpFile.deleteSync();
+        } catch (_) {}
+      }
+      _log.warning('下载更新包失败: $e');
+      rethrow;
+    } finally {
+      dio.close();
+    }
+  }
+
+  String _join(String dir, String name) =>
+      '$dir${Platform.pathSeparator}$name';
+
+  /// 在系统文件管理器中显示已下载的文件 / 文件夹
+  Future<void> revealInFileManager(String path) async {
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', ['-R', path]);
+      } else if (Platform.isWindows) {
+        // Windows: 打开所在文件夹（explorer /select 对含空格参数不可靠）
+        final dir = Directory(path).existsSync()
+            ? path
+            : path.substring(0, path.lastIndexOf('\\') + 1);
+        await Process.run('explorer', <String>[dir]);
+      } else {
+        await Process.run('xdg-open', <String>[path]);
+      }
+    } catch (e) {
+      _log.warning('打开文件夹失败: $e');
     }
   }
 

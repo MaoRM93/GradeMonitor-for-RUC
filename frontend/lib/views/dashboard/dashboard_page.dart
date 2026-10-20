@@ -162,7 +162,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(28),
+          padding: const EdgeInsets.fromLTRB(28, 44, 28, 28),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -407,7 +407,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final cs = Theme.of(context).colorScheme;
     final valueStyle = TextStyle(
       fontSize: 68,
-      fontWeight: FontWeight.w600,
+      fontWeight: FontWeight.w400,
       height: 1.0,
       letterSpacing: -1.5,
       color: cs.onSurface,
@@ -419,14 +419,14 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 22, color: iconColor),
-          const SizedBox(height: 6),
+          Icon(icon, size: 44, color: iconColor),
+          const SizedBox(height: 10),
           Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12.5,
+              fontSize: 18.75,
               fontWeight: FontWeight.w600,
               color: cs.onSurface.withValues(alpha: .5),
             ),

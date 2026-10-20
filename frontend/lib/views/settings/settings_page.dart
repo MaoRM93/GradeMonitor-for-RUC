@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/service/tray_service.dart';
@@ -291,75 +292,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   void _showUpdateDialog(UpdateCheckResult result) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.upgrade_rounded, color: AppTheme.success, size: 24),
-            const SizedBox(width: 10),
-            const Text('发现新版本'),
-          ],
-        ),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '新版本 ${result.latestVersion} 已发布，'
-                '当前版本 $_versionDisplay。',
-                style: const TextStyle(fontSize: 14, height: 1.5),
-              ),
-              if (result.releaseNotes.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Container(
-                  constraints: const BoxConstraints(maxHeight: 200),
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      ctx,
-                    ).colorScheme.surfaceContainerHighest.withValues(alpha: .5),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      result.releaseNotes,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.5,
-                        color: Theme.of(
-                          ctx,
-                        ).colorScheme.onSurface.withValues(alpha: .7),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('稍后再说'),
-          ),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              UpdateService().openInBrowser(
-                '${UpdateService.repoUrl}/releases/latest',
-              );
-            },
-            icon: const Icon(Icons.download_rounded, size: 18),
-            label: const Text('前往下载'),
-          ),
-        ],
-      ),
-    );
+    showDialog<void>(context: context, builder: (_) => _UpdateInfoDialog(result: result));
   }
+
 
   @override
   void dispose() {
@@ -396,7 +331,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
+          padding: const EdgeInsets.fromLTRB(28, 44, 28, 40),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -866,6 +801,295 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 「发现新版本」弹窗：
+/// - 更新日志以 Markdown 渲染（配合 flutter_markdown_plus）
+/// - 支持应用内直接下载安装包（不跳转浏览器），带进度与完成后定位
+class _UpdateInfoDialog extends StatefulWidget {
+  final UpdateCheckResult result;
+  const _UpdateInfoDialog({required this.result});
+
+  @override
+  State<_UpdateInfoDialog> createState() => _UpdateInfoDialogState();
+}
+
+enum _DownloadPhase { idle, downloading, done, failed }
+
+class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
+  late final ReleaseAsset? _asset = UpdateService().pickPlatformAsset(
+    widget.result.assets,
+  );
+
+  _DownloadPhase _phase = _DownloadPhase.idle;
+  double _progress = 0; // 0..1
+  String? _savedPath;
+  String _errorText = '';
+
+  bool get _notesEmpty => widget.result.releaseNotes.trim().isEmpty;
+
+  /// 当前版本号文案（弹窗独立于设置页类，需自行计算）
+  String get _versionDisplay {
+    final v = UpdateService().currentVersion;
+    return v.isEmpty ? '…' : v;
+  }
+
+  /// 未找到本平台安装包时可退回浏览器下载
+  bool get _browserOnly => _asset == null && !(_phase == _DownloadPhase.done);
+
+  Future<void> _startDownload() async {
+    if (_asset == null || _phase == _DownloadPhase.downloading) return;
+    setState(() {
+      _phase = _DownloadPhase.downloading;
+      _errorText = '';
+      _progress = 0;
+    });
+    try {
+      final path = await UpdateService().downloadRelease(
+        _asset,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() => _progress = total > 0 ? received / total : 0);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _phase = _DownloadPhase.done;
+        _savedPath = path;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _DownloadPhase.failed;
+        _errorText = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.upgrade_rounded, color: AppTheme.success, size: 24),
+          const SizedBox(width: 10),
+          const Text('发现新版本'),
+        ],
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '新版本 ${widget.result.latestVersion} 已发布，'
+              '当前版本 $_versionDisplay。',
+              style: const TextStyle(fontSize: 14, height: 1.5),
+            ),
+            if (!_notesEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 240),
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: .5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: SingleChildScrollView(
+                  child: MarkdownBody(
+                    data: widget.result.releaseNotes,
+                    softLineBreak: true,
+                    styleSheet: _mdStyle(context),
+                  ),
+                ),
+              ),
+            ],
+            ..._buildDownloadSection(context),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('稍后再说'),
+        ),
+        // 本平台无安装包时，浏览器是唯一途径；有安装包时降为次按钮
+        TextButton(
+          onPressed: () {
+            UpdateService().openInBrowser(
+              '${UpdateService.repoUrl}/releases/latest',
+            );
+          },
+          child: const Text('前往下载页'),
+        ),
+        if (_asset != null)
+          FilledButton.icon(
+            onPressed: _phase == _DownloadPhase.downloading ? null : _onPrimary,
+            icon: _phase == _DownloadPhase.downloading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _phase == _DownloadPhase.done
+                        ? Icons.folder_open_rounded
+                        : _phase == _DownloadPhase.failed
+                        ? Icons.refresh_rounded
+                        : Icons.download_rounded,
+                    size: 18,
+                  ),
+            label: Text(
+              _phase == _DownloadPhase.downloading
+                  ? '正在下载…'
+                  : _phase == _DownloadPhase.done
+                  ? '打开所在文件夹'
+                  : _phase == _DownloadPhase.failed
+                  ? '重试下载'
+                  : '直接下载',
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 主按钮行为随阶段变化
+  Future<void> _onPrimary() async {
+    if (_phase == _DownloadPhase.idle || _phase == _DownloadPhase.failed) {
+      await _startDownload();
+    } else if (_phase == _DownloadPhase.done && _savedPath != null) {
+      await UpdateService().revealInFileManager(_savedPath!);
+    }
+  }
+
+  /// 下载进度 / 结果提示区
+  List<Widget> _buildDownloadSection(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final asset = _asset;
+    final nameLabel = asset?.name ?? '';
+    final assetSizeMb = asset != null && asset.size > 0
+        ? '（约 ${(asset.size / 1024 / 1024).toStringAsFixed(1)} MB）'
+        : '';
+    final sub = TextStyle(
+      fontSize: 12.5,
+      height: 1.5,
+      color: cs.onSurface.withValues(alpha: .6),
+    );
+    if (_browserOnly) {
+      return [
+        const SizedBox(height: 10),
+        Text('未找到本平台的自动下载安装包，请通过「前往下载页」手动下载。', style: sub),
+      ];
+    }
+    switch (_phase) {
+      case _DownloadPhase.idle:
+        return [
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(
+                Icons.save_alt_rounded,
+                size: 14,
+                color: cs.onSurface.withValues(alpha: .45),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '将直接下载 $nameLabel$assetSizeMb 到系统的「下载」文件夹',
+                  style: sub,
+                ),
+              ),
+            ],
+          ),
+        ];
+      case _DownloadPhase.downloading:
+        return [
+          const SizedBox(height: 14),
+          LinearProgressIndicator(value: _progress > 0 ? _progress : null),
+          const SizedBox(height: 6),
+          Text(
+            _progress > 0
+                ? '${(_progress * 100).toStringAsFixed(0)}%'
+                : '连接中…',
+            style: sub,
+          ),
+        ];
+      case _DownloadPhase.done:
+        return [
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(Icons.check_circle_rounded, size: 16, color: AppTheme.success),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '已下载到「下载」文件夹：$nameLabel',
+                  style: sub,
+                ),
+              ),
+            ],
+          ),
+        ];
+      case _DownloadPhase.failed:
+        return [
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(Icons.error_outline_rounded, size: 16, color: AppTheme.error),
+              const SizedBox(width: 6),
+              Expanded(child: Text('下载失败：$_errorText', style: sub)),
+            ],
+          ),
+        ];
+    }
+  }
+
+  /// Markdown 样式：贴合弹窗小字排版
+  MarkdownStyleSheet _mdStyle(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final on = cs.onSurface;
+    base(String? weight) => TextStyle(
+      fontSize: 12.5,
+      height: 1.55,
+      fontWeight: weight == null ? FontWeight.w400 : FontWeight.w700,
+      color: on.withValues(alpha: .78),
+    );
+    return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      a: TextStyle(fontSize: 12.5, color: cs.primary, decoration: TextDecoration.underline),
+      p: base(null),
+      h1: base('700').copyWith(fontSize: 18, color: on, height: 1.4),
+      h2: base('700').copyWith(fontSize: 16, color: on, height: 1.4),
+      h3: base('700').copyWith(fontSize: 14.5, color: on, height: 1.4),
+      h4: base('700').copyWith(fontSize: 13.5, color: on),
+      h5: base('700').copyWith(fontSize: 13, color: on),
+      h6: base('700').copyWith(fontSize: 12.5, color: on),
+      strong: base('700').copyWith(color: on),
+      em: base(null).copyWith(fontStyle: FontStyle.italic),
+      listBullet: base(null),
+      blockSpacing: 8,
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: on.withValues(alpha: .18), width: 1),
+        ),
+      ),
+      code: TextStyle(
+        fontSize: 11.5,
+        color: on.withValues(alpha: .9),
+        fontFamily: 'monospace',
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: on.withValues(alpha: .07),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      blockquote: base(null).copyWith(color: on.withValues(alpha: .55)),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(left: BorderSide(color: cs.primary.withValues(alpha: .5), width: 3)),
       ),
     );
   }

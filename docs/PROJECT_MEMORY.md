@@ -67,7 +67,14 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 - **「方案计算」页骨架**（build 150 打包之后新增，未打包）：位于成绩单与设置之间（导航枚举第 3 位，图标 calculate_rounded），`views/scheme/scheme_page.dart`；大标题「方案计算」+小标题「根据您的推免方案计算您的 811 / 82 结果」，主体留空待后续迭代。
 - **「方案计算」页第一轮内容**：红色警示横条（结果仅作参考，需自行核对培养方案/院系方案）+ 蓝色提示横条（免试推荐适用的学业综合成绩计算范围全文，文案用户逐字给定，勿改动字词）+ GlassCard 单选卡「811 方案」「82 方案」（样式 RadioGroup<String>，值 '811'/'82'，未选默认 null；Radio.groupValue/onChanged 旧参数已弃用一律走 RadioGroup）。计算功能主体后续迭代。
 - **新增自更新「退出即装」**（`core/service/update_installer.dart` + `_UpdateInfoDialog`）：下载完成 → 「立即安装并重启」。macOS：`ditto -x -k` 解包（保留 exec 权限位、无 quarantine）→ 安装目录同级暂存 → bash 看守脚本（等旧 PID 退出 → 备份→同卷 rename 原子换包→失败回滚→`open` 重启→清 stage）；App Translocation 或安装目录不可写（如普通用户装 /Applications）自动降级手动。Windows：dart `archive` 解 zip → 找 Inno 安装器 → 中继 install.cmd（`/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS` 因 `[Run] skipifsilent` 由批处理接力 `start` 重启）。安装前显式 `BackendService().stop()`（else 新实例自愈清理 18923）。管线实测：ditto 权限位 + 脚本换包/回滚/清理全部通过（shim 替身避免真启动）。
-- **10-20 已打包交付 build 150**：`GradeMonitor-107.0.0.150-macOS.zip`（20M）+ `GradeMonitor.app` 于桌面。Info 校验：ShortVersion 107.0.0 / CFBundleVersion 150 / id com.grademonitor.app。含今日三项 UI 改动 + md 更新日志 + 应用内直接下载 + 退出即装。注意：150 之前（≤149）用户升级到 150 需手动；150 起自更新可用。
+- **方案计算功能已完成**（build 151）：
+  - 核心绩口径细化：**学分加权**＝Σjd÷Σxf（jd 为单科总绩点＝单科绩点×学分，与成绩单 avgGpa=jd/xf 同源）；有效参与＝白名单 ∩（jd、xf 均可解析且 xf>0）。
+  - 新文件 `views/scheme/scheme_core.dart`：白名单（20项）+ normalize（全半角/空白归一，仅此两类）+ analyze 返回同一课程集合——成绩单筛选与统计共用，保证范围一致。
+  - `GradeCourse` 模型补了 `kclbname` 字段（此前被 fromJson 丢掉）。
+  - 成绩单页：工具栏新增「范围：全部课程/核心绩课程」下拉 + 「核心绩 x.xx（N 门 · 学分加权）」徽章（含 Tooltip 口径说明）；空态文案覆盖核心绩情形。
+  - 方案计算页：单选 811/82（各带算式小字）；核心绩卡（自动预填 2 位小数，双击自定义，恢复自动按钮，自定义后不再被覆盖）；学术/综合 0–4.0 输入卡（综合仅 811 可用）+ 无效输入红字；结果卡实时算式与总分（40px），无方案时显示 '--'。
+  - 真实数据校验：31 门 / ∑jd=233.40 / ∑xf=64.0 / 核心绩=3.6469（简单平均 3.6613 对比，证伪）。
+- **10-20 已打包交付 build 151**：`GradeMonitor-107.0.0.151-macOS.zip`（20M，含方案计算页全部功能）+ Desktop `GradeMonitor.app`。build 150 zip 保留在桌面未删。
 - 已知限制：Windows 批处理对路径含 `%`/`&` 等非常规字符敏感（用户名正常不受影响）；安装器未签名，个别杀软可能拦截；旧版本（≤149）用户仍需手动覆盖一次，150 起才具备自动安装能力。
 - 当前工作区干净（除本快照文档）。
 

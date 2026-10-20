@@ -15,6 +15,9 @@ class GradeCourse {
   final String xnxq;
   final String kcxz;
 
+  /// 课程类别（kclbname，用于核心绩白名单分类）
+  final String kclbname;
+
   const GradeCourse({
     required this.kth,
     required this.kcname,
@@ -25,6 +28,7 @@ class GradeCourse {
     this.zcj = '',
     this.xnxq = '',
     this.kcxz = '',
+    this.kclbname = '',
   });
 
   /// 平均学分绩点 = jd / xf
@@ -46,6 +50,7 @@ class GradeCourse {
       zcj: json['zcj']?.toString() ?? '',
       xnxq: json['xnxq']?.toString() ?? '',
       kcxz: json['kcxz']?.toString() ?? '',
+      kclbname: json['kclbname']?.toString() ?? '',
     );
   }
 }

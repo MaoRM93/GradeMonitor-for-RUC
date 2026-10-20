@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/grades_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../scheme/scheme_core.dart';
 
 class GradesPage extends ConsumerStatefulWidget {
   const GradesPage({super.key});
@@ -15,6 +16,9 @@ class _GradesPageState extends ConsumerState<GradesPage> {
   String _semester = '全部';
   int _sortColumnIndex = 0;
   bool _sortAscending = true;
+
+  /// 范围筛选：false = 全部课程；true = 核心绩课程（白名单∩有效成绩）
+  bool _scopeCore = false;
 
   int _numCmp(String a, String b) {
     final na = double.tryParse(a) ?? 0;
@@ -53,6 +57,13 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final semesterValue = semesterItems.contains(_semester)
         ? _semester
         : '全部';
+
+    // 核心绩口径：白名单 ∩ 有效课程（与下方核心绩筛选所见课程集合一致）
+    final coreResult = gradesList.isEmpty
+        ? null
+        : CoreGpaUtil.analyze(gradesList);
+    final coreCount = coreResult?.courses.length ?? 0;
+    final coreText = coreResult?.gpaText ?? '-';
 
     return Scaffold(
       body: SafeArea(
@@ -139,6 +150,84 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(width: 12),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '范围：',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurface.withValues(alpha: .6),
+                        ),
+                      ),
+                      DropdownButton<String>(
+                        value: _scopeCore ? 'core' : 'all',
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'all',
+                            child: Text(
+                              '全部课程',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'core',
+                            child: Text(
+                              '核心绩课程',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) => setState(() => _scopeCore = v == 'core'),
+                        underline: const SizedBox(),
+                        isDense: true,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Tooltip(
+                    message: '核心绩＝核心绩课程白名单（按 kclbname 全字匹配）的'
+                        '学分加权平均绩点（Σ绩点÷Σ学分）。'
+                        '统计课程集合与「核心绩课程」筛选所见完全一致。',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.verified_rounded,
+                          size: 15,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '核心绩',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colorScheme.onSurface.withValues(alpha: .6),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          coreText,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          coreCount == 0
+                              ? '（暂无有效课程）'
+                              : '（$coreCount 门 · 学分加权）',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.onSurface.withValues(alpha: .45),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -151,9 +240,19 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   final bySemester = _semester == '全部'
                       ? list
                       : list.where((g) => g.xnxq == _semester).toList();
-                  final filtered = _searchQuery.isEmpty
+                  // 核心绩筛选：白名单 ∩ 有效课程（与统计口径同一集合）
+                  final inScope = _scopeCore
                       ? bySemester
-                      : bySemester
+                            .where(
+                              (g) => (coreResult?.courses ?? const <GradeCourse>[]).contains(
+                                g,
+                              ),
+                            )
+                            .toList()
+                      : bySemester;
+                  final filtered = _searchQuery.isEmpty
+                      ? inScope
+                      : inScope
                             .where(
                               (g) => g.kcname.toLowerCase().contains(
                                 _searchQuery.toLowerCase(),
@@ -164,6 +263,8 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   if (filtered.isEmpty) {
                     final emptyText = _searchQuery.isNotEmpty
                         ? '无匹配结果'
+                        : _scopeCore
+                        ? '核心绩课程在当前筛选下暂无有效成绩'
                         : _semester != '全部'
                         ? '该学期暂无成绩数据'
                         : '暂无成绩数据';

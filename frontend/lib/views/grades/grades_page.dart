@@ -364,129 +364,63 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                     return _sortAscending ? cmp : -cmp;
                   });
 
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                  // 冻结表头：表头表固定，数据表单独垂直滚动（表头不随滚动移动）；
+                  // 两表共用同一列宽配置（DataColumn.columnWidth），保证表头与数据列对齐
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: colorScheme.onSurface.withValues(alpha: .25),
+                      ),
+                    ),
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
-                      child: Container(
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: colorScheme.onSurface.withValues(alpha: .25),
-                          ),
-                        ),
-                        child: DataTable(
-                        sortColumnIndex: _sortColumnIndex,
-                        sortAscending: _sortAscending,
-                        headingRowColor: WidgetStateProperty.all(
-                          colorScheme.surfaceContainerHighest.withValues(
-                            alpha: .5,
-                          ),
-                        ),
-                        headingTextStyle: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: colorScheme.onSurface,
-                        ),
-                        dataTextStyle: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.onSurface,
-                        ),
-                        columnSpacing: 8,
-                        horizontalMargin: 8,
-                        // 表头居中：DataTable 会在标签左侧补排序箭头等宽占位，
-                        // 使"学期↑"这类带排序箭头的表头与数据列对中一致
-                        columns: [
-                          DataColumn(label: const Center(child: Text('学期')), headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('课程名称')), headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('学分')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('平时成绩')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('期末成绩')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('加权成绩')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('绩点')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                          DataColumn(label: const Center(child: Text('平均学分绩点')), numeric: true, headingRowAlignment: MainAxisAlignment.center, onSort: (i, asc) => setState(() { _sortColumnIndex = i; _sortAscending = asc; })),
-                        ],
-                        rows: sorted
-                            .map(
-                              (course) => DataRow(
-                                cells: [
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.xnxq.isEmpty ? '-' : course.xnxq,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxWidth: 200,
-                                        ),
-                                        child: Text(
-                                          course.kcname,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.xf.isEmpty ? '-' : course.xf,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.cjxm1.isEmpty
-                                            ? '-'
-                                            : course.cjxm1,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.cjxm3.isEmpty
-                                            ? '-'
-                                            : course.cjxm3,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.zcj.isEmpty ? '-' : course.zcj,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.jd.isEmpty ? '-' : course.jd,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    Center(
-                                      child: Text(
-                                        course.avgGpa,
-                                        style: _gpaStyle(
-                                          course.avgGpa,
-                                          colorScheme,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                      scrollDirection: Axis.horizontal,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 表头（固定，不随数据滚动）
+                          DataTable(
+                            sortColumnIndex: _sortColumnIndex,
+                            sortAscending: _sortAscending,
+                            headingRowColor: WidgetStateProperty.all(
+                              colorScheme.surfaceContainerHighest.withValues(
+                                alpha: .5,
                               ),
-                            )
-                            .toList(),
-                        ),
+                            ),
+                            headingTextStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: colorScheme.onSurface,
+                            ),
+                            columnSpacing: 8,
+                            horizontalMargin: 8,
+                            columns: _headColumns,
+                            rows: const [],
+                          ),
+                          // 数据区（仅该区域垂直滚动，表头恒定在上方）
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: DataTable(
+                                headingRowHeight: 0,
+                                dataTextStyle: TextStyle(
+                                  fontSize: 12,
+                                  color: colorScheme.onSurface,
+                                ),
+                                columnSpacing: 8,
+                                horizontalMargin: 8,
+                                columns: _bodyColumns,
+                                rows: sorted
+                                    .map(
+                                      (course) =>
+                                          _dataRow(course, colorScheme),
+                                    )
+                                    .toList(),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   );
@@ -503,6 +437,93 @@ class _GradesPageState extends ConsumerState<GradesPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // ---------- 成绩表：冻结表头（表头表 + 数据表共用列宽） ----------
+
+  void _handleSort(int i, bool asc) {
+    setState(() {
+      _sortColumnIndex = i;
+      _sortAscending = asc;
+    });
+  }
+
+  /// 表头列：显式列宽，与数据表共用同一组列宽配置
+  DataColumn _headCol(
+    String label, {
+    TableColumnWidth? width,
+    bool numeric = false,
+  }) {
+    return DataColumn(
+      label: Center(child: Text(label)),
+      numeric: numeric,
+      headingRowAlignment: MainAxisAlignment.center,
+      columnWidth: width,
+      onSort: _handleSort,
+    );
+  }
+
+  /// 列宽为「表头固有宽度（label+36 排序箭头区+pads）」计算所得的定值：
+  /// 两表均用 FixedColumnWidth（横向滚动上下文中 flex 列不生长，IntrinsicColumnWidth
+  /// 会使表头表/数据表分别按各自内容量宽，导致列错位）。
+  List<DataColumn> get _headColumns => [
+    _headCol('学期', width: const FixedColumnWidth(150)),
+    _headCol('课程名称', width: const FixedColumnWidth(200)),
+    _headCol('学分', width: const FixedColumnWidth(72), numeric: true),
+    _headCol('平时成绩', width: const FixedColumnWidth(96), numeric: true),
+    _headCol('期末成绩', width: const FixedColumnWidth(96), numeric: true),
+    _headCol('加权成绩', width: const FixedColumnWidth(96), numeric: true),
+    _headCol('绩点', width: const FixedColumnWidth(72), numeric: true),
+    _headCol('平均学分绩点', width: const FixedColumnWidth(124), numeric: true),
+  ];
+
+  /// 数据表列：隐形表头（空 label、不可排序、0 高），仅用于与表头共用列宽
+  List<DataColumn> get _bodyColumns => [
+    for (final TableColumnWidth width in const [
+      FixedColumnWidth(150),
+      FixedColumnWidth(200),
+      FixedColumnWidth(72),
+      FixedColumnWidth(96),
+      FixedColumnWidth(96),
+      FixedColumnWidth(96),
+      FixedColumnWidth(72),
+      FixedColumnWidth(124),
+    ])
+      DataColumn(label: const SizedBox.shrink(), columnWidth: width),
+  ];
+
+  DataRow _dataRow(GradeCourse course, ColorScheme cs) {
+    return DataRow(
+      cells: [
+        DataCell(Center(child: Text(course.xnxq.isEmpty ? '-' : course.xnxq))),
+        DataCell(
+          Center(
+            child: SizedBox(
+              width: 200,
+              child: Text(
+                course.kcname,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ),
+        DataCell(Center(child: Text(course.xf.isEmpty ? '-' : course.xf))),
+        DataCell(
+          Center(child: Text(course.cjxm1.isEmpty ? '-' : course.cjxm1)),
+        ),
+        DataCell(
+          Center(child: Text(course.cjxm3.isEmpty ? '-' : course.cjxm3)),
+        ),
+        DataCell(Center(child: Text(course.zcj.isEmpty ? '-' : course.zcj))),
+        DataCell(Center(child: Text(course.jd.isEmpty ? '-' : course.jd))),
+        DataCell(
+          Center(
+            child: Text(course.avgGpa, style: _gpaStyle(course.avgGpa, cs)),
+          ),
+        ),
+      ],
     );
   }
 

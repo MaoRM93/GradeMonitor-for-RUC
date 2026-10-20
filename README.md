@@ -1,6 +1,6 @@
 # GradeMonitor — 适用于 RUC 教务系统的成绩自动监控工具
 
-现已推出：macOS端的2026年秋季更新 108.0.0.100 版本。Windows 端正在开发中，敬请期待。
+现已推出：macOS端的2026年秋季更新 108.0.0.100 版本。Windows 端正在开发中，请您继续使用 107.0.0.125 LTS 版本，更新敬请期待。
 相较于以前的 6.0 和 107.0 系列版本，这一大版本重新构思了程序设计，优化了用户体验，并增加了一系列实用工具。
 
 GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测工具，安装后根据你的设置在后台工作，出分了就发通知告诉你，省下大把刷网页的时间。
@@ -23,13 +23,13 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 ### 仪表板显示更直观
 - 在首页简单、直观地显示各项数据指标与最新的一门成绩，界面美观清晰
-- <img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/d385ae01-13de-4bac-bb69-6eb1d45dd45a" />
+<img width="1604" height="1052" alt="image" src="https://github.com/user-attachments/assets/1492fcb3-51c8-4cb2-83e6-0e9a1366cc0e" />
+
 
 ### 自动监测更科学
 - 支持**成绩监测**和**排名监测**，可独立开关
 - 可设定监测时间窗口（如 08:00–23:00），深夜不打扰，窗口外自动休眠
 - 监测间隔可自定义（300–3600 秒），避免对学校服务器造成过大负担
-<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/525e0980-2d22-42c4-8350-cc2c9baa640e" />
 - 支持添加随机查询，降低账号风险
 
 ### 通知推送更贴心

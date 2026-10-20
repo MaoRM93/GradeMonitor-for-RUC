@@ -55,6 +55,10 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 - 洪泛抠图脚本若从**原始素材**重新导入会覆盖掉放大版——先抠后放大的顺序必须保持在同一脚本里。
 - 欢迎页"不显示"多半是数据态（用户点完「好」→ welcome_completed=true）而非代码错；`show_welcome_always` 可用开发者面板（三击版本号）切换。
 
+- **成绩单冻结表头（2026-10-20 定案）**：`PaginatedDataTable` 不可用于「全部行单页 + 冻结表头」（其数据区不是滚动视口、行多直接溢出，且自带 Card 装饰）。正解：表头 `DataTable(rows: const [], ...)` + 数据表 `DataTable(headingRowHeight: 0, columns: 空 label 且 onSort: null, ...)` 放进垂直滚动区；两表共用同一组 `DataColumn(columnWidth: FixedColumnWidth(W))` 定宽——**禁用 IntrinsicColumnWidth/flex**（外层横向滚动上下文宽度无界，flex 列不生长，两表各自按内容量宽导致列错位）。
+- **CJK 次像素量宽**：fontSize 12 的中文字形实际 advance >12.0（bold 更宽）。排序表头固有宽 = label + 18（前置占位 arrowIconSize16+padding2）+ 16（箭头）+ 2（尾距）+ 单元格 padding 8（首/末列 12）；FixedColumnWidth 必须 ≥ 该值另留余量（首次 68/92/120 全溢出 0.5–1.5px，加到 72/96/124 后通过）。
+- **布局冒烟诀窍**：临时复刻一份 widget test（相同表格参数 + `setSurfaceSize`）即可抓运行时断言/溢出帧，并用 `getSize`/`getRect` 验两表等宽与列对齐；跑完即删，不污染 analyze 基线。
+
 ## analyze 基线
 
 干净基线 ~12 条 info/warning 均为合并遗留（tray_service `_quitApp` 未用、settings_page `_prevShowMenubarIcon` 未用等），勿当新 bug 修。
@@ -129,6 +133,8 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 - GitHub 首页 `logs/` 行文案。
 - 正式发版时确认 tag：`git tag -f 107.0.0.156 && git push -f origin 107.0.0.156`。
 - **10-20 第五轮已交付 build 155**：修方案页布局崩溃（811/82 两列 Row 的 `CrossAxisAlignment.stretch` 在 SingleChildScrollView 无界高度下抛异常，release 化为灰盒吞掉「方案」之后的全部内容——剔除非 stretch 修复）；欢迎页步骤切换动画丝滑化（外层 `AnimatedSize` 平滑页面高度差 + 位移 0.02→0.04 + 300ms in/out 双 easeOutCubic + layoutBuilder 顶对齐叠放）。桌面 app(50.3MB) + `GradeMonitor-107.0.0.155-macOS.zip`(21M)，Info 校验 107.0.0/155 ✓；清场照例（首启需重新登录）。**教训：垂直滚动容器内禁用 Row stretch**。
+- **10-20 第六轮已交付 build 156**：成绩单搜索框降高（isDense + 图标约束 34 + hint 12px）对齐下拉框、表格密度收窄（spacing8/margin8/字号12/内边距12）、方案页 811/82 单选去灰框、核心绩/学术/综合三卡并排一行（卡 padding 16、数值 16、「恢复自动」瘦身）。铁律清场后打包 Desktop app(50.3MB) + `GradeMonitor-107.0.0.156-macOS.zip`(21M)，Info 校验 107.0.0/156 ✓，首启需重新登录。本地提交 `fd816c3` + `c072395`（未推送）。
+- **10-20 第七轮（commit `a8b779c`，未打包）**：用户反馈「成绩单行显示不全/奇怪截断 + 滚动时表头跟着走」→ 成绩单表格重构为**冻结表头**（方案见历史教训「冻结表头」条）；边框卡固定不再整体滚出视野，表头表 + 数据表共用定宽列（学期150/课程名200/学分72/平时96/期末96/加权96/绩点72/平均绩点124，总宽 906，适配默认窗口内容区 ~966）。widget 冒烟验证：零异常、两表 906.0 等宽、列中心 ±2px 对齐。**等用户确认后再打包 build 157**。
 - **10-20 第二轮改动已交付 build 152**：打包前铁律清场（桌面旧 `GradeMonitor.app`+150/151 zip 已删、`/Applications` 卸载、Application Support 登录/成绩数据清除、flutter clean）；产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.152-macOS.zip`(21M)，Info 校验 107.0.0 / 152 通过。**首启为全新状态，需重新登录**。
 
 ## 2026-10-20 第三轮：PF 剔除规则 + 提示条关闭 + 方案页文案重构 + 双击 bug

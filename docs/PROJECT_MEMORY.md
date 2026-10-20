@@ -1,6 +1,6 @@
 # GradeMonitor 项目记忆（Project Memory）
 
-> 供跨会话延续上下文。最后更新：2026-10-19 · 版本 107.0.0+149
+> 供跨会话延续上下文。最后更新：2026-10-20 · 版本 107.0.0+149 · 环境 10-20 已彻底清场（v149 卸载 + 缓存/数据清零）
 
 ## 项目概览
 
@@ -23,15 +23,16 @@
 
 ## 用户铁律（必须遵守）
 
-1. **每次打包新版本前，彻底清除上一版所有残留，包括已保存的登录信息**：
+1. **没有明确要求，绝不碰 GitHub**：一切工作只在本地。本地 commit 可以；push / tag / release 必须先获得用户明确指令。
+2. **每次打包新版本前，彻底清除上一版所有残留，包括已保存的登录信息**：
    ```bash
    rm -rf "/Users/admin/Library/Application Support/GradeMonitor"
    find ~/Library/Caches ~/Library/"Saved Application State" ~/Library/HTTPStorages ~/Library/Preferences -maxdepth 1 -iname "*grade*" -exec rm -rf {} +
    ```
    （zsh 通配符不匹配会中断整条命令，用 find，勿用裸 glob）
-2. 图标一律**线条式** Material 图标（`*_outlined`/`*_rounded` 勾线类），**拒绝底色块**。
-3. 设置页图标无底色，图形左缘与标题首字左缘对齐（墨迹偏移：person/notifications 10.4、settings 5.9、task_alt/balance 5.3 @64px，`_setupIcon(cs, icon, {inkShift})`）。
-4. 布局：内容组整体居中、组内左对齐；默认 1100×720 一屏少滚动。
+3. 图标一律**线条式** Material 图标（`*_outlined`/`*_rounded` 勾线类），**拒绝底色块**。
+4. 设置页图标无底色，图形左缘与标题首字左缘对齐（墨迹偏移：person/notifications 10.4、settings 5.9、task_alt/balance 5.3 @64px，`_setupIcon(cs, icon, {inkShift})`）。
+5. 布局：内容组整体居中、组内左对齐；默认 1100×720 一屏少滚动。
 
 ## 常用工作流
 
@@ -57,6 +58,12 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 ## analyze 基线
 
 干净基线 ~12 条 info/warning 均为合并遗留（tray_service `_quitApp` 未用、settings_page `_prevShowMenubarIcon` 未用等），勿当新 bug 修。
+
+## 2026-10-20 快照
+
+- 曾推进 `107.1.0+150` beta.1（提交 `4eff701` **已在远程**），随后用户**有意回退**：本地提交 `d80d442` Revert（未推送）。CHANGELOG.md 已移除，版本停在 107.0.0+149。107.1.0 材料（CHANGELOG 文案）可从 `git show 4eff701:CHANGELOG.md` 找回。
+- 清场记录（已完成）：`/Applications/GradeMonitor.app`、`Application Support/GradeMonitor`、Caches/Preferences/HTTPStorages 内 *grade* 残留、`Application Scripts/com.example.gradeMonitor` 全部删除，`flutter clean` 完成。`Containers/com.example.gradeMonitor` 仅剩 32K 系统 metadata（containermanagerd 保护，自动回收，无用户数据）。
+- 当前工作区干净（除本快照文档）。
 
 ## 待办 / 可选迭代
 

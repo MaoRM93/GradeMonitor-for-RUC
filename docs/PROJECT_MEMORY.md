@@ -127,7 +127,7 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 
 - 欢迎页各步骤语言表达精修（用户未再提）。
 - GitHub 首页 `logs/` 行文案。
-- 正式发版时确认 tag：`git tag -f 107.0.0.155 && git push -f origin 107.0.0.155`。
+- 正式发版时确认 tag：`git tag -f 107.0.0.156 && git push -f origin 107.0.0.156`。
 - **10-20 第五轮已交付 build 155**：修方案页布局崩溃（811/82 两列 Row 的 `CrossAxisAlignment.stretch` 在 SingleChildScrollView 无界高度下抛异常，release 化为灰盒吞掉「方案」之后的全部内容——剔除非 stretch 修复）；欢迎页步骤切换动画丝滑化（外层 `AnimatedSize` 平滑页面高度差 + 位移 0.02→0.04 + 300ms in/out 双 easeOutCubic + layoutBuilder 顶对齐叠放）。桌面 app(50.3MB) + `GradeMonitor-107.0.0.155-macOS.zip`(21M)，Info 校验 107.0.0/155 ✓；清场照例（首启需重新登录）。**教训：垂直滚动容器内禁用 Row stretch**。
 - **10-20 第二轮改动已交付 build 152**：打包前铁律清场（桌面旧 `GradeMonitor.app`+150/151 zip 已删、`/Applications` 卸载、Application Support 登录/成绩数据清除、flutter clean）；产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.152-macOS.zip`(21M)，Info 校验 107.0.0 / 152 通过。**首启为全新状态，需重新登录**。
 

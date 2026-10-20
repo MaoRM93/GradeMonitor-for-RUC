@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../dashboard/dashboard_page.dart';
 import '../grades/grades_page.dart';
+import '../scheme/scheme_page.dart';
 import '../settings/settings_page.dart';
 import '../welcome/welcome_flow.dart';
 import '../../core/service/update_service.dart';
@@ -14,6 +15,7 @@ import '../../widgets/toast_host.dart';
 enum NavDestination {
   dashboard(icon: Icons.dashboard_rounded, label: '仪表板'),
   grades(icon: Icons.school_rounded, label: '成绩单'),
+  scheme(icon: Icons.calculate_rounded, label: '方案计算'),
   settings(icon: Icons.settings_rounded, label: '系统设置');
 
   final IconData icon;
@@ -178,6 +180,8 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
         return const DashboardPage();
       case NavDestination.grades:
         return const GradesPage();
+      case NavDestination.scheme:
+        return const SchemePage();
       case NavDestination.settings:
         return const SettingsPage();
     }

@@ -31,3 +31,6 @@ build/
 
 # IDE
 .vscode/
+
+# AI 跨会话记忆：仅本地保留，不进公开仓库（远端已删除，勿再提交）
+docs/PROJECT_MEMORY.md

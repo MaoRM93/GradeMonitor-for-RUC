@@ -296,7 +296,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     showDialog<void>(context: context, builder: (_) => _UpdateInfoDialog(result: result));
   }
 
-
   @override
   void dispose() {
     _usernameCtrl.dispose();
@@ -807,6 +806,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
+/// 自动检查（开启程序/每小时）发现新版本时由主壳调用，弹同一个更新弹窗
+void showUpdateFoundDialog(BuildContext context, UpdateCheckResult result) {
+  showDialog<void>(context: context, builder: (_) => _UpdateInfoDialog(result: result));
+}
+
 /// 「发现新版本」弹窗：
 /// - 更新日志以 Markdown 渲染（配合 flutter_markdown_plus）
 /// - 支持应用内直接下载安装包（不跳转浏览器），带进度与完成后定位
@@ -924,13 +928,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: Row(
-        children: [
-          Icon(Icons.upgrade_rounded, color: AppTheme.success, size: 24),
-          const SizedBox(width: 10),
-          const Text('发现新版本'),
-        ],
-      ),
+      title: const Text('发现新版本'),
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480),
         child: Column(

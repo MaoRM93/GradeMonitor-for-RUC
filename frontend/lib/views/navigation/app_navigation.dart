@@ -41,20 +41,38 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   /// welcome=欢迎向导展示中，main=进入主界面
   String _welcomePhase = 'checking';
 
+  /// 本会话是否已自动弹过「发现新版本」（避免每小时重复打扰）
+  bool _autoUpdatePrompted = false;
+
   @override
   void initState() {
     super.initState();
     // 监听窗口事件（同步最大化状态给标题栏按钮图标）
     windowManager.addListener(this);
+    // 自动检查（开启程序/每小时）发现更新 → 弹「发现新版本」
+    UpdateService.updateFound.addListener(_onAutoUpdateFound);
     // 首帧渲染后再检查欢迎页，确保 context 可用
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkWelcomeWithRetry();
+      // 启动时的静默检查可能在监听挂上前已完成，补查一次
+      _onAutoUpdateFound();
     });
+  }
+
+  /// 自动检查发现新版本：欢迎流程结束后弹一次（每会话至多一次）
+  void _onAutoUpdateFound() {
+    final result = UpdateService.updateFound.value;
+    if (result == null || _autoUpdatePrompted) return;
+    if (_welcomePhase != 'main') return;
+    if (!mounted) return;
+    _autoUpdatePrompted = true;
+    showUpdateFoundDialog(context, result);
   }
 
   @override
   void dispose() {
     windowManager.removeListener(this);
+    UpdateService.updateFound.removeListener(_onAutoUpdateFound);
     super.dispose();
   }
 
@@ -241,7 +259,11 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                 : _welcomePhase == 'welcome'
                 // 欢迎向导占满标题栏以下整个窗口（iPhone 激活式逐页设置）
                 ? WelcomeFlow(
-                    onCompleted: () => setState(() => _welcomePhase = 'main'),
+                    onCompleted: () {
+                      setState(() => _welcomePhase = 'main');
+                      // 欢迎流程中若静默检查已发现更新，进入主界面后补弹
+                      _onAutoUpdateFound();
+                    },
                   )
                 : Row(
               children: [

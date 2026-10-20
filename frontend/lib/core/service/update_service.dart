@@ -117,6 +117,7 @@ class UpdateService {
   final _log = AppLogger('update');
   late final Dio _dio;
   Timer? _abuseTimer;
+  Timer? _updateTimer;
   bool _checking = false;
 
   /// 防滥用滑动窗口
@@ -125,6 +126,11 @@ class UpdateService {
 
   /// 全局禁用状态（static）：main.dart 监听后自动切换到禁用页
   static final ValueNotifier<bool> disabled = ValueNotifier<bool>(false);
+
+  /// 自动检查（启动/每小时）发现新版本时的广播：主壳监听后弹出更新弹窗。
+  /// 手动检查不写入（设置页自己处理 UI）。
+  static final ValueNotifier<UpdateCheckResult?> updateFound =
+      ValueNotifier<UpdateCheckResult?>(null);
 
   /// 运行时完整版本号（如 108.1.0.100），未加载完成时为空字符串
   String _currentVersion = '';
@@ -142,8 +148,15 @@ class UpdateService {
       _log.warning('读取应用版本失败: $e');
     }
 
-    // 静默检查：仅用于远程停用开关等无需提示的场景
+    // 静默检查：开启程序时检查一次（发现更新时经 updateFound 广播弹窗）
     unawaited(checkForUpdate(silent: true));
+
+    // 之后每小时静默检查一次
+    _updateTimer?.cancel();
+    _updateTimer = Timer.periodic(
+      const Duration(hours: 1),
+      (_) => unawaited(checkForUpdate(silent: true)),
+    );
 
     // 后端滥用标记轮询
     _abuseTimer?.cancel();
@@ -265,16 +278,18 @@ class UpdateService {
           }
 
           final hasUpdate = _isNewer(latestVersion, _currentVersion);
-          if (hasUpdate && !silent) {
-            _log.info('发现新版本: $latestVersion（当前 $_currentVersion）');
-          }
-          return UpdateCheckResult(
+          final result = UpdateCheckResult(
             ok: true,
             hasUpdate: hasUpdate,
             latestVersion: latestVersion,
             releaseNotes: releaseNotes,
             assets: assets,
           );
+          if (hasUpdate) {
+            _log.info('发现新版本: $latestVersion（当前 $_currentVersion）');
+            if (silent) updateFound.value = result;
+          }
+          return result;
         } catch (e) {
           lastError = e;
           if (!silent) _log.warning('检查更新失败（第 ${attempt + 1} 次）: $e');

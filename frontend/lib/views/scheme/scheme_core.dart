@@ -32,9 +32,11 @@ class CoreGpaResult {
 class CoreGpaUtil {
   CoreGpaUtil._();
 
-  /// kclbname 白名单（逐字原样，勿增删改）
+  /// kclbname 白名单（逐字原样，勿增删改）。
+  /// 用户 2026-10-20 决定：'思想政治理论课' **整类排除**——其中的思政实践课
+  /// 为 P（通过制，绩点 1.0）不得计入核心绩；
+  /// 与官方系统核对一致（30 门 / 学分加权 3.73）。
   static const List<String> whitelist = <String>[
-    '思想政治理论课',
     '思政课',
     '大学外语',
     '大学外语（拓展类课程）',

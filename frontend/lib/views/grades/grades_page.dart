@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/grades_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/note_banner.dart';
 import '../scheme/scheme_core.dart';
 
 class GradesPage extends ConsumerStatefulWidget {
@@ -94,6 +95,18 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                     color: colorScheme.onSurface.withValues(alpha: .5),
                   ),
                 ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
+              child: NoteBanner.warning(
+                title: '注意',
+                text:
+                    '由于学校培养方案持续更新，不同年级、专业的课程类别与培养要求可能存在差异，'
+                    '且培养方案中的课程分类与教务系统实际记录的字段可能不完全对应，'
+                    '因此本功能的核心绩筛选及平均学分绩点计算结果可能存在一定误差，仅供参考。'
+                    '请以学校及学院发布的正式文件和教务系统核算结果为准，'
+                    '并自行核验相关课程的纳入范围及计算结果。',
               ),
             ),
             Padding(

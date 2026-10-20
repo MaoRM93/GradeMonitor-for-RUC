@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/grades_provider.dart';
 import '../../widgets/glass_card.dart';
+import '../../widgets/note_banner.dart';
 import 'scheme_core.dart';
 
 /// 「方案计算」页：根据推免方案计算 811 / 82 结果。
@@ -43,6 +44,9 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   /// 当前是否处于核心绩可编辑状态（双击进入）
   bool _coreEditing = false;
 
+  /// 计算结果精度开关：true = 5 位小数（不足补 0），false = 保留 2 位
+  bool _precise5 = false;
+
   @override
   void initState() {
     super.initState();
@@ -63,9 +67,13 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     if (_coreCustom || _coreEditing) return;
     final grades = ref.read(gradesProvider).asData?.value;
     final gpa = grades == null ? null : CoreGpaUtil.analyze(grades).gpa;
-    final text = gpa == null ? '' : gpa.toStringAsFixed(2);
+    final text = gpa == null ? '' : _formatGpa(gpa);
     if (_coreCtrl.text != text) _coreCtrl.text = text;
   }
+
+  /// 数值展示：按精度开关输出 2 位或 5 位（toStringAsFixed 自动补 0）
+  String _formatGpa(double v) =>
+      _precise5 ? v.toStringAsFixed(5) : v.toStringAsFixed(2);
 
   // ---------- 数值解析 ----------
 
@@ -84,7 +92,15 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     return _parseScore(t) == null;
   }
 
-  double? get _coreValue => _parseScore(_coreCtrl.text);
+  double? get _coreValue {
+    // 自动模式下用全精度核心绩参与计算（页面展示值可能仅 2 位）
+    if (!_coreCustom) {
+      final grades = ref.read(gradesProvider).asData?.value;
+      final gpa = grades == null ? null : CoreGpaUtil.analyze(grades).gpa;
+      if (gpa != null) return gpa;
+    }
+    return _parseScore(_coreCtrl.text);
+  }
   double? get _academicValue => _parseScore(_academicCtrl.text);
   double? get _comprehensiveValue => _parseScore(_comprehensiveCtrl.text);
 
@@ -113,9 +129,9 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     final gradesData = ref.watch(gradesProvider).asData?.value;
     if (gradesData != null) {
       final gpa = CoreGpaUtil.analyze(gradesData).gpa;
-      final text = gpa == null ? '' : gpa.toStringAsFixed(2);
+      final text = gpa == null ? '' : _formatGpa(gpa);
       if (_coreCtrl.text != text) _coreCtrl.text = text;
-      }
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -134,16 +150,16 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               ),
               const SizedBox(height: 6),
               Text(
-                '根据您的推免方案计算您的 811 / 82 结果',
+                '根据您的实际情况计算您的 811/82 结果',
                 style: TextStyle(
                   fontSize: 14,
                   color: colorScheme.onSurface.withValues(alpha: .5),
                 ),
               ),
               const SizedBox(height: 20),
-              _buildWarningBanner(colorScheme),
+              _buildWarningBanner(),
               const SizedBox(height: 12),
-              _buildInfoBanner(colorScheme),
+              _buildInfoBanner(),
               const SizedBox(height: 16),
               _buildSchemeChooser(colorScheme),
               const SizedBox(height: 16),
@@ -162,63 +178,16 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   // ---------- 顶部提示 ----------
 
   /// 红色警示：结果仅作参考，需自行核对培养方案与院系方案
-  Widget _buildWarningBanner(ColorScheme cs) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 11),
-      decoration: BoxDecoration(
-        color: AppTheme.error.withValues(alpha: .08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.warning_amber_rounded, size: 18, color: AppTheme.error),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '计算结果仅作为参考，请务必自行核对培养方案与院系方案的要求后再使用。',
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.5,
-                color: AppTheme.error.withValues(alpha: .92),
-              ),
-            ),
-          ),
-        ],
-      ),
+  Widget _buildWarningBanner() {
+    return const NoteBanner.warning(
+      title: '注意',
+      text: '计算结果仅作为参考，请务必自行核对培养方案与院系方案的要求后再使用。',
     );
   }
 
   /// 蓝色提示：免试推荐适用的学业综合成绩计算范围
-  Widget _buildInfoBanner(ColorScheme cs) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 11),
-      decoration: BoxDecoration(
-        color: cs.primary.withValues(alpha: .08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cs.primary.withValues(alpha: .3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline_rounded, size: 18, color: cs.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _infoText,
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.55,
-                color: cs.onSurface.withValues(alpha: .8),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  Widget _buildInfoBanner() {
+    return NoteBanner.info(title: '提示', text: _infoText);
   }
 
   // ---------- 方案单选 ----------
@@ -362,7 +331,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               controller: _coreCtrl,
               enabled: _coreEditing,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              maxLength: 4,
+              maxLength: 8,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
@@ -456,7 +425,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             decoration: InputDecoration(
               counterText: '',
               hintText: enabled
-                  ? (filled ? null : '如 3.75（未填则不计结果）')
+                  ? (filled ? null : '如 3.70（未填则不计结果）')
                   : '综合能力不参与 82 方案',
               hintStyle: TextStyle(
                 fontSize: 13,
@@ -495,11 +464,11 @@ class _SchemePageState extends ConsumerState<SchemePage> {
       formula = '请先选择计算方案（811 / 82）';
     } else if (core != null && academic != null && _scheme == '82') {
       formula =
-          '${core.toStringAsFixed(2)} × 80% + ${academic.toStringAsFixed(2)} × 20%';
+          '${_formatGpa(core)} × 80% + ${_formatGpa(academic)} × 20%';
     } else if (core != null && academic != null && comprehensive != null) {
       formula =
-          '${core.toStringAsFixed(2)} × 80% + ${academic.toStringAsFixed(2)} × 10% + '
-          '${comprehensive.toStringAsFixed(2)} × 10%';
+          '${_formatGpa(core)} × 80% + ${_formatGpa(academic)} × 10% + '
+          '${_formatGpa(comprehensive)} × 10%';
     } else {
       formula =
           '请补齐${core == null ? '核心绩' : ''}${core == null && academic == null ? '、' : ''}'
@@ -517,13 +486,30 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '计算结果',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface.withValues(alpha: .85),
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      '计算结果',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurface.withValues(alpha: .85),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '5 位小数',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: cs.onSurface.withValues(alpha: .55),
+                      ),
+                    ),
+                    Switch(
+                      value: _precise5,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => setState(() => _precise5 = v),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -561,7 +547,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                   ),
                 ),
                 Text(
-                  result.toStringAsFixed(2),
+                  _formatGpa(result),
                   style: TextStyle(
                     fontSize: 40,
                     fontWeight: FontWeight.w700,

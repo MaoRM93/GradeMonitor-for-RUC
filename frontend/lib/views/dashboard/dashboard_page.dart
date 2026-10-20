@@ -419,14 +419,14 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 44, color: iconColor),
+          Icon(icon, size: 39.6, color: iconColor),
           const SizedBox(height: 10),
           Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 18.75,
+              fontSize: 15.0,
               fontWeight: FontWeight.w600,
               color: cs.onSurface.withValues(alpha: .5),
             ),

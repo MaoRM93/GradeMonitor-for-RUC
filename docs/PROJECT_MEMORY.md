@@ -131,7 +131,7 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 
 - 欢迎页各步骤语言表达精修（用户未再提）。
 - GitHub 首页 `logs/` 行文案。
-- 正式发版时确认 tag：`git tag -f 107.0.0.156 && git push -f origin 107.0.0.156`。
+- 正式发版时确认 tag：`git tag -f 107.0.0.157 && git push -f origin 107.0.0.157`（157 为下次打包号；156 已交付未发布）。
 - **10-20 第五轮已交付 build 155**：修方案页布局崩溃（811/82 两列 Row 的 `CrossAxisAlignment.stretch` 在 SingleChildScrollView 无界高度下抛异常，release 化为灰盒吞掉「方案」之后的全部内容——剔除非 stretch 修复）；欢迎页步骤切换动画丝滑化（外层 `AnimatedSize` 平滑页面高度差 + 位移 0.02→0.04 + 300ms in/out 双 easeOutCubic + layoutBuilder 顶对齐叠放）。桌面 app(50.3MB) + `GradeMonitor-107.0.0.155-macOS.zip`(21M)，Info 校验 107.0.0/155 ✓；清场照例（首启需重新登录）。**教训：垂直滚动容器内禁用 Row stretch**。
 - **10-20 第六轮已交付 build 156**：成绩单搜索框降高（isDense + 图标约束 34 + hint 12px）对齐下拉框、表格密度收窄（spacing8/margin8/字号12/内边距12）、方案页 811/82 单选去灰框、核心绩/学术/综合三卡并排一行（卡 padding 16、数值 16、「恢复自动」瘦身）。铁律清场后打包 Desktop app(50.3MB) + `GradeMonitor-107.0.0.156-macOS.zip`(21M)，Info 校验 107.0.0/156 ✓，首启需重新登录。本地提交 `fd816c3` + `c072395`（未推送）。
 - **10-20 第七轮（commit `a8b779c`，未打包）**：用户反馈「成绩单行显示不全/奇怪截断 + 滚动时表头跟着走」→ 成绩单表格重构为**冻结表头**（方案见历史教训「冻结表头」条）；边框卡固定不再整体滚出视野，表头表 + 数据表共用定宽列（学期150/课程名200/学分72/平时96/期末96/加权96/绩点72/平均绩点124，总宽 906，适配默认窗口内容区 ~966）。widget 冒烟验证：零异常、两表 906.0 等宽、列中心 ±2px 对齐。**等用户确认后再打包 build 157**。

@@ -1,6 +1,6 @@
 # GradeMonitor 项目记忆（Project Memory）
 
-> 供跨会话延续上下文。最后更新：2026-10-20 · 版本 107.0.0+149 · 环境 10-20 已彻底清场（v149 卸载 + 缓存/数据清零）
+> 供跨会话延续上下文。最后更新：2026-10-20 · 版本 107.0.0+150 · 环境 10-20 已彻底清场（v149 卸载 + 缓存/数据清零）
 
 ## 项目概览
 
@@ -65,6 +65,7 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 - 清场记录（已完成）：`/Applications/GradeMonitor.app`、`Application Support/GradeMonitor`、Caches/Preferences/HTTPStorages 内 *grade* 残留、`Application Scripts/com.example.gradeMonitor` 全部删除，`flutter clean` 完成。`Containers/com.example.gradeMonitor` 仅剩 32K 系统 metadata（containermanagerd 保护，自动回收，无用户数据）。
 - 今日更新（本地提交 `310181e` + 自更新功能提交）：① 统计卡字重 w600→w400、图标 22→44、文案 12.5→18.75（五张卡统一改，用户原话"四个"未细分）；② 更新弹窗：新增依赖 `flutter_markdown_plus 1.0.12`（md 渲染）+ 应用内直接下载（独立 Dio 通道下载到 ~/Downloads，.part 原子改名，同名顺延不覆盖）；③ 三页大标题上边距 28→44。
 - **新增自更新「退出即装」**（`core/service/update_installer.dart` + `_UpdateInfoDialog`）：下载完成 → 「立即安装并重启」。macOS：`ditto -x -k` 解包（保留 exec 权限位、无 quarantine）→ 安装目录同级暂存 → bash 看守脚本（等旧 PID 退出 → 备份→同卷 rename 原子换包→失败回滚→`open` 重启→清 stage）；App Translocation 或安装目录不可写（如普通用户装 /Applications）自动降级手动。Windows：dart `archive` 解 zip → 找 Inno 安装器 → 中继 install.cmd（`/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS` 因 `[Run] skipifsilent` 由批处理接力 `start` 重启）。安装前显式 `BackendService().stop()`（else 新实例自愈清理 18923）。管线实测：ditto 权限位 + 脚本换包/回滚/清理全部通过（shim 替身避免真启动）。
+- **10-20 已打包交付 build 150**：`GradeMonitor-107.0.0.150-macOS.zip`（20M）+ `GradeMonitor.app` 于桌面。Info 校验：ShortVersion 107.0.0 / CFBundleVersion 150 / id com.grademonitor.app。含今日三项 UI 改动 + md 更新日志 + 应用内直接下载 + 退出即装。注意：150 之前（≤149）用户升级到 150 需手动；150 起自更新可用。
 - 已知限制：Windows 批处理对路径含 `%`/`&` 等非常规字符敏感（用户名正常不受影响）；安装器未签名，个别杀软可能拦截；旧版本（≤149）用户仍需手动覆盖一次，150 起才具备自动安装能力。
 - 当前工作区干净（除本快照文档）。
 

@@ -217,10 +217,12 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                 setState(() => _scheme = v);
               }
             },
-            child: Column(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _schemeRow(cs, value: '811', label: '811'),
-                _schemeRow(cs, value: '82', label: '82'),
+                Expanded(child: _schemeCell(cs, value: '811')),
+                const SizedBox(width: 10),
+                Expanded(child: _schemeCell(cs, value: '82')),
               ],
             ),
           ),
@@ -229,23 +231,31 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     );
   }
 
-  Widget _schemeRow(
-    ColorScheme cs, {
-    required String value,
-    required String label,
-  }) {
+  /// 单个方案选择块（两列布局，选中态高亮）
+  Widget _schemeCell(ColorScheme cs, {required String value}) {
     final selected = _scheme == value;
     return InkWell(
       onTap: () => setState(() => _scheme = value),
       borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: selected
+              ? cs.primary.withValues(alpha: .07)
+              : Colors.transparent,
+          border: Border.all(
+            color: selected
+                ? cs.primary.withValues(alpha: .45)
+                : cs.onSurface.withValues(alpha: .25),
+          ),
+        ),
         child: Row(
           children: [
             Radio<String>(value: value, activeColor: cs.primary),
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
             Text(
-              label,
+              value,
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,

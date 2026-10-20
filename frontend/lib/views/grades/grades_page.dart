@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme/app_theme.dart';
 import '../../providers/grades_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/note_banner.dart';
@@ -45,6 +46,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final settings = ref.watch(settingsProvider);
     final hideUnknown = settings.hideUnknownCourses;
     final colorScheme = Theme.of(context).colorScheme;
+    // 与搜索框 OutlineInputBorder 同源的边框色（跟随主题亮暗）
+    final borderColor = Theme.of(context).brightness == Brightness.dark
+        ? AppTheme.darkBorder
+        : AppTheme.lightBorder;
 
     // 学期筛选选项：来自全部成绩数据的学期集合（降序）
     final gradesList = gradesAsync.asData?.value ?? const <GradeCourse>[];
@@ -144,7 +149,16 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                           color: colorScheme.onSurface.withValues(alpha: .6),
                         ),
                       ),
-                      DropdownButton<String>(
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: borderColor),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: DropdownButton<String>(
                         value: semesterValue,
                         items: semesterItems
                             .map(
@@ -161,6 +175,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                             setState(() => _semester = v ?? '全部'),
                         underline: const SizedBox(),
                         isDense: true,
+                        ),
                       ),
                     ],
                   ),
@@ -175,27 +190,38 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                           color: colorScheme.onSurface.withValues(alpha: .6),
                         ),
                       ),
-                      DropdownButton<String>(
-                        value: _scopeCore ? 'core' : 'all',
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'all',
-                            child: Text(
-                              '全部课程',
-                              style: TextStyle(fontSize: 13),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: borderColor),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: DropdownButton<String>(
+                          value: _scopeCore ? 'core' : 'all',
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'all',
+                              child: Text(
+                                '全部课程',
+                                style: TextStyle(fontSize: 13),
+                              ),
                             ),
-                          ),
-                          DropdownMenuItem(
-                            value: 'core',
-                            child: Text(
-                              '核心绩课程',
-                              style: TextStyle(fontSize: 13),
+                            DropdownMenuItem(
+                              value: 'core',
+                              child: Text(
+                                '核心绩课程',
+                                style: TextStyle(fontSize: 13),
+                              ),
                             ),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _scopeCore = v == 'core'),
-                        underline: const SizedBox(),
-                        isDense: true,
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _scopeCore = v == 'core'),
+                          underline: const SizedBox(),
+                          isDense: true,
+                        ),
                       ),
                     ],
                   ),
@@ -231,12 +257,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          coreCount == 0
-                              ? '（暂无有效课程）'
-                              : '（$coreCount 门 · 学分加权）',
+                          '$coreCount/${gradesList.length} 门',
                           style: TextStyle(
-                            fontSize: 11,
-                            color: colorScheme.onSurface.withValues(alpha: .45),
+                            fontSize: 11.5,
+                            color: colorScheme.onSurface.withValues(alpha: .55),
                           ),
                         ),
                       ],
@@ -331,7 +355,15 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                     scrollDirection: Axis.horizontal,
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                      child: DataTable(
+                      child: Container(
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: colorScheme.onSurface.withValues(alpha: .25),
+                          ),
+                        ),
+                        child: DataTable(
                         sortColumnIndex: _sortColumnIndex,
                         sortAscending: _sortAscending,
                         headingRowColor: WidgetStateProperty.all(
@@ -441,6 +473,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                               ),
                             )
                             .toList(),
+                        ),
                       ),
                     ),
                   );

@@ -10,11 +10,11 @@ import 'scheme_core.dart';
 /// 「方案计算」页：根据推免方案计算 811 / 82 结果。
 ///
 /// 计算规则（用户给定，勿改）：
-/// - 811 方案 = 核心绩×80% + 学术科研能力×10% + 综合能力×10%
+/// - 811 方案 = 核心绩×80% + 学术科研能力×10% + 素质拓展×10%
 /// - 82 方案  = 核心绩×80% + 学术科研能力×20%
 /// - 核心绩由 App 自动计算（白名单学分加权，见 scheme_core.dart），
 ///   默认只读；双击可自定义，自定义后可一键恢复自动值
-/// - 学术科研能力 / 综合能力为文本框输入，上限各 4.0
+/// - 学术科研能力 / 素质拓展为文本框输入，上限各 4.0
 class SchemePage extends ConsumerStatefulWidget {
   const SchemePage({super.key});
 
@@ -308,7 +308,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                   },
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 6),
-                    minimumSize: const Size(0, 30),
+                    minimumSize: const Size(0, 22),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   child: const Text('恢复自动', style: TextStyle(fontSize: 11.5)),
@@ -316,13 +316,13 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             ],
           ),
           const SizedBox(height: 8),
-          _buildCoreInput(cs, invalid: invalid),
+          Expanded(child: _buildCoreInput(cs, invalid: invalid)),
         ],
       ),
     );
   }
 
-  /// 核心绩输入：未编辑态渲染自绘只读框（双击进入编辑态）。
+  /// 核心绩输入：未编辑态渲染纯文本（无边框文本框，双击进入编辑态）。
   /// 不能用 enabled:false 的 TextField——其内部 IgnorePointer 会吞掉
   /// 双击手势，导致自定义功能失效。
   Widget _buildCoreInput(ColorScheme cs, {required bool invalid}) {
@@ -331,23 +331,29 @@ class _SchemePageState extends ConsumerState<SchemePage> {
       return InkWell(
         onDoubleTap: () => setState(() => _coreEditing = true),
         borderRadius: BorderRadius.circular(4),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: cs.onSurface.withValues(alpha: .3)),
-          ),
-          child: Text(
-            value.isEmpty ? '自动计算中…（双击可自定义）' : value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: value.isEmpty
-                  ? cs.onSurface.withValues(alpha: .35)
-                  : cs.onSurface,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value.isEmpty ? '自动计算中…' : value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: value.isEmpty
+                    ? cs.onSurface.withValues(alpha: .35)
+                    : cs.onSurface,
+              ),
             ),
-          ),
+            const SizedBox(height: 3),
+            Text(
+              '双击可自定义',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: cs.onSurface.withValues(alpha: .35),
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -355,6 +361,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
       controller: _coreCtrl,
       autofocus: true,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      textAlignVertical: TextAlignVertical.center,
       maxLength: 8,
       style: TextStyle(
         fontSize: 16,
@@ -382,18 +389,22 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     );
   }
 
-  // ---------- 核心绩 / 学术 / 综合（三卡一行） ----------
+  // ---------- 核心绩 / 学术 / 素质拓展（三卡一行，等高） ----------
 
   Widget _buildInputsRow(ColorScheme cs) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: _buildCoreCard(cs)),
-        const SizedBox(width: 10),
-        Expanded(child: _inputCard(cs, kind: _InputKind.academic)),
-        const SizedBox(width: 10),
-        Expanded(child: _inputCard(cs, kind: _InputKind.comprehensive)),
-      ],
+    // 先用 IntrinsicHeight 把行高定为最高子卡的高度，再 stretch 三卡等高
+    //（滚动上下文里直接 stretch 会给子项无界高度，必须先定高）
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _buildCoreCard(cs)),
+          const SizedBox(width: 10),
+          Expanded(child: _inputCard(cs, kind: _InputKind.academic)),
+          const SizedBox(width: 10),
+          Expanded(child: _inputCard(cs, kind: _InputKind.comprehensive)),
+        ],
+      ),
     );
   }
 
@@ -408,7 +419,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isAcademic ? '学术科研能力' : '综合能力',
+            isAcademic ? '学术科研能力' : '素质拓展',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -416,34 +427,37 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             ),
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: ctrl,
-            enabled: enabled,
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
-            maxLength: 4,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: cs.onSurface,
-            ),
-            decoration: InputDecoration(
-              counterText: '',
-              hintText: enabled ? '0 – 4.0' : '综合能力不参与 82 方案',
-              hintStyle: TextStyle(
-                fontSize: 13,
-                color: cs.onSurface.withValues(alpha: .35),
+          Expanded(
+            child: TextField(
+              controller: ctrl,
+              enabled: enabled,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
               ),
-              errorText: invalid ? '请输入 0 – 4.0 之间的数值' : null,
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 12,
+              textAlignVertical: TextAlignVertical.center,
+              maxLength: 4,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
               ),
-              border: const OutlineInputBorder(),
+              decoration: InputDecoration(
+                counterText: '',
+                hintText: enabled ? '0 – 4.0' : '素质拓展不参与 82 方案',
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  color: cs.onSurface.withValues(alpha: .35),
+                ),
+                errorText: invalid ? '请输入 0 – 4.0 之间的数值' : null,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
             ),
-            onChanged: (_) => setState(() {}),
           ),
         ],
       ),
@@ -478,7 +492,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
           '请补齐${core == null ? '核心绩' : ''}${core == null && academic == null ? '、' : ''}'
           '${academic == null ? '学术科研能力' : ''}'
           '${(_scheme == '811' && comprehensive == null) ? (core == null || academic == null ? '、' : '') : ''}'
-          '${(_scheme == '811' && comprehensive == null) ? '综合能力' : ''}${_scheme == '82' ? '' : ''}'
+          '${(_scheme == '811' && comprehensive == null) ? '素质拓展' : ''}${_scheme == '82' ? '' : ''}'
           '后自动出结果';
     }
 

@@ -16,7 +16,7 @@ enum NavDestination {
   dashboard(icon: Icons.dashboard_rounded, label: '仪表板'),
   grades(icon: Icons.school_rounded, label: '成绩单'),
   scheme(icon: Icons.calculate_rounded, label: '方案计算'),
-  settings(icon: Icons.settings_rounded, label: '系统设置');
+  settings(icon: Icons.settings_rounded, label: '设置');
 
   final IconData icon;
   final String label;
@@ -346,7 +346,7 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
   bool _showWelcomeAlways = false;
   bool _welcomeLoaded = false;
 
-  // 隐秘触发：1 秒内连续点击 3 次标题红字"开发者工具" → 显示禁用页
+  // 隐秘触发：1 秒内连续点击 3 次标题"开发者工具" → 显示禁用页
   int _titleTaps = 0;
   DateTime _lastTitleTap = DateTime.now();
 
@@ -468,33 +468,16 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.construction_rounded,
-                color: AppTheme.error,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              // 隐秘触发区：1 秒内三连击红字进入禁用页，无任何视觉反馈
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _onTitleTap,
-                child: const Text(
-                  '开发者工具',
-                  style: TextStyle(color: AppTheme.error),
-                ),
-              ),
-            ],
+          // 隐秘触发区：1 秒内三连击标题进入禁用页，无任何视觉反馈
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _onTitleTap,
+            child: const Text('开发者工具'),
           ),
           const SizedBox(height: 4),
           const Text(
-            '仅供开发调试使用',
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.grey,
-              fontStyle: FontStyle.italic,
-            ),
+            '请在开发者指导下使用',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
           ),
         ],
       ),

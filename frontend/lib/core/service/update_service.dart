@@ -11,7 +11,7 @@ import '../logger/app_logger.dart';
 
 /// GitHub Release 的安装包资源
 class ReleaseAsset {
-  /// 资源文件名（如 GradeMonitor-107.0.0.149-macOS.zip）
+  /// 资源文件名（如 GradeMonitor-108.1.0.100-macOS.zip）
   final String name;
 
   /// 浏览器下载地址（browser_download_url）
@@ -126,7 +126,7 @@ class UpdateService {
   /// 全局禁用状态（static）：main.dart 监听后自动切换到禁用页
   static final ValueNotifier<bool> disabled = ValueNotifier<bool>(false);
 
-  /// 运行时完整版本号（如 107.0.0.135），未加载完成时为空字符串
+  /// 运行时完整版本号（如 108.1.0.100），未加载完成时为空字符串
   String _currentVersion = '';
   String get currentVersion => _currentVersion;
 

@@ -17,6 +17,7 @@ from backend.service.notification_service import (
 )
 from backend.storage.cache import (
     diff_grades,
+    derive_semesters_from_local_grades,
     load_local_grades,
     load_local_ranks,
     save_local_grades,
@@ -256,7 +257,7 @@ class MonitorService:
             logger.info(f"[自动监控] 本地排名: pm={old_rank.get('pm') if old_rank else 'None'}")
 
             service = RankService(username, password)
-            new_rank = service.fetch_latest_rank()
+            new_rank = service.fetch_latest_rank(derive_semesters_from_local_grades())
             if not new_rank:
                 logger.info("[自动监控] 服务器未返回排名数据")
                 return

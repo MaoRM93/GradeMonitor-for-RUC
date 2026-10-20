@@ -10,35 +10,30 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 全量学期代码：2010-2011-1 → 2099-2100-4，每学年含 -1/-2/-3/-4，共 360 项，
-# 模块加载时生成一次。排名接口的 jczy013id 是「参与累计排名/绩点计算的学期过滤」：
-# 历史版本只写死当时最新的 5 个学期（2024-2025-1 → 2025-2026-2），导致小学期
-# （-4，如 2025-2026-4）及之后新学期的成绩不参与累计计算，出现「总绩点差 0.01、
-# 班级/专业排名差 1、课程总数正常」的偏差（2026-10 用户反馈并考证实锤）。
-# 写死 2010→2099 全量学期，百年内无需维护。学期序号沿用教务系统编码：
-# 1=秋季学期，2=春季学期，4=夏季/小学期；-3 暂无实证，按全量覆盖传入
-# （若教务接口不接受 -3，冒烟时会报 errorCode≠success，届时退回 1/2/4）。
+# 学期过滤兜底列表：2026-08 抓包验证可用（当时学生全部已出分学期）。
+# 主策略是动态推导（storage.cache.derive_semesters_from_local_grades：
+# 从学生本人成绩的 cjlrxq 收集真实学期代码）。真机验证结论：排名接口
+# 对学期代码做字典校验，传入字典外的代码会被整单拒绝
+# （eywxt.public.query.error，2026-10-20 实测）——所以不能像当初设想的
+# 那样枚举 2010→2099 全量学期，只能传真实出现过的代码。
+_FALLBACK_SEMESTERS = (
+    "2025-2026-2,2025-2026-1,"
+    "2024-2025-4,2024-2025-2,2024-2025-1"
+)
 
 
-def _build_semester_list() -> str:
-    """生成 2010-2011 至 2099-2100 全部学期代码（降序、逗号分隔）。"""
-    codes = []
-    for year in range(2099, 2009, -1):  # 学年降序：2099-2100 → 2010-2011
-        for term in (4, 3, 2, 1):  # 学期内降序，与历史 payload 顺序一致
-            codes.append(f"{year}-{year + 1}-{term}")
-    return ",".join(codes)
-
-
-_ALL_SEMESTERS = _build_semester_list()
-_SEMESTER_COUNT = _ALL_SEMESTERS.count(",") + 1
-
-
-def fetch_rank(session: requests.Session) -> Optional[dict[str, Any]]:
+def fetch_rank(
+    session: requests.Session,
+    semesters: Optional[list[str]] = None,
+) -> Optional[dict[str, Any]]:
     """
     调用排名接口，获取所有学期的专业排名和班级排名
 
     Args:
         session: 已经过 OAuth 认证的 requests.Session
+        semesters: 参与累计计算的学期代码列表（来自学生本人成绩的
+            cjlrxq 去重集合，含小学期）。None/空时使用历史抓包列表
+            （_FALLBACK_SEMESTERS）。
 
     Returns:
         dict | None: 包含专业排名(pm)、班级排名(bjpm)、总人数(countnum)等
@@ -67,17 +62,24 @@ def fetch_rank(session: requests.Session) -> Optional[dict[str, Any]]:
         "Content-Type": "application/json",
     })
 
-    # 构造请求参数（学期过滤 = 全量学期 2010-2011-1 → 2099-2100-4，见 _ALL_SEMESTERS 注释）
+    # 学期过滤：优先用学生本人成绩推导的真实学期代码（动态、含小学期）；
+    # 未提供或为空时回退历史抓包列表（见 _FALLBACK_SEMESTERS 注释）
+    if semesters:
+        codes = sorted(set(semesters), reverse=True)
+        semester_filter = ",".join(codes)
+    else:
+        semester_filter = _FALLBACK_SEMESTERS
+        codes = semester_filter.split(",")
     payload = {
-        "jczy013id": _ALL_SEMESTERS,
+        "jczy013id": semester_filter,
         "kclbcode": "",
         "jczy010id": [],
         "jczy013idList": [],
     }
 
     logger.debug(
-        f"Rank query semester filter: {_SEMESTER_COUNT} terms "
-        f"({_ALL_SEMESTERS[-11:]} … {_ALL_SEMESTERS[:11]})"
+        f"Rank query semester filter: {len(codes)} terms "
+        f"({codes[-1]} … {codes[0]})"
     )
 
     logger.info("Requesting rank data from API (with JWT Bearer)...")
@@ -145,10 +147,25 @@ class RankService:
         login_and_bind_jw(session, self.username, self.password)
         return session
 
-    def fetch_latest_rank(self) -> Optional[dict[str, Any]]:
-        """获取最新排名信息"""
+    def fetch_latest_rank(
+        self, semesters: Optional[list[str]] = None
+    ) -> Optional[dict[str, Any]]:
+        """获取最新排名信息
+
+        Args:
+            semesters: 参与累计计算的学期代码列表（来自学生本人成绩的
+                cjlrxq 去重集合）。None/空时使用历史抓包 5 学期列表；
+                动态列表被教务接口拒绝时自动回退该列表重试一次。
+        """
         session = self._create_session()
         try:
+            if semesters:
+                try:
+                    return fetch_rank(session, semesters=semesters)
+                except Exception as e:
+                    logger.warning(
+                        f"动态学期列表查询被拒({e})，回退历史列表重试"
+                    )
             return fetch_rank(session)
         finally:
             session.close()

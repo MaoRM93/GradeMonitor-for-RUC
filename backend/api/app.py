@@ -24,6 +24,7 @@ from backend.service.notification_service import send_test_notification, send_no
 from backend.storage.settings import load_settings, save_settings, DEFAULT_SETTINGS
 from backend.storage.cache import (
     diff_grades,
+    derive_semesters_from_local_grades,
     get_data_dir, get_data_file_path,
     load_total_query_count, increment_query_count, reset_query_count,
     load_local_grades, load_local_ranks,
@@ -457,7 +458,7 @@ async def query_once():
         logger.info(f"[手动查询] 本地排名: pm={old_rank.get('pm') if old_rank else 'None'}")
 
         rs = RankService(username, password)
-        new_rank = rs.fetch_latest_rank()
+        new_rank = rs.fetch_latest_rank(derive_semesters_from_local_grades())
         if new_rank:
             logger.info(f"[手动查询] 服务器排名: pm={new_rank.get('pm')}")
 

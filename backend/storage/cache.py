@@ -168,6 +168,29 @@ def save_local_grades(grades_dict: dict) -> None:
     """保存成绩数据到本地缓存"""
     with open(LOCAL_GRADES_FILE, "w", encoding="utf-8") as f:
         json.dump(grades_dict, f, ensure_ascii=False, indent=2)
+
+
+def derive_semesters_from_local_grades() -> list[str]:
+    """从本地成绩缓存推导学期代码列表（新学期在前、去重）。
+
+    成绩行的 cjlrxq（成绩录入学期，如 "2024-2025-1"）与排名接口
+    jczy013id 过滤参数同属学期代码格式，且必然是教务系统学期字典中的
+    合法值——用学生本人成绩里出现过的学期构造过滤列表最稳妥：
+    天然覆盖本人全部学期（含小学期），又不含任何字典外的无效代码
+    （全量枚举写法已被真机验证会被整单拒绝：eywxt.public.query.error）。
+
+    返回空列表表示无可用数据，调用方应回退历史抓包列表。
+    """
+    grades = load_local_grades() or {}
+    codes: set[str] = set()
+    for row in grades.values():
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("cjlrxq") or "").strip()
+        parts = code.split("-")
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            codes.add(code)
+    return sorted(codes, reverse=True)
     logger.info(f"写入成绩缓存: {LOCAL_GRADES_FILE}  ({len(grades_dict)} 门)")
 
 

@@ -127,8 +127,8 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 
 - 欢迎页各步骤语言表达精修（用户未再提）。
 - GitHub 首页 `logs/` 行文案。
-- 正式发版时确认 tag：`git tag -f 107.0.0.151 && git push -f origin 107.0.0.151`。
-- **本轮（10-20 第二轮）改动已实现、未打包**：用户发文后触发，如需交付照例 build 号 +1（现为 152）。
+- 正式发版时确认 tag：`git tag -f 107.0.0.152 && git push -f origin 107.0.0.152`。
+- **10-20 第二轮改动已交付 build 152**：打包前铁律清场（桌面旧 `GradeMonitor.app`+150/151 zip 已删、`/Applications` 卸载、Application Support 登录/成绩数据清除、flutter clean）；产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.152-macOS.zip`(21M)，Info 校验 107.0.0 / 152 通过。**首启为全新状态，需重新登录**。
 
 ## 2026-10-20 第二轮：白名单收敛 + 提示规范 + 精度开关
 

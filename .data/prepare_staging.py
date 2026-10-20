@@ -1,10 +1,11 @@
 # 准备 Inno Setup 打包所需的 staging 目录
 # 内容：前端 Release + Python 便携版 + backend + 完整 VC++ 运行库
+import glob
 import os
 import shutil
 import sys
 
-ROOT = r"D:\Projects\GradeDetector_Windows_4"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = os.path.join(ROOT, "frontend", "build", "windows", "x64", "runner", "Release")
 BACKEND = os.path.join(ROOT, "backend")
 RUNTIME_TOOLS = os.path.join(ROOT, "runtime", "tools")
@@ -12,10 +13,16 @@ DATA_DIR = os.path.join(ROOT, ".data")
 STAGING = os.path.join(DATA_DIR, "staging")
 
 # VC++ 运行库（应用本地部署，确保"不缺运行库"）
-VC_REDIST = os.path.join(
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools",
-    "VC", "Redist", "MSVC", "14.51.36231", "x64", "Microsoft.VC145.CRT",
+# 自动查找当前 VS Build Tools 安装的 x64 CRT 目录，避免写死版本号。
+_VC_REDIST_ROOT = os.path.join(
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools",
+    "VC", "Redist", "MSVC",
 )
+_vc_redist_candidates = sorted(
+    glob.glob(os.path.join(_VC_REDIST_ROOT, "*", "x64", "Microsoft.VC*.CRT")),
+    reverse=True,
+)
+VC_REDIST = _vc_redist_candidates[0] if _vc_redist_candidates else ""
 
 
 def main():

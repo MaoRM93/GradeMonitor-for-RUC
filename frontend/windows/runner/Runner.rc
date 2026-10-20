@@ -66,10 +66,10 @@ IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 #define VERSION_AS_NUMBER 1,0,0,0
 #endif
 
-// 显示格式统一为 x.y.z.build（pubspec 的 107.0.0+115 在文件属性里显示为 107.0.0.115，
+// 显示格式统一为 x.y.z.build（pubspec 的 108.0.0+100 在文件属性里显示为 108.0.0.100，
 // 避免出现加号；发版时需与 pubspec.yaml 的 version 保持同步）
 #if defined(FLUTTER_VERSION)
-#define VERSION_AS_STRING "107.0.0.115"
+#define VERSION_AS_STRING "108.0.0.100"
 #else
 #define VERSION_AS_STRING "1.0.0"
 #endif

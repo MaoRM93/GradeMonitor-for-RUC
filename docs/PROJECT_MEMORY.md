@@ -131,10 +131,17 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 
 - 欢迎页各步骤语言表达精修（用户未再提）。
 - GitHub 首页 `logs/` 行文案。
-- 正式发版时确认 tag：`git tag -f 107.0.0.157 && git push -f origin 107.0.0.157`（157 为下次打包号；156 已交付未发布）。
+- 正式发版时确认 tag：`git tag -f 108.1.0.100 && git push -f origin 108.1.0.100`（2026-10-20 起用户 switch 到版本线 **108.1.0**，build 号重置 100 递增；此前 107.0.0.x 线已终结于 157）。
 - **10-20 第五轮已交付 build 155**：修方案页布局崩溃（811/82 两列 Row 的 `CrossAxisAlignment.stretch` 在 SingleChildScrollView 无界高度下抛异常，release 化为灰盒吞掉「方案」之后的全部内容——剔除非 stretch 修复）；欢迎页步骤切换动画丝滑化（外层 `AnimatedSize` 平滑页面高度差 + 位移 0.02→0.04 + 300ms in/out 双 easeOutCubic + layoutBuilder 顶对齐叠放）。桌面 app(50.3MB) + `GradeMonitor-107.0.0.155-macOS.zip`(21M)，Info 校验 107.0.0/155 ✓；清场照例（首启需重新登录）。**教训：垂直滚动容器内禁用 Row stretch**。
 - **10-20 第六轮已交付 build 156**：成绩单搜索框降高（isDense + 图标约束 34 + hint 12px）对齐下拉框、表格密度收窄（spacing8/margin8/字号12/内边距12）、方案页 811/82 单选去灰框、核心绩/学术/综合三卡并排一行（卡 padding 16、数值 16、「恢复自动」瘦身）。铁律清场后打包 Desktop app(50.3MB) + `GradeMonitor-107.0.0.156-macOS.zip`(21M)，Info 校验 107.0.0/156 ✓，首启需重新登录。本地提交 `fd816c3` + `c072395`（未推送）。
 - **10-20 第七轮已交付 build 157（commit `a8b779c` 修复 + `8f434ff` 打包）**：用户反馈「成绩单行显示不全/奇怪截断 + 滚动时表头跟着走」→ 成绩单表格重构为**冻结表头**（方案见历史教训「冻结表头」条）；边框卡固定不再整体滚出视野，表头表 + 数据表共用定宽列（学期150/课程名200/学分72/平时96/期末96/加权96/绩点72/平均绩点124，总宽 906，适配默认窗口内容区 ~966）。widget 冒烟验证：零异常、两表 906.0 等宽、列中心 ±2px 对齐。铁律清场后打包 Desktop app(50.3MB) + `GradeMonitor-107.0.0.157-macOS.zip`(21M)，Info 校验 107.0.0/157 ✓，首启需重新登录。
+- **10-20 第八轮已交付 108.1.0+100（`501896f` UI + 打包；版本线更名**：107.0.0 → 108.1.0，build 号重置 100）**：
+  - 方案计算页：「综合能力」→「素质拓展」（卡片 label、82 方案禁用 hint、结果卡缺项文案、注释全改；蓝条为用户逐字文案未动）；三卡（核心绩/学术科研能力/素质拓展）**等高** = `IntrinsicHeight` 包 Row 再 `CrossAxisAlignment.stretch`（滚动上下文直接 stretch 会无界高度，必须先 IntrinsicHeight 定高），卡内容 `Expanded` 撑满；核心绩**自动态不再显示边框文本框**，改纯文本 + 下方小字「双击可自定义」，双击进入真 TextField（编辑态仍有框）；「恢复自动」按钮 minimumSize 高度 30→22 保持标题行同高。
+  - 侧栏导航「系统设置」→「设置」。
+  - 开发者工具对话框（侧栏版本号三连击触发）：标题去 AppTheme.error 红色（恢复 AlertDialog 默认色，三连击隐秘触发保留）、去掉 construction 图标、斜体「仅供开发调试使用」→ 正体「请在开发者指导下使用」。
+  - 版本解析兼容性确认：`_isNewer` 为逐段数值比较，108.1.0.100 无硬编码风险。
+  - 彻底清场：桌面产物、/Applications、Application Support、App Scripts com.example.gradeMonitor、Caches/HTTPStorages/Preferences *grade* 残留（实际 0 条）、frontend build/.dart_tool 全删 + flutter clean。
+  - 产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-108.1.0.100-macOS.zip`(21M)，Info 校验 108.1.0/100 ✓，首启需重新登录。
 - **10-20 第二轮改动已交付 build 152**：打包前铁律清场（桌面旧 `GradeMonitor.app`+150/151 zip 已删、`/Applications` 卸载、Application Support 登录/成绩数据清除、flutter clean）；产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.152-macOS.zip`(21M)，Info 校验 107.0.0 / 152 通过。**首启为全新状态，需重新登录**。
 
 ## 2026-10-20 第三轮：PF 剔除规则 + 提示条关闭 + 方案页文案重构 + 双击 bug

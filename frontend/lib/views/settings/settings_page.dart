@@ -5,6 +5,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/service/tray_service.dart';
+import '../../core/service/update_installer.dart';
 import '../../core/service/update_service.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/monitor_provider.dart';
@@ -809,6 +810,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 /// 「发现新版本」弹窗：
 /// - 更新日志以 Markdown 渲染（配合 flutter_markdown_plus）
 /// - 支持应用内直接下载安装包（不跳转浏览器），带进度与完成后定位
+/// - 下载完成后可一键「退出即装」：解包校验 → 退出应用 → 自动替换安装并重启
+///   （仅限本机可自动安装的场景，失败自动提示手动安装）
 class _UpdateInfoDialog extends StatefulWidget {
   final UpdateCheckResult result;
   const _UpdateInfoDialog({required this.result});
@@ -817,7 +820,15 @@ class _UpdateInfoDialog extends StatefulWidget {
   State<_UpdateInfoDialog> createState() => _UpdateInfoDialogState();
 }
 
-enum _DownloadPhase { idle, downloading, done, failed }
+enum _DownloadPhase {
+  idle,
+  downloading,
+  done,
+  preparing,
+  installing,
+  manual,
+  failed,
+}
 
 class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
   late final ReleaseAsset? _asset = UpdateService().pickPlatformAsset(
@@ -829,6 +840,14 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
   String? _savedPath;
   String _errorText = '';
 
+  /// 手动安装指引（自动安装不可用时的原因）
+  String _installHint = '';
+
+  bool get _busy =>
+      _phase == _DownloadPhase.downloading ||
+      _phase == _DownloadPhase.preparing ||
+      _phase == _DownloadPhase.installing;
+
   bool get _notesEmpty => widget.result.releaseNotes.trim().isEmpty;
 
   /// 当前版本号文案（弹窗独立于设置页类，需自行计算）
@@ -838,7 +857,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
   }
 
   /// 未找到本平台安装包时可退回浏览器下载
-  bool get _browserOnly => _asset == null && !(_phase == _DownloadPhase.done);
+  bool get _browserOnly => _asset == null;
 
   Future<void> _startDownload() async {
     if (_asset == null || _phase == _DownloadPhase.downloading) return;
@@ -867,6 +886,38 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
         _errorText = e.toString().replaceFirst('Exception: ', '');
       });
     }
+  }
+
+  /// 「立即安装并重启」：解包校验 → 退出应用 → 看守脚本自动替换安装并重启。
+  /// 自动安装不可用（权限/形态限制）时切换到手动安装指引。
+  Future<void> _startInstall() async {
+    if (_savedPath == null || _busy) return;
+    setState(() {
+      _phase = _DownloadPhase.preparing;
+      _installHint = '';
+    });
+    final outcome = await UpdateInstaller().prepareInstall(_savedPath!);
+    if (!mounted) return;
+
+    final plan = outcome.plan;
+    if (plan == null) {
+      setState(() {
+        _phase = _DownloadPhase.manual;
+        _installHint = outcome.reason;
+      });
+      return;
+    }
+
+    setState(() => _phase = _DownloadPhase.installing);
+    // 稍作停留让用户看到「即将重启」提示，随后应用将退出
+    await Future.delayed(const Duration(milliseconds: 800));
+    await UpdateInstaller().quitAndInstall(plan);
+    // 到这一步应用应已退出；若未退出（异常），提供手动定位入口
+    if (!mounted) return;
+    setState(() {
+      _phase = _DownloadPhase.manual;
+      _installHint = '自动安装未能完成，请手动操作';
+    });
   }
 
   @override
@@ -930,41 +981,73 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
         ),
         if (_asset != null)
           FilledButton.icon(
-            onPressed: _phase == _DownloadPhase.downloading ? null : _onPrimary,
-            icon: _phase == _DownloadPhase.downloading
+            onPressed: _busy ? null : _onPrimary,
+            icon: _phase == _DownloadPhase.downloading ||
+                    _phase == _DownloadPhase.preparing ||
+                    _phase == _DownloadPhase.installing
                 ? const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Icon(
-                    _phase == _DownloadPhase.done
-                        ? Icons.folder_open_rounded
-                        : _phase == _DownloadPhase.failed
-                        ? Icons.refresh_rounded
-                        : Icons.download_rounded,
+                    _switchIcon(),
                     size: 18,
                   ),
-            label: Text(
-              _phase == _DownloadPhase.downloading
-                  ? '正在下载…'
-                  : _phase == _DownloadPhase.done
-                  ? '打开所在文件夹'
-                  : _phase == _DownloadPhase.failed
-                  ? '重试下载'
-                  : '直接下载',
-            ),
+            label: Text(_primaryLabel()),
           ),
       ],
     );
   }
 
+  IconData _switchIcon() {
+    switch (_phase) {
+      case _DownloadPhase.done:
+        return Icons.restart_alt_rounded;
+      case _DownloadPhase.manual:
+        return Icons.folder_open_rounded;
+      case _DownloadPhase.failed:
+        return Icons.refresh_rounded;
+      default:
+        return Icons.download_rounded;
+    }
+  }
+
+  String _primaryLabel() {
+    switch (_phase) {
+      case _DownloadPhase.downloading:
+        return '正在下载…';
+      case _DownloadPhase.done:
+        return '立即安装并重启';
+      case _DownloadPhase.preparing:
+        return '正在准备安装…';
+      case _DownloadPhase.installing:
+        return '即将重启安装…';
+      case _DownloadPhase.manual:
+        return '打开所在文件夹';
+      case _DownloadPhase.failed:
+        return '重试下载';
+      case _DownloadPhase.idle:
+        return '直接下载';
+    }
+  }
+
   /// 主按钮行为随阶段变化
   Future<void> _onPrimary() async {
-    if (_phase == _DownloadPhase.idle || _phase == _DownloadPhase.failed) {
-      await _startDownload();
-    } else if (_phase == _DownloadPhase.done && _savedPath != null) {
-      await UpdateService().revealInFileManager(_savedPath!);
+    switch (_phase) {
+      case _DownloadPhase.idle:
+      case _DownloadPhase.failed:
+        await _startDownload();
+      case _DownloadPhase.done:
+        await _startInstall();
+      case _DownloadPhase.manual:
+        if (_savedPath != null) {
+          await UpdateService().revealInFileManager(_savedPath!);
+        }
+      case _DownloadPhase.downloading:
+      case _DownloadPhase.preparing:
+      case _DownloadPhase.installing:
+        return;
     }
   }
 
@@ -1034,6 +1117,65 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: 22),
+            child: Text(
+              '点击「立即安装并重启」后，应用将自动完成安装并重新打开'
+              '（安装过程中会短暂关闭）。',
+              style: sub,
+            ),
+          ),
+        ];
+      case _DownloadPhase.preparing:
+        return [
+          const SizedBox(height: 10),
+          LinearProgressIndicator(),
+          const SizedBox(height: 6),
+          Text('正在解包校验安装内容…', style: sub),
+        ];
+      case _DownloadPhase.installing:
+        return [
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('正在退出应用并自动替换安装，请勿关闭此窗口。', style: sub),
+              ),
+            ],
+          ),
+        ];
+      case _DownloadPhase.manual:
+        return [
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                size: 16,
+                color: AppTheme.warning,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('自动安装未完成：$_installHint', style: sub),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: 22),
+            child: Text(
+              '已为你定位到下载文件：'
+              'Windows 双击安装包完成升级；macOS 请将新版 App 替换现有位置。',
+              style: sub,
+            ),
           ),
         ];
       case _DownloadPhase.failed:

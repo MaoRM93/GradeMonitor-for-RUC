@@ -40,6 +40,9 @@ dependencies:
   # Markdown 更新日志渲染（flutter_markdown 官方停维后的社区延续版）
   flutter_markdown_plus: ^1.0.12
 
+  # zip 解包（自更新在 Windows 上的静默安装用；macOS 走系统 ditto）
+  archive: ^3.6.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

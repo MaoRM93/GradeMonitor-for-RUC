@@ -493,10 +493,26 @@ class _GradesPageState extends ConsumerState<GradesPage> {
       DataColumn(label: const SizedBox.shrink(), columnWidth: width),
   ];
 
+  /// 学期文本：在「学年」后插入换行，两行居中显示（如 2024-2025学年 / 春季学期）
+  String _termText(String xnxq) {
+    if (xnxq.isEmpty) return '-';
+    final i = xnxq.indexOf('学年');
+    if (i < 0) return xnxq;
+    final rest = xnxq.substring(i + 2);
+    return rest.isEmpty ? xnxq : '${xnxq.substring(0, i + 2)}\n$rest';
+  }
+
   DataRow _dataRow(GradeCourse course, ColorScheme cs) {
     return DataRow(
       cells: [
-        DataCell(Center(child: Text(course.xnxq.isEmpty ? '-' : course.xnxq))),
+        DataCell(
+          Center(
+            child: Text(
+              _termText(course.xnxq),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
         DataCell(
           Center(
             child: SizedBox(
@@ -504,6 +520,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
               child: Text(
                 course.kcname,
                 maxLines: 2,
+                textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
               ),
             ),

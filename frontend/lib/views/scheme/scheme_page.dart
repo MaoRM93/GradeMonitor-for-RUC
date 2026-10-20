@@ -166,7 +166,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               _buildSchemeChooser(colorScheme),
               const SizedBox(height: 16),
               _buildInputsRow(colorScheme),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               _buildResultCard(colorScheme),
             ],
           ),

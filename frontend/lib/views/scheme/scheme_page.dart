@@ -26,7 +26,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   static const String _infoText =
       '根据 2026 年政策，本年度免试推荐适用的学业综合成绩计算范围包括思想政治理论课（含思政选修课）、'
       '公共外语/大学外语（含拓展类课程）、平台课/公共计算机、部类共同、部类基础（必修）、'
-      '部类核心课、专业基础公共数学、人工智能与数据技术平台课/数据与信息技术课、'
+      '部类核心课、专业基础、公共数学、人工智能与数据技术平台课/数据与信息技术课、'
       '学科基础、专业核心课、专业必修以及所在院系开设的学年论文。'
       '对于转专业及退出拔尖创新人才培养项目的学生，'
       '转入专业培养方案不要求的课程，不计入免试推荐绩点。';
@@ -247,7 +247,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             Radio<String>(value: value, activeColor: cs.primary),
             const SizedBox(width: 4),
             Text(
-              value,
+              value == '811' ? '811 政策' : '82 政策',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,

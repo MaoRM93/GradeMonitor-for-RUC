@@ -122,11 +122,20 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   Expanded(
                     child: TextField(
                       controller: _searchController,
+                      style: const TextStyle(fontSize: 13),
                       decoration: InputDecoration(
+                        isDense: true,
                         hintText: '搜索课程名称...',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                        hintStyle: const TextStyle(fontSize: 12),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                        prefixIconConstraints: const BoxConstraints(
+                          minWidth: 34,
+                          minHeight: 34,
+                        ),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
                                 icon: const Icon(Icons.clear_rounded, size: 18),
                                 onPressed: () {
                                   _searchController.clear();
@@ -134,6 +143,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                                 },
                               )
                             : null,
+                        suffixIconConstraints: const BoxConstraints(
+                          minWidth: 34,
+                          minHeight: 34,
+                        ),
                       ),
                       onChanged: (v) => setState(() => _searchQuery = v),
                     ),
@@ -354,7 +367,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   return SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
                       child: Container(
                         clipBehavior: Clip.antiAlias,
                         decoration: BoxDecoration(
@@ -377,11 +390,11 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                           color: colorScheme.onSurface,
                         ),
                         dataTextStyle: TextStyle(
-                          fontSize: 13,
+                          fontSize: 12,
                           color: colorScheme.onSurface,
                         ),
-                        columnSpacing: 16,
-                        horizontalMargin: 12,
+                        columnSpacing: 8,
+                        horizontalMargin: 8,
                         // 表头居中：DataTable 会在标签左侧补排序箭头等宽占位，
                         // 使"学期↑"这类带排序箭头的表头与数据列对中一致
                         columns: [

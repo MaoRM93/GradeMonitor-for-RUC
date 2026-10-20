@@ -165,8 +165,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               const SizedBox(height: 16),
               _buildSchemeChooser(colorScheme),
               const SizedBox(height: 16),
-              _buildCoreCard(colorScheme),
-              const SizedBox(height: 12),
               _buildInputsRow(colorScheme),
               const SizedBox(height: 12),
               _buildResultCard(colorScheme),
@@ -230,7 +228,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     );
   }
 
-  /// 单个方案选择块（两列布局，选中态高亮）
+  /// 单个方案选择块（两列布局，选中态淡色高亮、无边框）
   Widget _schemeCell(ColorScheme cs, {required String value}) {
     final selected = _scheme == value;
     return InkWell(
@@ -243,11 +241,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
           color: selected
               ? cs.primary.withValues(alpha: .07)
               : Colors.transparent,
-          border: Border.all(
-            color: selected
-                ? cs.primary.withValues(alpha: .45)
-                : cs.onSurface.withValues(alpha: .25),
-          ),
         ),
         child: Row(
           children: [
@@ -272,7 +265,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   Widget _buildCoreCard(ColorScheme cs) {
     final invalid = _invalidShown(_coreCtrl.text);
     return GlassCard(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -305,7 +298,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               ),
               const Spacer(),
               if (_coreCustom || _coreEditing)
-                TextButton.icon(
+                TextButton(
                   onPressed: () {
                     setState(() {
                       _coreCustom = false;
@@ -313,11 +306,12 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                     });
                     _syncCore();
                   },
-                  icon: const Icon(Icons.undo_rounded, size: 15),
-                  label: const Text(
-                    '恢复自动',
-                    style: TextStyle(fontSize: 12),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
+                  child: const Text('恢复自动', style: TextStyle(fontSize: 11.5)),
                 ),
             ],
           ),
@@ -339,7 +333,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
         borderRadius: BorderRadius.circular(4),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(4),
             border: Border.all(color: cs.onSurface.withValues(alpha: .3)),
@@ -347,7 +341,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
           child: Text(
             value.isEmpty ? '自动计算中…（双击可自定义）' : value,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.w700,
               color: value.isEmpty
                   ? cs.onSurface.withValues(alpha: .35)
@@ -363,7 +357,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       maxLength: 8,
       style: TextStyle(
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: FontWeight.w700,
         color: cs.onSurface,
       ),
@@ -388,14 +382,16 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     );
   }
 
-  // ---------- 学术 / 综合 ----------
+  // ---------- 核心绩 / 学术 / 综合（三卡一行） ----------
 
   Widget _buildInputsRow(ColorScheme cs) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Expanded(child: _buildCoreCard(cs)),
+        const SizedBox(width: 10),
         Expanded(child: _inputCard(cs, kind: _InputKind.academic)),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(child: _inputCard(cs, kind: _InputKind.comprehensive)),
       ],
     );
@@ -407,7 +403,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     final enabled = isAcademic || _scheme == '811';
     final invalid = _invalidShown(ctrl.text);
     return GlassCard(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -428,7 +424,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             ),
             maxLength: 4,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.w700,
               color: cs.onSurface,
             ),

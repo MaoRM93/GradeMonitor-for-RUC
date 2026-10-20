@@ -18,6 +18,9 @@ class GradeCourse {
   /// 课程类别（kclbname，用于核心绩白名单分类）
   final String kclbname;
 
+  /// 等级名称（zcjname1，用于识 PF/两级制课程）
+  final String zcjname1;
+
   const GradeCourse({
     required this.kth,
     required this.kcname,
@@ -29,6 +32,7 @@ class GradeCourse {
     this.xnxq = '',
     this.kcxz = '',
     this.kclbname = '',
+    this.zcjname1 = '',
   });
 
   /// 平均学分绩点 = jd / xf
@@ -51,6 +55,7 @@ class GradeCourse {
       xnxq: json['xnxq']?.toString() ?? '',
       kcxz: json['kcxz']?.toString() ?? '',
       kclbname: json['kclbname']?.toString() ?? '',
+      zcjname1: json['zcjname1']?.toString() ?? '',
     );
   }
 }

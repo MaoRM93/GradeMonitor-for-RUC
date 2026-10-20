@@ -130,6 +130,14 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 - 正式发版时确认 tag：`git tag -f 107.0.0.152 && git push -f origin 107.0.0.152`。
 - **10-20 第二轮改动已交付 build 152**：打包前铁律清场（桌面旧 `GradeMonitor.app`+150/151 zip 已删、`/Applications` 卸载、Application Support 登录/成绩数据清除、flutter clean）；产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.152-macOS.zip`(21M)，Info 校验 107.0.0 / 152 通过。**首启为全新状态，需重新登录**。
 
+## 2026-10-20 第三轮：PF 剔除规则 + 提示条关闭 + 方案页文案重构 + 双击 bug
+
+- **核心绩口径终版（用户拍板）**：① 白名单**恢复**'思想政治理论课'（回到 20 项）；② **先筛课程类别、再筛成绩形态——所有 PF 制（两级制）课程全部不纳入核心绩**。PF 判据 = `zcjname1` ∈ {P,F,PASS,FAIL,合格,不合格,通过,不通过}（归一后比大写）。镜像验证：仍 30 门 / 231.40÷62.0=3.7323 → 3.73（PF 剔除的恰是思政实践课），与官方一致。`GradeCourse` 补了 `zcjname1` 字段。
+- **双击自定义核心绩 bug 已修**：根因是 `enabled:false` 的 TextField 内部 `IgnorePointer` 吞掉双击手势（双击根本到不了外层 GestureDetector）。改为双态渲染：未编辑 = 自绘只读框（InkWell onDoubleTap 进入编辑）；编辑 = 真 TextField(autofocus)。同时 build 同步自动值加 `_coreCustom||_coreEditing` 守卫（之前会覆盖用户输入）。「恢复自动」按钮在编辑态即显示。
+- **提示横条关闭**：右上角「不再显示」（永久，写 `ui_prefs.json`）+「叉」（单次，静态内存 Set，重开 App 恢复）；新服务 `core/service/ui_prefs_service.dart`（不走后端）。icon 18→20、标题 13→14。三个条 key：grades_core_gpa / scheme_result_warning / scheme_scope_info。
+- **蓝条正文**开头去掉"提示：" → "根据 2026 年政策，本年度免试推荐适用的…"
+- **方案页文案重构**：方案单选卡加组标题「方案」，811/82 行去掉灰色算式注释（单行、15px）；核心绩/学术/综合卡标题后灰色小字全删；(0 – 4.0) 移入输入框 hint（核心绩 hint='0 – 4.0'，编辑态同样输入框化；'如 3.70' 例子删除）；结果卡 Switch 改 **16px Checkbox +「精确计算」**（尺寸与 12px 文字匹配）——功能不变（5 位小数补 0）。
+
 ## 2026-10-20 第二轮：白名单收敛 + 提示规范 + 精度开关
 
 - **核心绩口径修正（用户拍板）**：'思想政治理论课' **整类排除**（思政实践课 P/通过制绩点 1.0 不得计入）→ 白名单 19 项，**30 门 / 学分加权 3.73，与官方教务系统完全一致**。镜像验证：Σjd=231.40、Σxf=62.0、3.7323。

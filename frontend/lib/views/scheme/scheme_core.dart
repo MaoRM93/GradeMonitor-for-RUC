@@ -1,10 +1,14 @@
 import '../../providers/grades_provider.dart';
 
 /// 核心绩口径（用户给定，勿改勿扩）：
-/// - 分类依据：课程的 `kclbname` 与白名单**全字匹配**
+/// - 分类依据：课程的 `kclbname` 与白名单**全字匹配**（依次两步筛选）
+///   ① 先筛课程类别：kclbname ∈ 白名单（20 项）
+///   ② 再筛成绩形态：**所有 PF 制（两级制）课程全部不纳入**
+///     ——即剔除等级为 P/F（合格/不合格、通过/不通过）的课程，
+///     如思政实践课（P）不计入
 /// - 预处理仅允许两类归一：全角↔半角符号转换、去除空白字符
 ///   ——除此之外禁止任何模糊/子串/关键词匹配，禁止扩大课程范围
-/// - 核心绩 = 命中课程集合的**学分加权平均绩点**（Σjd ÷ Σxf），
+/// - 核心绩 = 剩余课程集合的**学分加权平均绩点**（Σjd ÷ Σxf），
 ///   复用项目现有换算规则：jd 为单科总绩点（单科绩点×学分），
 ///   与成绩单页"平均学分绩点 = jd / xf"同源
 /// - 有效参与条件：jd 与 xf 均可解析为数值且 xf > 0（沿用 tryParse 语义）；
@@ -33,10 +37,11 @@ class CoreGpaUtil {
   CoreGpaUtil._();
 
   /// kclbname 白名单（逐字原样，勿增删改）。
-  /// 用户 2026-10-20 决定：'思想政治理论课' **整类排除**——其中的思政实践课
-  /// 为 P（通过制，绩点 1.0）不得计入核心绩；
+  /// 历次用户拍板：2026-10-20 曾整类排除'思想政治理论课'，当日改为——
+  /// **恢复该类别，改为剔除所有 PF 制（两级制）课程**（先筛类别、再筛 PF）。
   /// 与官方系统核对一致（30 门 / 学分加权 3.73）。
   static const List<String> whitelist = <String>[
+    '思想政治理论课',
     '思政课',
     '大学外语',
     '大学外语（拓展类课程）',
@@ -85,11 +90,31 @@ class CoreGpaUtil {
   static bool isCore(GradeCourse course) =>
       _normalizedWhitelist.contains(normalize(course.kclbname));
 
-  /// 课程是否"有效参与计算"：jd / xf 均可解析且 xf > 0
+  /// PF（两级制）等级集合：命中即不参与核心绩
+  /// （教务优等制为 P=通过 / F=不通过，兼容中文写法与 P 大小写）
+  static const Set<String> _passFailLevels = <String>{
+    'P',
+    'F',
+    'PASS',
+    'FAIL',
+    '合格',
+    '不合格',
+    '通过',
+    '不通过',
+  };
+
+  /// 课程是否为 PF 制成绩（判据：等级字段 zcjname1）
+  static bool isPassFail(GradeCourse course) =>
+      _passFailLevels.contains(normalize(course.zcjname1).toUpperCase());
+
+  /// 课程是否"有效参与计算"：
+  /// ① 白名单命中；② 非 PF 制；③ jd / xf 均可解析且 xf > 0
   static bool isValidForCalc(GradeCourse course) {
-    final jd = double.tryParse(course.jd);
-    final xf = double.tryParse(course.xf);
-    return jd != null && xf != null && xf > 0;
+    return isCore(course) &&
+        !isPassFail(course) &&
+        double.tryParse(course.jd) != null &&
+        double.tryParse(course.xf) != null &&
+        double.parse(course.xf) > 0;
   }
 
   /// 计算核心绩：白名单 ∩ 有效课程，核心绩 = Σjd ÷ Σxf（学分加权）

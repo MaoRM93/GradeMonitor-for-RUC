@@ -100,6 +100,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
               child: NoteBanner.warning(
+                persistKey: 'grades_core_gpa',
                 title: '注意',
                 text:
                     '由于学校培养方案持续更新，不同年级、专业的课程类别与培养要求可能存在差异，'

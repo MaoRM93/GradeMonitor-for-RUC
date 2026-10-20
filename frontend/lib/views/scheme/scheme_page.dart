@@ -24,7 +24,7 @@ class SchemePage extends ConsumerStatefulWidget {
 
 class _SchemePageState extends ConsumerState<SchemePage> {
   static const String _infoText =
-      '提示：本年度免试推荐适用的学业综合成绩计算范围包括思想政治理论课（含思政选修课）、'
+      '根据 2026 年政策，本年度免试推荐适用的学业综合成绩计算范围包括思想政治理论课（含思政选修课）、'
       '公共外语/大学外语（含拓展类课程）、平台课/公共计算机、部类共同、部类基础（必修）、'
       '部类核心课、专业基础公共数学、人工智能与数据技术平台课/数据与信息技术课、'
       '学科基础、专业核心课、专业必修以及所在院系开设的学年论文。'
@@ -125,12 +125,14 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // 成绩数据变化时同步核心绩自动值
-    final gradesData = ref.watch(gradesProvider).asData?.value;
-    if (gradesData != null) {
-      final gpa = CoreGpaUtil.analyze(gradesData).gpa;
-      final text = gpa == null ? '' : _formatGpa(gpa);
-      if (_coreCtrl.text != text) _coreCtrl.text = text;
+    // 成绩数据变化时同步核心绩自动值（自动模式下才允许覆盖）
+    if (!_coreCustom && !_coreEditing) {
+      final gradesData = ref.watch(gradesProvider).asData?.value;
+      if (gradesData != null) {
+        final gpa = CoreGpaUtil.analyze(gradesData).gpa;
+        final text = gpa == null ? '' : _formatGpa(gpa);
+        if (_coreCtrl.text != text) _coreCtrl.text = text;
+      }
     }
 
     return Scaffold(
@@ -180,6 +182,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   /// 红色警示：结果仅作参考，需自行核对培养方案与院系方案
   Widget _buildWarningBanner() {
     return const NoteBanner.warning(
+      persistKey: 'scheme_result_warning',
       title: '注意',
       text: '计算结果仅作为参考，请务必自行核对培养方案与院系方案的要求后再使用。',
     );
@@ -187,27 +190,41 @@ class _SchemePageState extends ConsumerState<SchemePage> {
 
   /// 蓝色提示：免试推荐适用的学业综合成绩计算范围
   Widget _buildInfoBanner() {
-    return NoteBanner.info(title: '提示', text: _infoText);
+    return NoteBanner.info(persistKey: 'scheme_scope_info', text: _infoText);
   }
 
   // ---------- 方案单选 ----------
 
   Widget _buildSchemeChooser(ColorScheme cs) {
     return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      child: RadioGroup<String>(
-        groupValue: _scheme,
-        onChanged: (v) {
-          if (v != null && v != _scheme) {
-            setState(() => _scheme = v);
-          }
-        },
-        child: Column(
-          children: [
-            _schemeRow(cs, value: '811', label: '811 方案', hint: '核心绩 80% + 学术 10% + 综合 10%'),
-            _schemeRow(cs, value: '82', label: '82 方案', hint: '核心绩 80% + 学术 20%'),
-          ],
-        ),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '方案',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: cs.onSurface.withValues(alpha: .85),
+            ),
+          ),
+          const SizedBox(height: 4),
+          RadioGroup<String>(
+            groupValue: _scheme,
+            onChanged: (v) {
+              if (v != null && v != _scheme) {
+                setState(() => _scheme = v);
+              }
+            },
+            child: Column(
+              children: [
+                _schemeRow(cs, value: '811', label: '811'),
+                _schemeRow(cs, value: '82', label: '82'),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -216,14 +233,13 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     ColorScheme cs, {
     required String value,
     required String label,
-    required String hint,
   }) {
     final selected = _scheme == value;
     return InkWell(
       onTap: () => setState(() => _scheme = value),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             Radio<String>(value: value, activeColor: cs.primary),
@@ -231,19 +247,9 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             Text(
               label,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 color: cs.onSurface.withValues(alpha: selected ? .95 : .8),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              hint,
-              style: TextStyle(
-                fontSize: 12,
-                color: cs.onSurface.withValues(
-                  alpha: selected ? .5 : .38,
-                ),
               ),
             ),
           ],
@@ -256,11 +262,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
 
   Widget _buildCoreCard(ColorScheme cs) {
     final invalid = _invalidShown(_coreCtrl.text);
-    final coreCount =
-        (ref.watch(gradesProvider).asData?.value == null)
-        ? 0
-        : CoreGpaUtil.analyze(ref.watch(gradesProvider).asData!.value).courses
-              .length;
     return GlassCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -293,18 +294,8 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              Text(
-                _coreCustom
-                    ? '（双击后已自定义）'
-                    : '（学分加权 · 与成绩单核心绩口径一致 · $coreCount 门）',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: cs.onSurface.withValues(alpha: .45),
-                ),
-              ),
               const Spacer(),
-              if (_coreCustom)
+              if (_coreCustom || _coreEditing)
                 TextButton.icon(
                   onPressed: () {
                     setState(() {
@@ -322,44 +313,69 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             ],
           ),
           const SizedBox(height: 8),
-          GestureDetector(
-            onDoubleTap:
-                _coreEditing || _coreCustom
-                    ? null
-                    : () => setState(() => _coreEditing = true),
-            child: TextField(
-              controller: _coreCtrl,
-              enabled: _coreEditing,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              maxLength: 8,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: cs.onSurface,
-              ),
-              decoration: InputDecoration(
-                counterText: '',
-                hintText: '自动计算中…（双击可自定义，0 – 4.0）',
-                hintStyle: TextStyle(
-                  fontSize: 13,
-                  color: cs.onSurface.withValues(alpha: .35),
-                ),
-                errorText: invalid ? '请输入 0 – 4.0 之间的数值' : null,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                border: const OutlineInputBorder(),
-              ),
-              onChanged: (v) {
-                if (!_coreCustom) setState(() => _coreCustom = true);
-                setState(() {});
-              },
-            ),
-          ),
+          _buildCoreInput(cs, invalid: invalid),
         ],
       ),
+    );
+  }
+
+  /// 核心绩输入：未编辑态渲染自绘只读框（双击进入编辑态）。
+  /// 不能用 enabled:false 的 TextField——其内部 IgnorePointer 会吞掉
+  /// 双击手势，导致自定义功能失效。
+  Widget _buildCoreInput(ColorScheme cs, {required bool invalid}) {
+    if (!_coreEditing) {
+      final value = _coreCtrl.text.trim();
+      return InkWell(
+        onDoubleTap: () => setState(() => _coreEditing = true),
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: cs.onSurface.withValues(alpha: .3)),
+          ),
+          child: Text(
+            value.isEmpty ? '自动计算中…（双击可自定义）' : value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: value.isEmpty
+                  ? cs.onSurface.withValues(alpha: .35)
+                  : cs.onSurface,
+            ),
+          ),
+        ),
+      );
+    }
+    return TextField(
+      controller: _coreCtrl,
+      autofocus: true,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      maxLength: 8,
+      style: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        color: cs.onSurface,
+      ),
+      decoration: InputDecoration(
+        counterText: '',
+        hintText: '0 – 4.0',
+        hintStyle: TextStyle(
+          fontSize: 13,
+          color: cs.onSurface.withValues(alpha: .35),
+        ),
+        errorText: invalid ? '请输入 0 – 4.0 之间的数值' : null,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+        border: const OutlineInputBorder(),
+      ),
+      onChanged: (_) => setState(() {
+        _coreCustom = true;
+      }),
     );
   }
 
@@ -381,33 +397,18 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     final ctrl = isAcademic ? _academicCtrl : _comprehensiveCtrl;
     final enabled = isAcademic || _scheme == '811';
     final invalid = _invalidShown(ctrl.text);
-    final filled = ctrl.text.trim().isNotEmpty;
     return GlassCard(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                isAcademic ? '学术科研能力' : '综合能力',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: cs.onSurface.withValues(
-                    alpha: enabled ? .85 : .4,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                isAcademic ? '（0 – 4.0）' : '（0 – 4.0 · 仅 811 方案）',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: cs.onSurface.withValues(alpha: .45),
-                ),
-              ),
-            ],
+          Text(
+            isAcademic ? '学术科研能力' : '综合能力',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: cs.onSurface.withValues(alpha: enabled ? .85 : .4),
+            ),
           ),
           const SizedBox(height: 8),
           TextField(
@@ -424,9 +425,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
             ),
             decoration: InputDecoration(
               counterText: '',
-              hintText: enabled
-                  ? (filled ? null : '如 3.70（未填则不计结果）')
-                  : '综合能力不参与 82 方案',
+              hintText: enabled ? '0 – 4.0' : '综合能力不参与 82 方案',
               hintStyle: TextStyle(
                 fontSize: 13,
                 color: cs.onSurface.withValues(alpha: .35),
@@ -487,6 +486,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       '计算结果',
@@ -496,18 +496,23 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                         color: cs.onSurface.withValues(alpha: .85),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 14),
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: Checkbox(
+                        value: _precise5,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        onChanged: (v) => setState(() => _precise5 = v ?? false),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     Text(
-                      '5 位小数',
+                      '精确计算',
                       style: TextStyle(
                         fontSize: 12,
                         color: cs.onSurface.withValues(alpha: .55),
                       ),
-                    ),
-                    Switch(
-                      value: _precise5,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onChanged: (v) => setState(() => _precise5 = v),
                     ),
                   ],
                 ),

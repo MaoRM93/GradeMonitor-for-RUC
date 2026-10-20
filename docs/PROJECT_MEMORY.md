@@ -127,8 +127,8 @@ ditto -c -k --keepParent /Users/admin/Desktop/GradeMonitor.app /Users/admin/Desk
 
 - 欢迎页各步骤语言表达精修（用户未再提）。
 - GitHub 首页 `logs/` 行文案。
-- 正式发版时确认 tag：`git tag -f 107.0.0.154 && git push -f origin 107.0.0.154`。
-- **10-20 第四轮 UI 已交付 build 154**：桌面 `/Users/admin/Desktop/GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.154-macOS.zip`(21M)，Info 校验 107.0.0/154 ✓。改动：①成绩单「学期/范围」下拉加边框（与搜索框同源边框色，AppTheme.lightBorder/darkBorder 跟随主题）；②核心绩徽章精简为 `核心绩 3.73 30/52 门`（核心数/总数，无括号无附加文案）；③成绩数据表四周圆角外框（Container border+Clip.antiAlias 包 DataTable）；④方案页 811/82 改一行两列（选中格 primary 高亮+边框）。打包前铁律清场照例（旧产物 153 已删、app 卸载、Application Support 清空）；首启全新状态需重新登录。
+- 正式发版时确认 tag：`git tag -f 107.0.0.155 && git push -f origin 107.0.0.155`。
+- **10-20 第五轮已交付 build 155**：修方案页布局崩溃（811/82 两列 Row 的 `CrossAxisAlignment.stretch` 在 SingleChildScrollView 无界高度下抛异常，release 化为灰盒吞掉「方案」之后的全部内容——剔除非 stretch 修复）；欢迎页步骤切换动画丝滑化（外层 `AnimatedSize` 平滑页面高度差 + 位移 0.02→0.04 + 300ms in/out 双 easeOutCubic + layoutBuilder 顶对齐叠放）。桌面 app(50.3MB) + `GradeMonitor-107.0.0.155-macOS.zip`(21M)，Info 校验 107.0.0/155 ✓；清场照例（首启需重新登录）。**教训：垂直滚动容器内禁用 Row stretch**。
 - **10-20 第二轮改动已交付 build 152**：打包前铁律清场（桌面旧 `GradeMonitor.app`+150/151 zip 已删、`/Applications` 卸载、Application Support 登录/成绩数据清除、flutter clean）；产出 Desktop `GradeMonitor.app`(50.3MB) + `GradeMonitor-107.0.0.152-macOS.zip`(21M)，Info 校验 107.0.0 / 152 通过。**首启为全新状态，需重新登录**。
 
 ## 2026-10-20 第三轮：PF 剔除规则 + 提示条关闭 + 方案页文案重构 + 双击 bug

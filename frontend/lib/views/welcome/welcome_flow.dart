@@ -252,25 +252,48 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                 children: [
                   // 顶部返回区（欢迎页不显示返回）
                   SizedBox(height: 40, child: _buildBackRow(cs)),
-                  // 页面内容（切换时淡入 + 轻微上移）
+                  // 页面内容（切换时淡入 + 轻微上移；外层 AnimatedSize
+                  // 让步骤间页面高度差异平滑过渡，避免内容跳变）
                   Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 260),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeIn,
-                      transitionBuilder: (child, anim) {
-                        final offset = Tween<Offset>(
-                          begin: const Offset(0, .02),
-                          end: Offset.zero,
-                        ).animate(anim);
-                        return FadeTransition(
-                          opacity: anim,
-                          child: SlideTransition(position: offset, child: child),
-                        );
-                      },
-                      child: KeyedSubtree(
-                        key: ValueKey(_page),
-                        child: _buildPage(cs),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeInOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeOutCubic,
+                          transitionBuilder: (child, anim) {
+                            final offset = Tween<Offset>(
+                              begin: const Offset(0, .04),
+                              end: Offset.zero,
+                            ).animate(anim);
+                            return FadeTransition(
+                              opacity: anim,
+                              child: SlideTransition(
+                                position: offset,
+                                child: child,
+                              ),
+                            );
+                          },
+                          // 顶部对齐叠放：旧页淡出时新页从旧页顶部位置起始，
+                          // 高度变化完全交给 AnimatedSize 平滑处理
+                          layoutBuilder: (currentChild, previousChildren) {
+                            return Stack(
+                              alignment: Alignment.topCenter,
+                              children: <Widget>[
+                                ...previousChildren,
+                                ?currentChild,
+                              ],
+                            );
+                          },
+                          child: KeyedSubtree(
+                            key: ValueKey(_page),
+                            child: _buildPage(cs),
+                          ),
+                        ),
                       ),
                     ),
                   ),

@@ -218,7 +218,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               }
             },
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(child: _schemeCell(cs, value: '811')),
                 const SizedBox(width: 10),

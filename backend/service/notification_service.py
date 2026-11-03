@@ -205,7 +205,19 @@ def _ensure_win_aumid() -> None:
 
 def _show(title: str, message: str, record: bool = True) -> None:
     """发送 macOS/Windows 系统通知。
-    注：WebSocket 辅助通道暂时关闭，优先保证稳定性。后续开启时取消 _try_send_via_websocket 注释即可。
+
+    **macOS 改为由 App 自身的原生通知通道投递**（前端
+    flutter_local_notifications → UNUserNotification），原因是
+    `osascript display notification` 由 Script Editor/osascript 代发：
+    通知图标是系统通用占位图（不是本 App 图标），点击也不会回到 App。
+    改由 App 进程投递后，图标即 App 图标、点击可激活主窗口、且可被
+    「聚焦」等系统设置归类到本 App 下。
+
+    仅当前端 WebSocket 未连接时才回退 osascript（保证仍能收到提醒）。
+
+    注意：**通知内容、触发条件、去重与对比逻辑完全不变**，这里只是把
+    "由谁弹出这条通知"从前端 osascript 换成 App 自己的原生通道。
+
     [record] 是否持久化到 recent_change.json（仪表板「最新动态」读取汇总），
     测试/预览通知传 False 避免覆盖真实变动记录。
     """
@@ -228,6 +240,14 @@ def _show(title: str, message: str, record: bool = True) -> None:
                 _json.dump(_data, _f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.debug(f"记录最近通知失败: {e}")
+
+    # macOS：优先交给 App 原生通知（正确图标 + 可点击回 App）
+    if sys.platform == "darwin":
+        if _try_send_via_websocket(title, message):
+            logger.info(f"通知已交由 App 原生通道投递: {title}")
+            return
+        logger.debug("App 原生通道不可用，回退 osascript")
+
     try:
         if sys.platform == "darwin":
             escaped_title = title.replace('"', '\\"').replace("'", "\\'")
@@ -258,32 +278,36 @@ def _show(title: str, message: str, record: bool = True) -> None:
 
 
 def _try_send_via_websocket(title: str, message: str) -> bool:
-    """尝试通过 MonitorService 的 WebSocket 广播通知事件。
-    返回 True 表示成功广播（有至少一个 Flutter 客户端连接），False 表示无可用通道。
+    """通过 MonitorService 的 WebSocket 广播 show_notification 事件。
+
+    返回 True 表示已投递（存在至少一个前端 WebSocket 连接）；
+    False 表示无可用前端通道，调用方应回退 osascript。
+
+    只负责"把通知交给 App 进程弹出"，不参与任何通知内容的生成。
     """
     try:
-        from backend.service.monitor_service import monitor
         import asyncio
 
-        # 获取运行中的 event loop
+        from backend.service.monitor_service import monitor
+
+        # 没有前端连接时无法投递，交给 osascript 兜底
+        if not monitor._listeners:
+            logger.debug("WebSocket 无连接客户端，回退 osascript")
+            return False
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            logger.debug("WebSocket 不可用（无运行中的 event loop），使用 fallback")
+            logger.debug("无运行中的 event loop，回退 osascript")
             return False
 
-        # 检查是否有连接的 Flutter 客户端
-        if not monitor._listeners:
-            logger.debug("WebSocket 无连接客户端，使用 osascript fallback")
-            return False
-
-        # 广播通知事件
-        loop.create_task(monitor._broadcast({
+        payload = {
             "type": "show_notification",
             "title": title,
             "message": message,
-        }))
+        }
+        loop.create_task(monitor._broadcast(payload))
         return True
     except Exception as e:
-        logger.debug(f"WebSocket 广播失败，使用 fallback: {e}")
+        logger.debug(f"WebSocket 广播失败，回退 osascript: {e}")
         return False

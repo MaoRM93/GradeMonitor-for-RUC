@@ -13,15 +13,27 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Any
 
-from backend.auth.login import login_and_bind_jw
+from backend.api.security import (
+    TOKEN_HEADER,
+    header_token,
+    init_token,
+    is_public_path,
+)
+from backend.auth.login import LoginError, login_and_bind_jw
 from backend.service.grade_service import GradeService
 from backend.service.rank_service import RankService
 from backend.service.monitor_service import monitor
 from backend.service.notification_service import send_test_notification, send_notification_preview
-from backend.storage.settings import load_settings, save_settings, DEFAULT_SETTINGS
+from backend.storage.settings import (
+    load_settings,
+    public_settings,
+    save_settings,
+    DEFAULT_SETTINGS,
+)
 from backend.storage.cache import (
     diff_grades,
     derive_semesters_from_local_grades,
@@ -40,12 +52,17 @@ app = FastAPI(
     description="自动查成绩后台服务",
 )
 
-# 允许本地 Flutter 应用跨域请求
+# 启动时确定本次运行的访问令牌（来自前端注入的环境变量，或本地 token 文件）
+_API_TOKEN = init_token()
+
+# CORS 收紧：只允许本机同源访问。原先的 allow_origins=["*"] 会让任意网页
+# 读取本机成绩/设置；现在仅放行 127.0.0.1 / localhost 的常见端口形态。
+# 真正的防跨站保护由下面的令牌校验负责（CORS 只是额外一层）。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origin_regex=r"^(http://(127\.0\.0\.1|localhost)(:\d+)?|file://.*)$",
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*", TOKEN_HEADER],
 )
 
 
@@ -63,6 +80,34 @@ async def log_requests(request: Request, call_next):
         elapsed = (time.time() - start_time) * 1000
         logger.error(f"<-- {request.method} {request.url.path} ERROR ({elapsed:.0f}ms): {e}")
         raise
+
+
+# ---------- 访问令牌校验中间件 ----------
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    """所有 /api/* 端点必须携带有效令牌（健康检查与文档路径除外）。
+
+    令牌由前端拉起后端时通过 GRADEMONITOR_API_TOKEN 注入，或由后端生成
+    后写入 <数据目录>/api_token（0600）供本地复用；不随网络传输明文。
+    未通过的请求在进入业务逻辑前即返回 401，不泄露任何数据。
+    """
+    path = request.url.path
+    # CORS 预检请求放行（浏览器 OPTIONS 不带自定义头）
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if is_public_path(path):
+        return await call_next(request)
+
+    provided = request.headers.get(TOKEN_HEADER) or request.headers.get("Authorization", "")
+    if provided.lower().startswith("bearer "):
+        provided = provided[7:]
+    if not header_token(provided):
+        logger.warning(f"拒绝未授权请求: {request.method} {path}")
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "unauthorized: missing or invalid API token"},
+        )
+    return await call_next(request)
 
 
 # ---------- 内存缓存（仅在查询时读写文件）----------
@@ -203,6 +248,18 @@ async def login(req: LoginRequest):
         login_and_bind_jw(session, req.username, req.password)
         logger.info(f"用户 {req.username} 登录成功")
         return LoginResponse(success=True, message="登录成功")
+    except LoginError as e:
+        # 失败已经分类（凭据错误 / 维护中 / 网络不通），把 kind 透给前端，
+        # 前端按 kind 显示对应文案；再也不用把维护和断网都报成密码错。
+        logger.error(f"用户 {req.username} 登录失败 [{e.kind}]: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "kind": e.kind,
+                "message": e.user_message,
+                "detail": str(e),
+            },
+        )
     except Exception as e:
         logger.error(f"用户 {req.username} 登录失败: {e}")
         raise HTTPException(status_code=401, detail=str(e))
@@ -255,17 +312,30 @@ async def get_rank():
 
 @app.get("/api/settings")
 async def get_settings():
-    return load_settings()
+    """返回设置（**不含密码**，仅 has_password 标记）。
+
+    密码保存在系统安全存储（钥匙串/DPAPI）中，前端不再需要取值；
+    给出 has_password 便于设置页显示"已保存密码"状态。
+    """
+    return public_settings()
 
 
 @app.post("/api/settings")
 async def update_settings(update: SettingsUpdate):
     current = load_settings()
     changed = {k: v for k, v in update.dict(exclude_none=True).items() if v is not None}
+
+    # 密码单独处理：只有前端显式传了非空 password 才更新；传空串表示清除。
+    # 未传（None/exclude_none 后不存在）则保持安全存储中的既有密码不变。
+    password_change = changed.pop("password", None)
+
     for key, val in changed.items():
         current[key] = val
+    if password_change is not None:
+        current["password"] = password_change
+
     save_settings(current)
-    logger.info(f"设置已更新: {list(changed.keys())}")
+    logger.info(f"设置已更新: {list(changed.keys())}{' + password' if password_change is not None else ''}")
 
     # 开机自启动设置变更时，同步到系统（macOS 登录项 / Windows 注册表）
     if "auto_start" in changed:
@@ -276,7 +346,8 @@ async def update_settings(update: SettingsUpdate):
         except Exception as e:
             logger.warning(f"开机自启动设置失败: {e}")
 
-    return {"success": True, "settings": current}
+    # 响应同样不包含密码
+    return {"success": True, "settings": public_settings()}
 
 
 @app.get("/api/monitor/status")
@@ -323,6 +394,35 @@ async def restart_monitor():
     except Exception as e:
         logger.error(f"重启监控失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/logout")
+async def logout():
+    """退出登录：停掉监控、清除已保存的凭据，回到未登录状态。
+
+    只清除**凭据**（学号 + 钥匙串/DPAPI 里的密码）与欢迎向导完成标记，
+    不删除已缓存的成绩与排名数据——本地数据属于用户，退出登录不该连带清空。
+    需要清空数据请用 /api/dev/clear-all-data。
+    """
+    try:
+        # 先停监控，避免凭据被清掉后监控线程拿着空密码反复请求教务系统
+        if monitor.is_running:
+            await monitor.stop()
+            logger.info("退出登录：监控已停止")
+    except Exception as e:
+        logger.warning(f"退出登录时停止监控失败: {e}")
+
+    current = load_settings()
+    current["username"] = ""
+    # 显式传空串 → save_settings 会走 clear_password() 清除安全存储
+    current["password"] = ""
+    current["remember_me"] = False
+    # 重置欢迎向导标记：下次登录时重新走一遍引导
+    current["welcome_completed"] = False
+    save_settings(current)
+    logger.info("退出登录：凭据已清除")
+
+    return {"success": True, "message": "已退出登录", "settings": public_settings()}
 
 
 @app.post("/api/notification/test")
@@ -555,6 +655,14 @@ async def get_data_dir_info():
 
 @app.websocket("/ws/events")
 async def websocket_events(websocket: WebSocket):
+    # WebSocket 鉴权：浏览器/第三方进程无法伪造自定义头，因此这里同时
+    # 接受 Header 与 query 参数（前端用 Header，尽力而为）。
+    provided = websocket.headers.get(TOKEN_HEADER) or websocket.query_params.get("token", "")
+    if not header_token(provided):
+        logger.warning("拒绝未授权的 WebSocket 连接")
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     await websocket.send_json({"type": "connected", "message": "已连接"})
     logger.info("WebSocket 客户端已连接")

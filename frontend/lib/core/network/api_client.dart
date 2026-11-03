@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'dart:io';
 
 import '../constants/api_path.dart';
+import '../constants/api_token.dart';
 import '../logger/app_logger.dart';
 import '../../core/service/update_service.dart';
 
@@ -28,19 +29,34 @@ class ApiClient {
       ),
     );
 
-    // 日志拦截器：打印请求和响应
+    // 令牌拦截器：为每个请求附加本地后端访问令牌。
+    // 必须放在最前（先于日志），且用拦截器而非静态 header——令牌在
+    // App 启动过程中才生成，而 ApiClient 是单例、可能先被构造。
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final token = ApiToken.value;
+          if (token.isNotEmpty) {
+            options.headers[ApiToken.headerName] = token;
+          }
+          handler.next(options);
+        },
+      ),
+    );
+
+    // 日志拦截器：打印请求和响应（敏感字段脱敏）
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
           _log.debug('${options.method} ${options.uri}');
           if (options.data != null) {
-            _log.debug('Body: ${options.data}');
+            _log.debug('Body: ${_redact(options.data)}');
           }
           handler.next(options);
         },
         onResponse: (response, handler) {
           _log.debug(
-            'Response ${response.statusCode}: ${_truncate(response.data)}',
+            'Response ${response.statusCode}: ${_truncate(_redact(response.data))}',
           );
           handler.next(response);
         },
@@ -48,7 +64,8 @@ class ApiClient {
           _log.error('HTTP Error: ${error.message}', error);
           if (error.response != null) {
             _log.error(
-              'Status: ${error.response?.statusCode}, Body: ${_truncate(error.response?.data)}',
+              'Status: ${error.response?.statusCode}, '
+              'Body: ${_truncate(_redact(error.response?.data))}',
             );
           }
           if (error.error is SocketException) {
@@ -58,6 +75,27 @@ class ApiClient {
         },
       ),
     );
+  }
+
+  /// 需要脱敏的字段名（登录密码不应以任何形式落盘到日志）
+  static const Set<String> _secretKeys = {'password', 'token'};
+
+  /// 递归替换敏感字段的值为 `***`
+  ///
+  /// 历史问题：日志拦截器原先把整个请求体 toString 打进 frontend.log，
+  /// 登录请求体里的明文密码因此被长期写进日志文件。
+  dynamic _redact(dynamic data) {
+    if (data is Map) {
+      final out = <String, dynamic>{};
+      data.forEach((k, v) {
+        final key = k.toString().toLowerCase();
+        final isSecret = _secretKeys.any((s) => key.contains(s));
+        out[k.toString()] = isSecret ? '***' : _redact(v);
+      });
+      return out;
+    }
+    if (data is List) return data.map(_redact).toList();
+    return data;
   }
 
   String _truncate(dynamic data, [int maxLen = 500]) {
@@ -82,6 +120,11 @@ class ApiClient {
       );
     }
     return resp;
+  }
+
+  /// 退出登录：后端会停止监控、清除已保存的凭据，并重置欢迎向导标记。
+  Future<Response> logout() async {
+    return dio.post(ApiPath.logout);
   }
 
   // ---- Data ----

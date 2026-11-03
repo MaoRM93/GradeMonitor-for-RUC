@@ -5,8 +5,11 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/service/tray_service.dart';
+import '../../core/service/session_service.dart';
+import '../../core/logger/app_logger.dart';
 import '../../core/service/update_installer.dart';
 import '../../core/service/update_service.dart';
+import '../../core/service/update_verifier.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/monitor_provider.dart';
 import '../../widgets/glass_card.dart';
@@ -21,12 +24,23 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
+  final _log = AppLogger('settings_ui');
+
   // 表单控制器
   final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _hidePassword = true;
   bool _rememberMe = false;
   bool _isLoggingIn = false;
+
+  /// 后端是否已保存密码（仅用于提示文案，前端不再持有明文）
+  bool _hasSavedPassword = false;
+
+  /// 是否处于已登录状态（学号 + 已保存凭据）。
+  /// 已登录时账号区只展示学号与「退出登录」，不再展示密码输入框；
+  /// 退出后回退成登录表单，供用户重新登录。
+  bool _loggedIn = false;
+  bool _isLoggingOut = false;
 
   // 监控设置
   bool _autoMonitor = false;
@@ -58,9 +72,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     await ref.read(settingsProvider.notifier).fetchSettings();
     final s = ref.read(settingsProvider);
     _usernameCtrl.text = s.username;
-    _passwordCtrl.text = s.password;
+    // 后端不再回传密码（安全存储），输入框留空；
+    // 已保存密码时用 hint 提示"留空则保持原密码"。
+    _passwordCtrl.text = '';
+    _hasSavedPassword = s.hasPassword;
     _rememberMe = s.rememberMe;
     _hidePassword = true;
+    // 已登录 = 有学号且后端保存着密码（退出登录后两者都会被清空）
+    _loggedIn = s.username.isNotEmpty && s.hasPassword;
     _autoMonitor = s.autoMonitorEnabled;
     _rankMonitor = s.rankMonitorEnabled;
     _safeMode = s.randomIntervalEnabled;
@@ -107,7 +126,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final current = ref.read(settingsProvider);
       final merged = AppSettings(
         username: current.username,
-        password: current.password,
+        // 密码不再进入设置对象（后端安全存储持有），保持 hasPassword 标记
+        password: '',
+        hasPassword: current.hasPassword,
         rememberMe: current.rememberMe,
         notifyMode: (changes['notify_mode'] as String?) ?? current.notifyMode,
         startTime: (changes['start_time'] as String?) ?? current.startTime,
@@ -134,6 +155,212 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       );
       await notifier.saveSettings(merged);
     } catch (_) {}
+  }
+
+  // ── 账号区 ──
+
+  /// 已登录：只显示学号与「退出登录」，不再展示密码输入框
+  Widget _buildAccountRow(ColorScheme colorScheme) {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 22,
+          backgroundColor: colorScheme.primary.withValues(alpha: .12),
+          child: Icon(
+            Icons.person_rounded,
+            size: 24,
+            color: colorScheme.primary,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '学号',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurface.withValues(alpha: .5),
+                ),
+              ),
+              const SizedBox(height: 2),
+              SelectableText(
+                _usernameCtrl.text.isEmpty ? '未绑定' : _usernameCtrl.text,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: .5,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        OutlinedButton.icon(
+          onPressed: _isLoggingOut ? null : _logout,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: colorScheme.error,
+            side: BorderSide(color: colorScheme.error.withValues(alpha: .45)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+          icon: _isLoggingOut
+              ? SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colorScheme.error,
+                  ),
+                )
+              : const Icon(Icons.logout_rounded, size: 18),
+          label: Text(_isLoggingOut ? '退出中...' : '退出登录'),
+        ),
+      ],
+    );
+  }
+
+  /// 未登录（刚退出登录、或凭据缺失）：显示登录表单
+  Widget _buildLoginForm(ColorScheme colorScheme) {
+    return Column(
+      children: [
+        TextField(
+          controller: _usernameCtrl,
+          decoration: const InputDecoration(
+            labelText: '学号',
+            hintText: '输入教务系统学号',
+            prefixIcon: Icon(Icons.badge_rounded, size: 20),
+          ),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _passwordCtrl,
+          obscureText: _hidePassword,
+          keyboardType: TextInputType.visiblePassword,
+          enableSuggestions: false,
+          autocorrect: false,
+          enableIMEPersonalizedLearning: false,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[\x00-\x7F]')),
+          ],
+          decoration: InputDecoration(
+            labelText: '密码',
+            hintText: _hasSavedPassword
+                ? '已保存密码（留空则保持不变）'
+                : '输入教务系统密码（仅英文/数字/符号）',
+            prefixIcon: const Icon(Icons.key_rounded, size: 20),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _hidePassword
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+                size: 20,
+              ),
+              onPressed: () =>
+                  setState(() => _hidePassword = !_hidePassword),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Checkbox(
+              value: _rememberMe,
+              onChanged: (v) => setState(() => _rememberMe = v ?? false),
+            ),
+            GestureDetector(
+              onTap: () => setState(() => _rememberMe = !_rememberMe),
+              child: Text(
+                '记住密码',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: colorScheme.onSurface.withValues(alpha: .6),
+                ),
+              ),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: _isLoggingIn ? null : _testLogin,
+              icon: _isLoggingIn
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.login_rounded, size: 18),
+              label: Text(_isLoggingIn ? '验证中...' : '登录并保存'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 退出登录：后端停监控 + 清除凭据 + 重置欢迎标记，前端切回欢迎向导
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出登录'),
+        content: const Text(
+          '将停止成绩监控并清除已保存的学号与密码。\n'
+          '已缓存的成绩和排名会保留，不会删除。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('退出'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isLoggingOut = true);
+    try {
+      await ref.read(apiClientProvider).logout();
+      _log.info('已退出登录');
+
+      // 同步前端状态：清空学号与密码标记，避免界面仍显示旧学号
+      _usernameCtrl.text = '';
+      _passwordCtrl.text = '';
+      _hasSavedPassword = false;
+      _rememberMe = false;
+      final notifier = ref.read(settingsProvider.notifier);
+      final current = ref.read(settingsProvider);
+      await notifier.saveSettings(
+        current.copyWith(
+          username: '',
+          password: '',
+          hasPassword: false,
+          rememberMe: false,
+          welcomeCompleted: false,
+        ),
+      );
+      // 停掉本地监控状态显示
+      await ref.read(monitorProvider.notifier).fetchStatus();
+
+      if (mounted) {
+        setState(() => _loggedIn = false);
+        ToastHost().show('已退出登录');
+      }
+      // 通知导航层切回欢迎向导，让用户重新登录
+      SessionService.notifyLogout();
+    } catch (e) {
+      _log.error('退出登录失败', e);
+      if (mounted) ToastHost().show('退出登录失败：$e');
+    } finally {
+      if (mounted) setState(() => _isLoggingOut = false);
+    }
   }
 
   /// 切换监控启停，同步后台服务
@@ -231,7 +458,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final current = ref.read(settingsProvider);
       final updated = current.copyWith(
         username: _usernameCtrl.text.trim(),
-        password: _passwordCtrl.text,
+        // 密码已由 login() 直接写入后端安全存储；此处不再回传，
+        // 避免设置对象（密码为空）覆盖掉刚保存的凭据。
+        hasPassword: true,
         rememberMe: _rememberMe,
         autoMonitorEnabled: _autoMonitor,
         rankMonitorEnabled: _rankMonitor,
@@ -244,6 +473,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         hideUnknownCourses: _hideUnknownCourses,
       );
       await notifier.saveSettings(updated);
+      // 登录成功后账号区切换成「学号 + 退出登录」，并清空密码输入框
+      _passwordCtrl.text = '';
+      _hasSavedPassword = true;
     }
 
     if (mounted) {
@@ -252,6 +484,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
     setState(() {
       _isLoggingIn = false;
+      if (result.success) _loggedIn = true;
     });
   }
 
@@ -353,90 +586,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(height: 28),
 
-              // ---- ① 账号与登录 ----
-              _SectionTitle(title: '账号与登录', icon: Icons.lock_rounded),
+              // ---- ① 账号 ----
+              _SectionTitle(title: '账号', icon: Icons.account_circle_rounded),
               const SizedBox(height: 12),
               GlassCard(
                 padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _usernameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: '学号',
-                        hintText: '输入教务系统学号',
-                        prefixIcon: Icon(Icons.badge_rounded, size: 20),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _passwordCtrl,
-                      obscureText: _hidePassword,
-                      keyboardType: TextInputType.visiblePassword,
-                      enableSuggestions: false,
-                      autocorrect: false,
-                      enableIMEPersonalizedLearning: false,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[\x00-\x7F]'),
-                        ),
-                      ],
-                      decoration: InputDecoration(
-                        labelText: '密码',
-                        hintText: '输入教务系统密码（仅英文/数字/符号）',
-                        prefixIcon: const Icon(Icons.key_rounded, size: 20),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _hidePassword
-                                ? Icons.visibility_off_rounded
-                                : Icons.visibility_rounded,
-                            size: 20,
-                          ),
-                          onPressed: () =>
-                              setState(() => _hidePassword = !_hidePassword),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Checkbox(
-                          value: _rememberMe,
-                          onChanged: (v) =>
-                              setState(() => _rememberMe = v ?? false),
-                        ),
-                        GestureDetector(
-                          onTap: () =>
-                              setState(() => _rememberMe = !_rememberMe),
-                          child: Text(
-                            '记住密码',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colorScheme.onSurface.withValues(
-                                alpha: .6,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const Spacer(),
-                        FilledButton.icon(
-                          onPressed: _isLoggingIn ? null : _testLogin,
-                          icon: _isLoggingIn
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.login_rounded, size: 18),
-                          label: Text(_isLoggingIn ? '验证中...' : '登录并保存'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                child: _loggedIn ? _buildAccountRow(colorScheme) : _buildLoginForm(colorScheme),
               ),
               const SizedBox(height: 24),
 
@@ -835,6 +990,8 @@ enum _DownloadPhase {
 }
 
 class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
+  final _log = AppLogger('update_ui');
+
   late final ReleaseAsset? _asset = UpdateService().pickPlatformAsset(
     widget.result.assets,
   );
@@ -844,6 +1001,9 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
   String? _savedPath;
   String _errorText = '';
 
+  /// 当前 failed 阶段是「签名校验未通过」而非下载失败
+  bool _verifyFailed = false;
+
   /// 手动安装指引（自动安装不可用时的原因）
   String _installHint = '';
 
@@ -852,7 +1012,11 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       _phase == _DownloadPhase.preparing ||
       _phase == _DownloadPhase.installing;
 
-  bool get _notesEmpty => widget.result.releaseNotes.trim().isEmpty;
+  /// 更新日志（已剔除机器用的签名清单块）
+  String get _notesText =>
+      UpdateVerifier.stripManifestBlocks(widget.result.releaseNotes);
+
+  bool get _notesEmpty => _notesText.trim().isEmpty;
 
   /// 当前版本号文案（弹窗独立于设置页类，需自行计算）
   String get _versionDisplay {
@@ -868,6 +1032,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
     setState(() {
       _phase = _DownloadPhase.downloading;
       _errorText = '';
+      _verifyFailed = false;
       _progress = 0;
     });
     try {
@@ -892,14 +1057,46 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
     }
   }
 
-  /// 「立即安装并重启」：解包校验 → 退出应用 → 看守脚本自动替换安装并重启。
-  /// 自动安装不可用（权限/形态限制）时切换到手动安装指引。
+  /// 「立即安装并重启」：**先做发布包签名校验** → 解包校验 → 退出应用
+  /// → 看守脚本自动替换安装并重启。
+  ///
+  /// 签名校验失败（含「发布方未提供清单」）一律**拒绝自动安装**并降级为
+  /// 手动安装：这可以挡住「GitHub 账号/Release 资产被替换」的供应链攻击，
+  /// 因为它改不动写死在客户端里的 Ed25519 公钥。
   Future<void> _startInstall() async {
     if (_savedPath == null || _busy) return;
     setState(() {
       _phase = _DownloadPhase.preparing;
       _installHint = '';
     });
+
+    final manifest = widget.result.manifestFor(_asset);
+    if (manifest == null) {
+      setState(() {
+        _phase = _DownloadPhase.manual;
+        _installHint = '该版本未提供与本安装包对应的签名清单，无法验证完整性，'
+            '已停止自动安装。请手动安装并自行确认来源。';
+      });
+      return;
+    }
+
+    final check = await UpdateVerifier.verifyDownloadedFile(
+      _savedPath!,
+      manifest,
+    );
+    if (!mounted) return;
+    if (!check.ok) {
+      setState(() {
+        _phase = _DownloadPhase.failed;
+        _errorText = '安装包校验失败：${check.reason}';
+        _installHint = '校验未通过，已阻止自动安装。请删除该文件后重新下载，'
+            '或前往官方下载页手动获取。';
+        _verifyFailed = true;
+      });
+      return;
+    }
+    _log.info('安装包签名校验通过: ${manifest.file}');
+
     final outcome = await UpdateInstaller().prepareInstall(_savedPath!);
     if (!mounted) return;
 
@@ -952,7 +1149,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
                 ),
                 child: SingleChildScrollView(
                   child: MarkdownBody(
-                    data: widget.result.releaseNotes,
+                    data: _notesText,
                     softLineBreak: true,
                     styleSheet: _mdStyle(context),
                   ),
@@ -1024,7 +1221,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       case _DownloadPhase.manual:
         return '打开所在文件夹';
       case _DownloadPhase.failed:
-        return '重试下载';
+        return _verifyFailed ? '重新下载' : '重试下载';
       case _DownloadPhase.idle:
         return '直接下载';
     }
@@ -1120,8 +1317,11 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
           Padding(
             padding: const EdgeInsets.only(left: 22),
             child: Text(
-              '点击「立即安装并重启」后，应用将自动完成安装并重新打开'
-              '（安装过程中会短暂关闭）。',
+              widget.result.manifestFor(_asset) != null
+                  ? '点击「立即安装并重启」后，应用会先校验安装包的发布签名，'
+                        '通过后自动完成安装并重新打开（安装过程中会短暂关闭）。'
+                  : '该版本未提供与本安装包对应的签名清单，自动安装将被拒绝，'
+                        '请手动安装并自行确认来源。',
               style: sub,
             ),
           ),
@@ -1183,9 +1383,21 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
             children: [
               Icon(Icons.error_outline_rounded, size: 16, color: AppTheme.error),
               const SizedBox(width: 6),
-              Expanded(child: Text('下载失败：$_errorText', style: sub)),
+              Expanded(
+                child: Text(
+                  _verifyFailed ? _errorText : '下载失败：$_errorText',
+                  style: sub,
+                ),
+              ),
             ],
           ),
+          if (_verifyFailed && _installHint.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 22),
+              child: Text(_installHint, style: sub),
+            ),
+          ],
         ];
     }
   }

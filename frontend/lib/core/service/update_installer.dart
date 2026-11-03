@@ -67,7 +67,17 @@ class UpdateInstaller {
   /// 调用方以「准备中…」状态 await 即可。
   Future<PrepareOutcome> prepareInstall(String zipPath) async {
     try {
-      if (Platform.isMacOS) return _prepareMac(zipPath);
+      if (Platform.isMacOS) {
+        // DMG 是给手动分发用的：自动安装靠 ditto 解 zip，dmg 解不了。
+        // 走到这里说明 Release 里没有 zip 只有 dmg，明确告知用户手动拖拽安装。
+        final lower = zipPath.toLowerCase();
+        if (lower.endsWith('.dmg')) {
+          return PrepareOutcome(
+            reason: '该版本只提供 DMG 镜像，请打开后把 App 拖到 Applications 文件夹完成覆盖',
+          );
+        }
+        return _prepareMac(zipPath);
+      }
       if (Platform.isWindows) return _prepareWindows(zipPath);
       return PrepareOutcome(reason: '当前平台不支持自动安装');
     } catch (e) {

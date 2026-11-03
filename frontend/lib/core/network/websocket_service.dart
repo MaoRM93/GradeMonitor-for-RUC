@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../constants/api_path.dart';
+import '../constants/api_token.dart';
 import '../logger/app_logger.dart';
 
 /// WebSocket 事件类型
@@ -64,7 +66,24 @@ class WebSocketService {
 
   void _doConnect() {
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(ApiPath.wsUrl));
+      // 用 IOWebSocketChannel 以便携带鉴权头（WebSocketChannel.connect 不支持 header）。
+      // 令牌同时作为 header 与 query 参数传入：header 是首选，query 是
+      // 某些平台/后端实现未透传 header 时的兜底。
+      final token = ApiToken.value;
+      final baseUri = Uri.parse(ApiPath.wsUrl);
+      final uri = token.isEmpty
+          ? baseUri
+          : baseUri.replace(
+              queryParameters: {...baseUri.queryParameters, 'token': token},
+            );
+      _channel = IOWebSocketChannel.connect(
+        uri,
+        headers: token.isEmpty
+            ? null
+            : {ApiToken.headerName: token},
+        pingInterval: const Duration(seconds: 25),
+        connectTimeout: const Duration(seconds: 10),
+      );
       _isConnected = true;
       _reconnectAttempts = 0;
       _log.info('WebSocket 已连接');

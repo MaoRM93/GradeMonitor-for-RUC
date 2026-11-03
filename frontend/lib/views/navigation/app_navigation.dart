@@ -10,6 +10,7 @@ import '../scheme/scheme_page.dart';
 import '../settings/settings_page.dart';
 import '../welcome/welcome_flow.dart';
 import '../../core/service/update_service.dart';
+import '../../core/service/session_service.dart';
 import '../../widgets/toast_host.dart';
 
 enum NavDestination {
@@ -51,6 +52,8 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     windowManager.addListener(this);
     // 自动检查（开启程序/每小时）发现更新 → 弹「发现新版本」
     UpdateService.updateFound.addListener(_onAutoUpdateFound);
+    // 设置页退出登录 → 切回欢迎向导重新登录
+    SessionService.logoutSignal.addListener(_onLoggedOut);
     // 首帧渲染后再检查欢迎页，确保 context 可用
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkWelcomeWithRetry();
@@ -73,7 +76,18 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   void dispose() {
     windowManager.removeListener(this);
     UpdateService.updateFound.removeListener(_onAutoUpdateFound);
+    SessionService.logoutSignal.removeListener(_onLoggedOut);
     super.dispose();
+  }
+
+
+  /// 设置页退出登录后：回到欢迎向导，让用户重新登录
+  void _onLoggedOut() {
+    if (!mounted) return;
+    setState(() {
+      _currentDest = NavDestination.dashboard;
+      _welcomePhase = 'welcome';
+    });
   }
 
   @override

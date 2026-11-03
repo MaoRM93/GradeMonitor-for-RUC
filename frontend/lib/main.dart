@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 import 'core/theme/app_theme.dart';
 import 'core/logger/app_logger.dart';
+import 'core/constants/api_token.dart';
 import 'core/service/backend_service.dart';
 import 'core/service/tray_service.dart';
 import 'core/service/notification_service.dart';
@@ -47,6 +48,22 @@ void main() async {
 
   // 初始化通知服务（失败不影响 App 运行）
   await NotificationService().init();
+
+  // 点击通知 → 显示/激活主窗口并置于前台。
+  // 关闭窗口只是 hide()，所以这里先 show() 再 focus()。
+  // window_manager 的 show() 在 macOS 上内部会 makeKeyAndOrderFront +
+  // NSApp.activate(ignoringOtherApps: true)，已足以把 App 提到前台。
+  NotificationService.onNotificationTap = () async {
+    try {
+      if (!await windowManager.isVisible()) {
+        await windowManager.show();
+      }
+      await windowManager.focus();
+      log.info('通过通知点击激活主窗口');
+    } catch (e) {
+      log.warning('通知点击激活窗口失败: $e');
+    }
+  };
 
   // 全局 WebSocket 通知监听（独立于任何页面生命周期）
   _globalWs.connect();
@@ -99,6 +116,9 @@ Future<bool> _shouldShowTray(AppLogger log) async {
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 3);
     final request = await client.get('127.0.0.1', 18923, '/api/settings');
+    if (ApiToken.value.isNotEmpty) {
+      request.headers.set(ApiToken.headerName, ApiToken.value);
+    }
     final response = await request.close();
     if (response.statusCode == 200) {
       final body = await response.transform(utf8.decoder).join();

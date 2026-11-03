@@ -7,7 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/constants/api_path.dart';
+import '../../core/constants/api_token.dart';
 import '../logger/app_logger.dart';
+import 'update_verifier.dart';
 
 /// GitHub Release 的安装包资源
 class ReleaseAsset {
@@ -20,7 +22,27 @@ class ReleaseAsset {
   /// 文件大小（字节）
   final int size;
 
-  const ReleaseAsset({required this.name, required this.url, required this.size});
+  /// GitHub 服务端计算的摘要（形如 `sha256:abc…`）；旧 Release 可能为空。
+  ///
+  /// 来自 Releases API 的 `digest` 字段，仅作辅助提示——真正的信任锚是
+  /// 发布包签名清单（见 [UpdateVerifier]），因为 digest 与资产同源，
+  /// 资产被替换时 digest 也会跟着被替换。
+  final String digest;
+
+  const ReleaseAsset({
+    required this.name,
+    required this.url,
+    required this.size,
+    this.digest = '',
+  });
+
+  /// 摘要的裸 hex 部分（无 `sha256:` 前缀），无法解析时为空
+  String get digestHex {
+    final d = digest.trim().toLowerCase();
+    if (d.isEmpty) return '';
+    final idx = d.indexOf(':');
+    return idx >= 0 ? d.substring(idx + 1) : d;
+  }
 }
 
 /// 检查更新结果
@@ -43,6 +65,12 @@ class UpdateCheckResult {
   /// 失败原因（手动检查时提示用户）
   final String? error;
 
+  /// 从 Release 正文解析出的本平台签名清单（可能多份）。
+  ///
+  /// 同一平台可能同时发布 `.zip`（应用内自动更新）与 `.dmg`（手动下载安装），
+  /// 两者 sha256 不同，必须各持一块清单，由 [manifestFor] 按实际资产名挑。
+  final List<SignedManifest> manifests;
+
   const UpdateCheckResult({
     required this.ok,
     this.hasUpdate = false,
@@ -50,7 +78,19 @@ class UpdateCheckResult {
     this.releaseNotes = '',
     this.assets = const [],
     this.error,
+    this.manifests = const [],
   });
+
+  /// 挑出与 [asset] 同名的那一份清单；没有则返回 null。
+  ///
+  /// 返回 null 意味着**无法校验**，安装时必须拒绝自动安装并降级为手动。
+  SignedManifest? manifestFor(ReleaseAsset? asset) {
+    if (asset == null) return null;
+    return UpdateVerifier.selectForAsset(manifests, asset.name);
+  }
+
+  /// 本平台的第一份清单（仅用于「是否发布了清单」这类粗略判断）
+  SignedManifest? get manifest => manifests.isEmpty ? null : manifests.first;
 }
 
 /// GitHub Release 更新与全局禁用服务
@@ -183,8 +223,12 @@ class UpdateService {
   Future<void> _checkAbuse() async {
     if (disabled.value) return;
     try {
+      final token = ApiToken.value;
       final resp = await _dio.get<Map<String, dynamic>>(
         '${ApiPath.baseUrl}${ApiPath.monitorStatus}',
+        options: token.isEmpty
+            ? null
+            : Options(headers: {ApiToken.headerName: token}),
       );
       if (resp.data?['query_abuse_detected'] == true) {
         disabled.value = true;
@@ -266,8 +310,17 @@ class UpdateService {
                     name: (raw['name'] ?? '').toString(),
                     url: (raw['browser_download_url'] ?? '').toString(),
                     size: (raw['size'] is int) ? raw['size'] as int : 0,
+                    digest: (raw['digest'] ?? '').toString(),
                   ),
           ];
+
+          // 解析发布包签名清单（若发布者附带）。解析失败不阻断检查更新，
+          // 但会导致后续安装时无法校验 → 自动安装被拒绝。
+          // 同平台可能同时发布 zip 与 dmg，故收全部清单，安装时按资产名精确匹配。
+          final manifests = UpdateVerifier.parseManifests(releaseNotes);
+          if (manifests.isEmpty) {
+            _log.warning('该 Release 未附带本平台签名清单，自动安装将被拒绝');
+          }
 
           // 远程停用开关：最新 Release tag 等于 killSwitchVersion 时
           // 全屏禁用应用（main.dart 监听 disabled 自动切换禁用页）
@@ -284,6 +337,7 @@ class UpdateService {
             latestVersion: latestVersion,
             releaseNotes: releaseNotes,
             assets: assets,
+            manifests: manifests,
           );
           if (hasUpdate) {
             _log.info('发现新版本: $latestVersion（当前 $_currentVersion）');
@@ -327,7 +381,12 @@ class UpdateService {
 
   /// 按当前平台从 Release 资源中挑选合适的安装包；找不到返回 null。
   ///
-  /// mac → 名称含 "mac";  windows → 含 "windows"（优先 x64）
+  /// mac → 名称含 "mac" 且是 zip（自动安装靠 ditto 解 zip，dmg 解不了）
+  /// windows → 含 "windows"（优先 x64）
+  ///
+  /// 出现多种 mac 资源时（例如同时发布 .zip 给自动更新、.dmg 给手动分发），
+  /// 必须优先选 .zip：两者名字都含 "mac"，按数组顺序取第一个会随机拿到 dmg，
+  /// 导致安装阶段 ditto 解包失败。这里显式排除 dmg/pkg，只认 zip。
   ReleaseAsset? pickPlatformAsset(List<ReleaseAsset> assets) {
     if (assets.isEmpty) return null;
     final bool isMac = Platform.isMacOS;
@@ -336,7 +395,11 @@ class UpdateService {
     for (final a in assets) {
       final n = a.name.toLowerCase();
       if (isMac) {
-        if (n.contains('mac')) return a;
+        if (n.contains('mac')) {
+          // 自动更新只接受 zip；dmg/pkg 留作手动安装
+          if (n.endsWith('.zip')) return a;
+          fallback ??= a;
+        }
       } else if (isWin) {
         if (n.contains('windows')) {
           if (n.contains('x64')) return a;

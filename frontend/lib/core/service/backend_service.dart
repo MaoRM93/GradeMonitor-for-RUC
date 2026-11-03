@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import '../constants/api_token.dart';
 import '../logger/app_logger.dart';
 
 /// 后端 Python 服务管理
@@ -41,6 +42,11 @@ class BackendService {
 
     _log.info('工作目录: $workingDir');
 
+    // 每次启动生成一次性令牌并注入后端环境变量（后端据此校验所有请求）。
+    // 后端同时把它写入 <数据目录>/api_token，便于"手动启动后端"的场景复用。
+    final apiToken = ApiToken.generate();
+    _log.info('已生成后端访问令牌（长度 ${apiToken.length}）');
+
     try {
       _process = await Process.start(
         python,
@@ -56,6 +62,7 @@ class BackendService {
         environment: {
           ...Platform.environment,
           'GRADEMONITOR_APP_PATH': Platform.resolvedExecutable,
+          'GRADEMONITOR_API_TOKEN': apiToken,
         },
       );
 
@@ -253,6 +260,7 @@ class BackendService {
         if (response.statusCode == 200) {
           _log.info('后端服务就绪 (${(i + 1) * 200}ms)');
           client.close();
+          await _adoptTokenFromDataDir();
           return;
         }
         client.close();
@@ -261,5 +269,48 @@ class BackendService {
       }
     }
     _log.warning('后端服务启动超时（5 秒），可能仍在初始化中');
+    await _adoptTokenFromDataDir();
+  }
+
+  /// 兜底：若前端与后端不是"父子进程"关系（例如后端为手动启动/开发调试），
+  /// 则从后端写入的 <数据目录>/api_token 读取令牌复用，避免全部请求 401。
+  /// 后端每次启动都会把自己的有效令牌写入该文件，因此读到的总是当前值。
+  Future<void> _adoptTokenFromDataDir() async {
+    try {
+      final candidates = <String>[];
+      final envDir = Platform.environment['GRADEMONITOR_DATA_DIR'];
+      if (envDir != null && envDir.isNotEmpty) candidates.add(envDir);
+
+      final home =
+          Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+      if (home != null && home.isNotEmpty) {
+        if (Platform.isMacOS) {
+          candidates.add(
+            '$home/Library/Application Support/GradeMonitor',
+          );
+        } else if (Platform.isWindows) {
+          final appData = Platform.environment['APPDATA'];
+          if (appData != null && appData.isNotEmpty) {
+            candidates.add('$appData\\GradeMonitor');
+          }
+        }
+        candidates.add('$home/.grademonitor');
+      }
+
+      for (final dir in candidates) {
+        final f = File(
+          '$dir${Platform.pathSeparator}api_token',
+        );
+        if (!f.existsSync()) continue;
+        final token = f.readAsStringSync().trim();
+        if (token.isNotEmpty && token != ApiToken.value) {
+          ApiToken.adopt(token);
+          _log.info('已从数据目录复用后端访问令牌');
+        }
+        return;
+      }
+    } catch (e) {
+      _log.debug('读取后端令牌文件失败（可忽略）: $e');
+    }
   }
 }

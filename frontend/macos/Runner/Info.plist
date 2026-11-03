@@ -6,8 +6,16 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<!--
+	  图标注册（2026-11 修复）：
+	  原先 CFBundleIconFile 为空字符串且无 CFBundleIconName，导致系统无法把
+	  资源目录里编译好的 AppIcon 关联到本 App——Dock/通知中心取不到图标，
+	  通知只能显示系统通用占位图。这里显式声明 asset catalog 的图标名。
+	-->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIconFile</key>
-	<string></string>
+	<string>app_icon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>

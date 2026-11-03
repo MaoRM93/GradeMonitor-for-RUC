@@ -7,6 +7,7 @@ class ApiPath {
 
   // Auth
   static const String login = '/api/login';
+  static const String logout = '/api/logout';
 
   // Data
   static const String grades = '/api/grades';

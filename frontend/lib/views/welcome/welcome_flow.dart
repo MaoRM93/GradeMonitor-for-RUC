@@ -207,12 +207,13 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   Future<void> _finish() async {
     setState(() => _saving = true);
 
-    // 凭据已在账号页验证通过，这里只负责保存
+    // 凭据已在账号页验证通过（login() 已把密码交给后端安全存储），
+    // 这里只保存其余设置，不再重复提交密码。
     final notifier = ref.read(settingsProvider.notifier);
     final current = ref.read(settingsProvider);
     final updated = current.copyWith(
       username: _usernameCtrl.text.trim(),
-      password: _passwordCtrl.text,
+      hasPassword: true,
       // 密码始终记住（曾有的"记住密码"开关已移除）
       rememberMe: true,
       autoMonitorEnabled: _autoMonitor,

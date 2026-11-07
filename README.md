@@ -1,6 +1,6 @@
 # GradeMonitor — 适用于 RUC 教务系统的成绩自动监控工具
 
-现已推出： **2026 年秋季更新 8.0 系列版本。macOS Windows 双端皆可用
+现已推出： **2026 年秋季更新 8.0 系列版本**。macOS Windows 双端皆可用
 相较于以前的 6.0 和 107.0 系列版本，这一大版本重新构思了程序设计，优化了用户体验，并增加了一系列实用工具。
 
 GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测工具。安装后，程序会根据您的设置在后台运行，成绩发布后及时发送通知，省去反复刷新教务系统网页的时间。
@@ -11,6 +11,11 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 - macOS 13 及以上（仅支持 Apple Silicon / M 系列芯片）；推荐使用最新版 macOS 27。
 - Windows 10 64 位，版本 1809 及以上（x64）；推荐使用最新版 Windows 11 26H2。
+
+## 重要更新
+<img width="650" alt="image" src="https://github.com/user-attachments/assets/d3ef89f9-63eb-4021-9412-4c10361df970" />
+- 适配了教务系统 11 月接入统一身份验证平台的一系列更新。
+- 警告：如您停留在 108.0.x.xxx 系列版本，您将无法获取到新的成绩单。
 
 ## 程序功能一览
 

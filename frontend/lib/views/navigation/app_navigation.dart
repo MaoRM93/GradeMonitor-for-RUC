@@ -45,6 +45,9 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   /// 本会话是否已自动弹过「发现新版本」（避免每小时重复打扰）
   bool _autoUpdatePrompted = false;
 
+  /// 本会话是否已弹过「预发行版本」告警（只弹一次）
+  bool _preReleasePrompted = false;
+
   @override
   void initState() {
     super.initState();
@@ -52,6 +55,8 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     windowManager.addListener(this);
     // 自动检查（开启程序/每小时）发现更新 → 弹「发现新版本」
     UpdateService.updateFound.addListener(_onAutoUpdateFound);
+    // 当前版本高于最新 Release → 弹「您可能在使用预发行版本」
+    UpdateService.preReleaseFound.addListener(_onPreReleaseFound);
     // 设置页退出登录 → 切回欢迎向导重新登录
     SessionService.logoutSignal.addListener(_onLoggedOut);
     // 首帧渲染后再检查欢迎页，确保 context 可用
@@ -59,6 +64,7 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
       _checkWelcomeWithRetry();
       // 启动时的静默检查可能在监听挂上前已完成，补查一次
       _onAutoUpdateFound();
+      _onPreReleaseFound();
     });
   }
 
@@ -72,14 +78,24 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     showUpdateFoundDialog(context, result);
   }
 
+  /// 启动检查发现当前版本高于最新正式 Release：欢迎流程结束后弹一次红色告警
+  void _onPreReleaseFound() {
+    final result = UpdateService.preReleaseFound.value;
+    if (result == null || _preReleasePrompted) return;
+    if (_welcomePhase != 'main') return;
+    if (!mounted) return;
+    _preReleasePrompted = true;
+    showPreReleaseDialog(context, result);
+  }
+
   @override
   void dispose() {
     windowManager.removeListener(this);
     UpdateService.updateFound.removeListener(_onAutoUpdateFound);
+    UpdateService.preReleaseFound.removeListener(_onPreReleaseFound);
     SessionService.logoutSignal.removeListener(_onLoggedOut);
     super.dispose();
   }
-
 
   /// 设置页退出登录后：回到欢迎向导，让用户重新登录
   void _onLoggedOut() {
@@ -118,10 +134,16 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
 
         if (mounted) {
           // 检查完成后一次性决定去向，避免主界面先渲染再被欢迎页覆盖
-          setState(() {
-            _welcomePhase =
-                (!welcomeCompleted || showWelcomeAlways) ? 'welcome' : 'main';
-          });
+          final phase = (!welcomeCompleted || showWelcomeAlways)
+              ? 'welcome'
+              : 'main';
+          setState(() => _welcomePhase = phase);
+          // 直接进主界面时，启动静默检查可能早已完成（监听回调因当时还在
+          // checking 阶段被跳过），这里补触发两个告警
+          if (phase == 'main') {
+            _onAutoUpdateFound();
+            _onPreReleaseFound();
+          }
         }
         return; // 成功，退出重试
       } catch (_) {
@@ -132,7 +154,11 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
       }
     }
     // 后端始终未就绪：按主界面继续（与旧行为一致）
-    if (mounted) setState(() => _welcomePhase = 'main');
+    if (mounted) {
+      setState(() => _welcomePhase = 'main');
+      _onAutoUpdateFound();
+      _onPreReleaseFound();
+    }
   }
 
   /// 自定义标题栏：拖拽区 + 应用名 + 最小化/最大化/关闭
@@ -275,81 +301,89 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                 ? WelcomeFlow(
                     onCompleted: () {
                       setState(() => _welcomePhase = 'main');
-                      // 欢迎流程中若静默检查已发现更新，进入主界面后补弹
+                      // 欢迎流程中若静默检查已发现更新/预发行，进入主界面后补弹
                       _onAutoUpdateFound();
+                      _onPreReleaseFound();
                     },
                   )
                 : Row(
-              children: [
-                Material(
-                  elevation: 0,
-                  color: colorScheme.surface.withValues(alpha: .4),
-                  child: SizedBox(
-                    width: 110,
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 40),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2, bottom: 12),
-                          child: Icon(
-                            Icons.search_rounded,
-                            size: 28,
-                            color: colorScheme.primary,
-                          ),
-                        ),
-                        Text(
-                          'Grade\nMonitor',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: colorScheme.onSurface,
-                            height: 1.3,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        const Divider(indent: 16, endIndent: 16),
-                        const Spacer(),
-                        ...NavDestination.values.map((dest) {
-                          final selected = _currentDest == dest;
-                          return _NavItem(
-                            icon: dest.icon,
-                            label: dest.label,
-                            selected: selected,
-                            onTap: () => setState(() => _currentDest = dest),
-                          );
-                        }),
-                        const Spacer(),
-                        const Divider(indent: 16, endIndent: 16),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16, top: 8),
-                          child: GestureDetector(
-                            onTap: _onVersionTap,
-                            child: Text(
-                              UpdateService.VerStatus.isEmpty
-                                  ? '…'
-                                  : UpdateService.VerStatus,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: colorScheme.onSurface.withValues(
-                                  alpha: .3,
+                    children: [
+                      Material(
+                        elevation: 0,
+                        color: colorScheme.surface.withValues(alpha: .4),
+                        child: SizedBox(
+                          width: 110,
+                          child: Column(
+                            children: [
+                              const SizedBox(height: 40),
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 2,
+                                  bottom: 12,
+                                ),
+                                child: Icon(
+                                  Icons.search_rounded,
+                                  size: 28,
+                                  color: colorScheme.primary,
                                 ),
                               ),
-                            ),
+                              Text(
+                                'Grade\nMonitor',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: colorScheme.onSurface,
+                                  height: 1.3,
+                                ),
+                              ),
+                              const SizedBox(height: 28),
+                              const Divider(indent: 16, endIndent: 16),
+                              const Spacer(),
+                              ...NavDestination.values.map((dest) {
+                                final selected = _currentDest == dest;
+                                return _NavItem(
+                                  icon: dest.icon,
+                                  label: dest.label,
+                                  selected: selected,
+                                  onTap: () =>
+                                      setState(() => _currentDest = dest),
+                                );
+                              }),
+                              const Spacer(),
+                              const Divider(indent: 16, endIndent: 16),
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: 16,
+                                  top: 8,
+                                ),
+                                child: GestureDetector(
+                                  onTap: _onVersionTap,
+                                  child: Text(
+                                    UpdateService.VerStatus.isEmpty
+                                        ? '…'
+                                        : UpdateService.VerStatus,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: colorScheme.onSurface.withValues(
+                                        alpha: .3,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      VerticalDivider(
+                        width: 1,
+                        thickness: .5,
+                        color: colorScheme.outlineVariant,
+                      ),
+                      Expanded(child: _buildPage(_currentDest)),
+                    ],
                   ),
-                ),
-                VerticalDivider(
-                  width: 1,
-                  thickness: .5,
-                  color: colorScheme.outlineVariant,
-                ),
-                Expanded(child: _buildPage(_currentDest)),
-              ],
-            ),
           ),
         ],
       ),

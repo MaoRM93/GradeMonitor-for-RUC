@@ -172,6 +172,11 @@ class UpdateService {
   static final ValueNotifier<UpdateCheckResult?> updateFound =
       ValueNotifier<UpdateCheckResult?>(null);
 
+  /// 预发行版本告警广播：当前版本 **高于** GitHub 最新 Release 时触发
+  /// （即用户装的是开发者尚未正式发布的预览副本）。主壳监听后弹红色提示框。
+  static final ValueNotifier<UpdateCheckResult?> preReleaseFound =
+      ValueNotifier<UpdateCheckResult?>(null);
+
   /// 运行时完整版本号（如 108.1.0.100），未加载完成时为空字符串
   String _currentVersion = '';
   String get currentVersion => _currentVersion;
@@ -271,10 +276,7 @@ class UpdateService {
 
           // 仓库尚未发布任何 Release：无需重试
           if (response.statusCode == 404) {
-            return const UpdateCheckResult(
-              ok: false,
-              error: '仓库暂未发布任何版本',
-            );
+            return const UpdateCheckResult(ok: false, error: '仓库暂未发布任何版本');
           }
           if (response.statusCode != 200 || response.data == null) {
             throw Exception('GitHub API 返回 ${response.statusCode}');
@@ -331,6 +333,8 @@ class UpdateService {
           }
 
           final hasUpdate = _isNewer(latestVersion, _currentVersion);
+          // 反向比较：当前版本比最新正式版还新 → 预发行（预览）副本
+          final isPreRelease = _isNewer(_currentVersion, latestVersion);
           final result = UpdateCheckResult(
             ok: true,
             hasUpdate: hasUpdate,
@@ -342,6 +346,12 @@ class UpdateService {
           if (hasUpdate) {
             _log.info('发现新版本: $latestVersion（当前 $_currentVersion）');
             if (silent) updateFound.value = result;
+          } else if (isPreRelease) {
+            _log.info(
+              '当前版本 $_currentVersion 高于最新 Release $latestVersion，'
+              '判定为预发行版本',
+            );
+            if (silent) preReleaseFound.value = result;
           }
           return result;
         } catch (e) {
@@ -502,8 +512,7 @@ class UpdateService {
     }
   }
 
-  String _join(String dir, String name) =>
-      '$dir${Platform.pathSeparator}$name';
+  String _join(String dir, String name) => '$dir${Platform.pathSeparator}$name';
 
   /// 在系统文件管理器中显示已下载的文件 / 文件夹
   Future<void> revealInFileManager(String path) async {

@@ -102,8 +102,13 @@ if ($SkipFlutter) {
     Write-Step '跳过 Flutter 构建（-SkipFlutter）'
 } else {
     Write-Step 'flutter build windows --release'
-    $flutter = Join-Path $env:FLUTTER_ROOT 'bin\flutter.bat'
-    if (-not $env:FLUTTER_ROOT -or -not (Test-Path -LiteralPath $flutter)) {
+    # FLUTTER_ROOT 可能未设置（直接跑脚本时很常见），此时回退到 PATH 里的 flutter。
+    $flutter = $null
+    if ($env:FLUTTER_ROOT) {
+        $candidate = Join-Path $env:FLUTTER_ROOT 'bin\flutter.bat'
+        if (Test-Path -LiteralPath $candidate) { $flutter = $candidate }
+    }
+    if (-not $flutter) {
         $cmd = Get-Command flutter -ErrorAction SilentlyContinue
         if (-not $cmd) { Fail '未找到 flutter，请确保 Flutter SDK 在 PATH 中' }
         $flutter = $cmd.Source

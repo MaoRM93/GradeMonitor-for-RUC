@@ -1,6 +1,16 @@
 # backend/auth/login.py
 """
 RUC 统一认证（OAuth2）登录流程
+
+校园网内链路（2026-11 现状，已实测可用）：
+    1. GET  https://v.ruc.edu.cn/auth/login       → 页面里取 csrftoken
+    2. POST https://v.ruc.edu.cn/auth/login       → 302 到 /oauth2/authorize
+    3. GET  /oauth2/authorize                     → 302 到 jw.ruc.edu.cn/secService/oauthlogin?code=...
+    4. GET  jw 回调                                → 种下 SESSION / token / authcode
+
+校外访问时第 1 步会被 302 到 wvpn.ruc.edu.cn（WebVPN 网关）或
+cas.ruc.edu.cn（统一身份认证），那种页面里**没有 csrftoken**。
+以前这种「不在校园网」会被一律报成「教务系统正在维护中」，误导用户。
 """
 import requests
 from bs4 import BeautifulSoup
@@ -12,27 +22,49 @@ logger = get_logger(__name__)
 
 # ---------- 登录失败分类 ----------
 #
-# 认证链路上有三类完全不同的失败，处理方式也不同：
-#   · CREDENTIALS  —— 统一认证明确拒绝（密码错了）
-#   · MAINTENANCE  —— 认证通过了但教务系统没给会话（维护/服务端异常）
-#   · NETWORK      —— 连不上任何一个服务器
+# 认证链路上有几类完全不同的失败，处理方式也不同：
+#   · CREDENTIALS     —— 统一认证明确拒绝（密码错了）
+#   · MAINTENANCE     —— 认证通过了但教务系统没给会话（真的在维护/服务端异常）
+#   · NETWORK         —— 连不上任何一个服务器
+#   · CAMPUS_NETWORK  —— 请求被重定向到 WebVPN / CAS，说明当前不在校园网内
+#   · SSO_FAILED      —— OAuth 走完了但教务系统拒绝建会话（code 无效/过期）
 #
-# 以前三类都抛同一个 Exception，前端只能一律显示「账号或密码错误」，
-# 维护期间会误导用户去反复改密码。现在用 LoginError 携带分类。
+# 关键教训：以前「取不到 csrftoken」直接归为 MAINTENANCE，校外用户会以为
+# 学校在维护，反复重试甚至改密码。现在先判断是不是被网关劫走了。
 
 KIND_CREDENTIALS = "credentials"
 KIND_MAINTENANCE = "maintenance"
 KIND_NETWORK = "network"
+KIND_CAMPUS_NETWORK = "campus_network"
+KIND_SSO_FAILED = "sso_failed"
+# 验证码相关（CAS 统一认证强制验证码；教务系统直连通常不需要，风控时才会要）
+KIND_CAPTCHA_REQUIRED = "captcha_required"
+KIND_CAPTCHA_INVALID = "captcha_invalid"
 
-# 三类失败给用户看的文案（唯一来源；前端只是兜底复用）
+# 各类失败给用户看的文案（唯一来源；前端只是兜底复用）
 USER_MESSAGES = {
     KIND_CREDENTIALS: "您输入的账号或密码错误，请检查后重试",
     KIND_MAINTENANCE: "教务系统正在维护中，请稍候",
     KIND_NETWORK: "无法连接到服务器，请检查您的网络连接",
+    KIND_CAMPUS_NETWORK: "当前不在校园网内，请连接校园网后重试",
+    KIND_SSO_FAILED: "登录凭证已失效，请重新登录",
+    KIND_CAPTCHA_REQUIRED: "本次登录需要验证码，请填写验证码后重试",
+    KIND_CAPTCHA_INVALID: "验证码不正确，请重新输入",
 }
 
 # 判定「教务系统维护中」的页面特征词
 _MAINTENANCE_HINTS = ("维护", "暂停使用", "maintain", "upgrading")
+
+# 校外访问时会出现的网关特征——命中说明请求被转走了，不是维护
+_OFF_CAMPUS_HOSTS = ("wvpn.ruc.edu.cn", "cas.ruc.edu.cn", "/account/login")
+
+# 教务系统拒绝建立会话时的页面特征
+_SSO_FAILURE_HINTS = ("单点登录获取用户信息失败", "获取用户信息失败")
+
+# 建立会话成功必须同时具备的 cookie
+# 注意：只拿到 SESSION 是不够的——code 无效时 jw 也会种 SESSION，
+# 但不会给 token/authcode，后续成绩接口全部 401。
+_REQUIRED_JW_COOKIES = ("SESSION", "token", "authcode")
 
 
 def _looks_like_maintenance(text: str) -> bool:
@@ -43,11 +75,36 @@ def _looks_like_maintenance(text: str) -> bool:
     return any(hint.lower() in lowered for hint in _MAINTENANCE_HINTS)
 
 
+def _looks_like_sso_failure(text: str) -> bool:
+    """回调页是否明确报「单点登录获取用户信息失败」"""
+    if not text:
+        return False
+    return any(hint in text for hint in _SSO_FAILURE_HINTS)
+
+
+def _off_campus_gateway(resp: requests.Response) -> str:
+    """请求是否被重定向到校外网关
+
+    Returns:
+        命中的网关标识（域名或路径）；没命中返回空串
+    """
+    urls = [resp.url or ""]
+    for hop in resp.history:
+        urls.append(hop.headers.get("Location") or "")
+    for url in urls:
+        lowered = url.lower()
+        for host in _OFF_CAMPUS_HOSTS:
+            if host in lowered:
+                return host
+    return ""
+
+
 class LoginError(Exception):
     """带分类的登录失败异常
 
     Attributes:
         kind: KIND_CREDENTIALS / KIND_MAINTENANCE / KIND_NETWORK
+              / KIND_CAMPUS_NETWORK / KIND_SSO_FAILED
         user_message: 可直接展示给用户的中文文案
     """
 
@@ -58,22 +115,43 @@ class LoginError(Exception):
 
 
 def get_csrf_token(session: requests.Session) -> str:
-    """从认证页面提取 CSRF Token"""
+    """从认证页面提取 CSRF Token
+
+    Raises:
+        LoginError: 被转到校外网关（CAMPUS_NETWORK）或页面确实异常（MAINTENANCE）
+    """
     resp = session.get(AUTH_LOGIN_URL)
+
+    # 先判断是不是被 WebVPN / CAS 劫走了——这是「不在校园网」，不是「维护」
+    gateway = _off_campus_gateway(resp)
+    if gateway:
+        logger.warning(f"登录页被重定向到 {gateway}，当前不在校园网内")
+        raise LoginError(
+            KIND_CAMPUS_NETWORK,
+            f"auth login page redirected to {gateway} (off campus)",
+        )
+
     soup = BeautifulSoup(resp.text, "html.parser")
     token = soup.find("input", {"id": "csrftoken"})
-    if not token:
-        # 拿不到登录页结构：要么服务器在维护，要么接口改版
+    if token:
+        return token["value"]
+
+    # 页面里没有 csrftoken、也没有被重定向：才可能是真的维护或页面改版
+    if _looks_like_maintenance(resp.text):
         raise LoginError(
             KIND_MAINTENANCE,
-            "csrftoken not found in the authentication page.",
+            "authentication page shows maintenance notice.",
         )
-    return token["value"]
+    logger.error(f"登录页结构异常（无 csrftoken），长度 {len(resp.text)}，最终 URL {resp.url}")
+    raise LoginError(
+        KIND_MAINTENANCE,
+        "csrftoken not found in the authentication page.",
+    )
 
 
 def login_and_bind_jw(session: requests.Session, username: str, password: str):
     """
-    完整认证闭环（无需验证码）
+    完整认证闭环（校园网内，无需验证码）
 
     Args:
         session: requests.Session 实例
@@ -84,7 +162,7 @@ def login_and_bind_jw(session: requests.Session, username: str, password: str):
         requests.Response: 教务系统回调的最终响应
 
     Raises:
-        LoginError: 带分类的登录失败（凭据错误 / 维护中 / 网络不通）
+        LoginError: 带分类的登录失败
     """
     try:
         return _login_and_bind_jw(session, username, password)
@@ -94,6 +172,182 @@ def login_and_bind_jw(session: requests.Session, username: str, password: str):
         # 任何网络层异常（DNS、连接、超时、TLS）都归为「连不上服务器」
         logger.error(f"连接教务系统失败: {e}")
         raise LoginError(KIND_NETWORK, f"request failed: {e}") from e
+
+
+# ---------------------------------------------------------------- 多入口分发
+#
+# 三种登录入口（2026-11 用户实测定义）：
+#   MODE_JW   "jw"   —— 教务系统直连，**默认**。通常不需要验证码，一步 POST 拿会话。
+#   MODE_CAS  "cas"  —— CAS 统一身份认证。强制验证码，但 CASTGC 可静默续期 7 天。
+#   MODE_VRUC "vruc" —— 传统 v.ruc OAuth。官方即将废弃，优先级最低。
+#
+# 三者最终都会得到同一套 jw cookie（SESSION/token/authcode），
+# 因此下游成绩/排名/监控逻辑完全不需要区分登录方式。
+
+MODE_JW = "jw"
+MODE_CAS = "cas"
+MODE_VRUC = "vruc"
+DEFAULT_MODE = MODE_JW
+ALL_MODES = (MODE_JW, MODE_CAS, MODE_VRUC)
+
+# 哪些入口需要验证码（前端据此决定是否显示验证码输入框）
+MODES_NEED_CAPTCHA = (MODE_CAS,)
+
+
+def mode_needs_captcha(mode: str) -> bool:
+    """该登录入口是否**固定**需要验证码
+
+    注意：教务系统直连在触发风控时也可能要验证码，那种情况由
+    `login_by_mode` 抛出 KIND_CAPTCHA_REQUIRED 让前端动态补输入框。
+    """
+    return mode in MODES_NEED_CAPTCHA
+
+
+def normalize_mode(mode: str) -> str:
+    """规范化登录方式字符串，非法值回落到默认入口"""
+    value = (mode or "").strip().lower()
+    if value in ALL_MODES:
+        return value
+    return DEFAULT_MODE
+
+
+def create_authenticated_session(
+    username: str,
+    password: str,
+    mode: str = DEFAULT_MODE,
+    prefer_saved: bool = True,
+):
+    """为后台任务（成绩/排名/监控）创建一个已认证的 Session
+
+    优先复用落盘会话（省掉一次登录、也避开验证码）；失效时用给定
+    凭据重新登录。CAS 入口若需要验证码而用户不在场，会抛出
+    KIND_CAPTCHA_REQUIRED —— 监控循环会捕获并跳过本轮。
+
+    Args:
+        username: 学号
+        password: 密码
+        mode: 登录方式（通常取 settings 里保存的值）
+        prefer_saved: 是否先尝试恢复已保存会话
+
+    Returns:
+        已认证的 requests.Session
+    """
+    from backend.auth import cas_login, jw_login, session_store
+
+    actual = normalize_mode(mode)
+    session = cas_login.new_session() if actual == MODE_CAS else jw_login.new_session()
+
+    if prefer_saved:
+        payload = session_store.load() or {}
+        saved_mode = payload.get("login_mode") or ""
+        if saved_mode == actual and try_restore_session(session):
+            return session
+
+    try:
+        login_by_mode(session, username, password, mode=actual)
+    except Exception:
+        try:
+            session.close()
+        except Exception:
+            pass
+        raise
+    return session
+
+
+def saved_login_mode() -> str:
+    """读取上次成功登录使用的方式（用于后台任务复用）"""
+    from backend.auth import session_store
+
+    payload = session_store.load() or {}
+    return normalize_mode(payload.get("login_mode") or "")
+
+
+def login_by_mode(
+    session: requests.Session,
+    username: str,
+    password: str,
+    mode: str = DEFAULT_MODE,
+    captcha: str = "",
+) -> str:
+    """按登录入口分发认证，并把结果会话持久化
+
+    Args:
+        session: 待认证的 Session
+        username: 学号
+        password: 密码
+        mode: "jw" / "cas" / "vruc"
+        captcha: 验证码（仅 cas 或触发风控的 jw 需要）
+
+    Returns:
+        实际使用的登录方式
+
+    Raises:
+        LoginError: 带分类的登录失败
+    """
+    from backend.auth import cas_login, jw_login, session_store
+
+    actual = normalize_mode(mode)
+    logger.info(f"开始登录（方式={actual}, 用户={username}）")
+
+    try:
+        if actual == MODE_JW:
+            jw_login.login(session, username, password, captcha)
+        elif actual == MODE_CAS:
+            cas_login.login(session, username, password, captcha)
+        else:
+            login_and_bind_jw(session, username, password)
+    except LoginError:
+        raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"连接认证服务器失败: {e}")
+        raise LoginError(KIND_NETWORK, f"request failed: {e}") from e
+
+    # 落盘会话，供监控循环与下次启动免登录复用
+    try:
+        session_store.save(session_store.snapshot(session), login_mode=actual)
+    except Exception as e:
+        logger.warning(f"会话持久化失败（不影响本次登录）: {e}")
+
+    return actual
+
+
+def try_restore_session(session: requests.Session) -> bool:
+    """尝试用已保存的 cookie 恢复会话（免登录）
+
+    流程：
+      1. 读落盘的 cookie 灌进 session
+      2. jw token 还在有效期（12h）→ 直接可用
+      3. 否则若有 CASTGC → 静默续期（不弹验证码）
+      4. 都不行 → 返回 False，由用户重新登录
+
+    Returns:
+        True 表示会话可用
+    """
+    from backend.auth import cas_login, jw_login, session_store
+
+    payload = session_store.load()
+    if not payload:
+        return False
+
+    jw_count = session_store.apply_to_session(session, "jw.ruc.edu.cn")
+    session_store.apply_to_session(session, "cas.ruc.edu.cn")
+    if not jw_count:
+        return False
+
+    if jw_login.token_valid(session):
+        logger.info("已保存的教务会话仍在有效期内，免登录恢复成功")
+        return True
+
+    logger.info("教务 token 已过期，尝试用 CASTGC 静默续期")
+    if cas_login.silent_renew(session):
+        try:
+            session_store.save(session_store.snapshot(session), login_mode=payload.get("login_mode", ""))
+        except Exception:
+            pass
+        return True
+
+    logger.info("静默续期失败，需要重新登录")
+    return False
 
 
 def _login_and_bind_jw(
@@ -120,6 +374,14 @@ def _login_and_bind_jw(
     if resp.status_code != 302:
         logger.error(f"Unexpected status code: {resp.status_code}")
         logger.error(f"Server response body: {resp.text[:500]}")
+
+        # 登录 POST 也可能被网关拦下（会话过期后 proxy 模式会跳登录页）
+        gateway = _off_campus_gateway(resp)
+        if gateway:
+            raise LoginError(
+                KIND_CAMPUS_NETWORK,
+                f"login POST redirected to {gateway} (off campus)",
+            )
 
         # 5xx 或页面里出现维护字样 → 服务端异常/维护
         if resp.status_code >= 500 or _looks_like_maintenance(resp.text):
@@ -163,14 +425,40 @@ def _login_and_bind_jw(
     final_resp = session.get(jw_callback_url, allow_redirects=True)
 
     jw_cookies = session.cookies.get_dict(domain="jw.ruc.edu.cn")
-    if jw_cookies:
-        logger.info(f"Session successfully established for jw.ruc.edu.cn (cookies: {list(jw_cookies.keys())})")
+
+    # 必须三个 cookie 齐全才算成功：code 无效时 jw 只种 SESSION，
+    # 旧代码只判断「有没有 cookie」，会把这种失败误判为登录成功。
+    missing = [name for name in _REQUIRED_JW_COOKIES if name not in jw_cookies]
+    if not missing:
+        logger.info(
+            f"Session successfully established for jw.ruc.edu.cn "
+            f"(cookies: {list(jw_cookies.keys())})"
+        )
         return final_resp
 
-    # 凭据已通过但教务系统没发会话 cookie——典型就是维护窗口
+    logger.error(
+        f"教务系统未建立完整会话，缺少 cookie: {missing} "
+        f"(已有: {list(jw_cookies.keys())})"
+    )
+
+    # 回调页明确报 SSO 失败 → code 无效/过期
+    if _looks_like_sso_failure(final_resp.text):
+        raise LoginError(
+            KIND_SSO_FAILED,
+            "jw callback page reported '单点登录获取用户信息失败' "
+            f"(missing cookies: {missing})",
+        )
+
+    # 凭据已通过但教务系统没发完整会话——典型就是维护窗口
     if _looks_like_maintenance(final_resp.text):
         logger.warning("教务系统返回维护提示页，本次登录无法建立会话")
+        raise LoginError(
+            KIND_MAINTENANCE,
+            "教务系统返回维护提示页，未能建立会话。",
+        )
+
     raise LoginError(
         KIND_MAINTENANCE,
-        "Process completed, but no valid Cookie found for jw.ruc.edu.cn.",
+        "Process completed, but no valid Cookie found for jw.ruc.edu.cn. "
+        f"(missing: {missing})",
     )

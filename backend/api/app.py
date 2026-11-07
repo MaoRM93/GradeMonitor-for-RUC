@@ -23,7 +23,18 @@ from backend.api.security import (
     init_token,
     is_public_path,
 )
-from backend.auth.login import LoginError, login_and_bind_jw
+from backend.auth.login import (
+    ALL_MODES,
+    DEFAULT_MODE,
+    KIND_CAPTCHA_INVALID,
+    KIND_CAPTCHA_REQUIRED,
+    LoginError,
+    login_by_mode,
+    mode_needs_captcha,
+    normalize_mode,
+    try_restore_session,
+)
+from backend.auth import cas_login, jw_login, session_store
 from backend.service.grade_service import GradeService
 from backend.service.rank_service import RankService
 from backend.service.monitor_service import monitor
@@ -42,7 +53,7 @@ from backend.storage.cache import (
     load_local_grades, load_local_ranks,
     save_local_grades, save_local_ranks,
 )
-from backend.utils.logger import get_logger
+from backend.utils.logger import get_logger, get_log_dir
 
 logger = get_logger(__name__)
 
@@ -173,7 +184,7 @@ _init_cache()
 
 logger.info("=" * 50)
 logger.info("GradeMonitor Backend 启动")
-logger.info(f"日志目录: {Path(__file__).resolve().parent.parent.parent / 'logs'}")
+logger.info(f"日志目录: {get_log_dir()}")
 logger.info("=" * 50)
 
 
@@ -202,17 +213,40 @@ async def _shutdown():
 class LoginRequest(BaseModel):
     username: str
     password: str
+    # 登录入口：jw（教务系统直连，默认）/ cas（统一身份认证）/ vruc（传统）
+    mode: str = DEFAULT_MODE
+    # 验证码：CAS 必填；教务系统直连仅在触发风控时需要
+    captcha: str = ""
+    # 验证码会话 id（由 /api/login/captcha 返回，用于复用同一个 HTTP 会话）
+    captcha_id: str = ""
 
 
 class LoginResponse(BaseModel):
     success: bool
     message: str = ""
+    mode: str = DEFAULT_MODE
+    # 是否需要验证码（前端据此弹出验证码输入框）
+    captcha_required: bool = False
+
+
+class CaptchaRequest(BaseModel):
+    mode: str = DEFAULT_MODE
+
+
+class CaptchaResponse(BaseModel):
+    captcha_id: str
+    mode: str
+    # data:image/jpeg;base64,... 形式的图片
+    image: str
+    width: int = 60
+    height: int = 20
 
 
 class SettingsUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     remember_me: Optional[bool] = None
+    login_mode: Optional[str] = None
     notify_mode: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
@@ -235,22 +269,161 @@ async def root():
     return {"status": "ok", "service": "GradeMonitor Backend"}
 
 
+# ---------- 验证码会话 ----------
+#
+# 验证码必须与"取它的那个 HTTP 会话"绑定：CAS 每次 GET 登录页都会刷新
+# execution，教务系统直连也把验证码存在服务端会话里。所以这里用
+# captcha_id 把 Session 暂存下来，登录时复用同一个 Session。
+
+_captcha_sessions: dict[str, dict] = {}
+_CAPTCHA_TTL = 180  # 秒
+
+
+def _purge_captcha_sessions() -> None:
+    """清掉过期的验证码会话，防止长期占内存"""
+    now = time.time()
+    for key in [
+        k for k, v in _captcha_sessions.items() if now - v["created_at"] > _CAPTCHA_TTL
+    ]:
+        entry = _captcha_sessions.pop(key, None)
+        if entry:
+            try:
+                entry["session"].close()
+            except Exception:
+                pass
+
+
+def _pop_captcha_session(captcha_id: str):
+    """取出并移除验证码会话"""
+    _purge_captcha_sessions()
+    entry = _captcha_sessions.pop(captcha_id, None)
+    if not entry:
+        return None
+    return entry["session"]
+
+
+@app.post("/api/login/captcha", response_model=CaptchaResponse)
+async def login_captcha(req: CaptchaRequest):
+    """获取登录验证码图片
+
+    CAS 统一认证强制需要验证码；教务系统直连一般不需要（风控时才要）。
+    返回 base64 内联图片，前端直接显示，无需再发一次请求。
+    """
+    import base64 as b64
+    import uuid
+
+    mode = normalize_mode(req.mode)
+    _purge_captcha_sessions()
+
+    try:
+        if mode == "cas":
+            session = cas_login.new_session()
+            raw, _login_url = cas_login.fetch_captcha(session)
+            width, height = 60, 20
+        else:
+            session = jw_login.new_session()
+            raw = jw_login.fetch_captcha(session)
+            width, height = 60, 20
+    except Exception as e:
+        logger.error(f"获取验证码失败 (mode={mode}): {e}")
+        raise HTTPException(status_code=500, detail=f"获取验证码失败: {e}")
+
+    captcha_id = uuid.uuid4().hex
+    _captcha_sessions[captcha_id] = {
+        "session": session,
+        "mode": mode,
+        "created_at": time.time(),
+    }
+
+    logger.info(f"已下发验证码 (mode={mode}, id={captcha_id[:8]})")
+    return CaptchaResponse(
+        captcha_id=captcha_id,
+        mode=mode,
+        image="data:image/jpeg;base64," + b64.b64encode(raw).decode("ascii"),
+        width=width,
+        height=height,
+    )
+
+
+@app.get("/api/login/modes")
+async def login_modes():
+    """返回可用的登录入口（前端欢迎页据此渲染选项）
+
+    顺序即推荐优先级：教务系统直连（默认）→ CAS → 传统 v.ruc。
+    """
+    return {
+        "default": DEFAULT_MODE,
+        "modes": [
+            {
+                "id": "jw",
+                "name": "教务系统",
+                "description": "无需验证码，登录最快，推荐使用",
+                "needs_captcha": False,
+                "recommended": True,
+            },
+            {
+                "id": "cas",
+                "name": "CAS 统一身份验证",
+                "description": "学校统一认证平台，需要输入验证码；登录后可 7 天免登录",
+                "needs_captcha": True,
+                "recommended": False,
+            },
+            {
+                "id": "vruc",
+                "name": "传统登录",
+                "description": "旧版登录方式，官方即将停止支持",
+                "needs_captcha": False,
+                "recommended": False,
+            },
+        ],
+    }
+
+
+@app.get("/api/session/status")
+async def session_status():
+    """检查本地保存的登录会话是否还能直接使用（免登录）"""
+    import requests as req_lib
+
+    session = req_lib.Session()
+    session.trust_env = False
+    try:
+        ok = try_restore_session(session)
+        payload = session_store.load() or {}
+        return {
+            "available": bool(ok),
+            "login_mode": payload.get("login_mode", ""),
+        }
+    finally:
+        session.close()
+
+
 @app.post("/api/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
-    import requests as req_lib
-    session = req_lib.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    })
+    mode = normalize_mode(req.mode)
+
+    # 需要验证码的入口：优先复用前端取码时的那个会话（验证码与会话绑定）
+    session = None
+    if req.captcha_id:
+        session = _pop_captcha_session(req.captcha_id)
+        if session is None:
+            logger.warning("验证码已过期或不存在，重新建立会话")
+
+    if session is None:
+        session = cas_login.new_session() if mode == "cas" else jw_login.new_session()
+
     try:
-        login_and_bind_jw(session, req.username, req.password)
-        logger.info(f"用户 {req.username} 登录成功")
-        return LoginResponse(success=True, message="登录成功")
+        actual = login_by_mode(
+            session,
+            req.username,
+            req.password,
+            mode=mode,
+            captcha=req.captcha,
+        )
+        logger.info(f"用户 {req.username} 登录成功（方式={actual}）")
+        return LoginResponse(success=True, message="登录成功", mode=actual)
     except LoginError as e:
-        # 失败已经分类（凭据错误 / 维护中 / 网络不通），把 kind 透给前端，
-        # 前端按 kind 显示对应文案；再也不用把维护和断网都报成密码错。
+        # 失败已经分类（凭据错误 / 验证码 / 维护中 / 网络不通），把 kind 透给前端，
+        # 前端按 kind 显示对应文案；需要验证码时前端据此弹出输入框。
         logger.error(f"用户 {req.username} 登录失败 [{e.kind}]: {e}")
         raise HTTPException(
             status_code=401,
@@ -258,13 +431,19 @@ async def login(req: LoginRequest):
                 "kind": e.kind,
                 "message": e.user_message,
                 "detail": str(e),
+                "captcha_required": e.kind
+                in (KIND_CAPTCHA_REQUIRED, KIND_CAPTCHA_INVALID),
+                "mode": mode,
             },
         )
     except Exception as e:
         logger.error(f"用户 {req.username} 登录失败: {e}")
         raise HTTPException(status_code=401, detail=str(e))
     finally:
-        session.close()
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @app.get("/api/grades")
@@ -420,6 +599,14 @@ async def logout():
     # 重置欢迎向导标记：下次登录时重新走一遍引导
     current["welcome_completed"] = False
     save_settings(current)
+
+    # 清掉落盘的登录会话（否则下次启动会被"免登录恢复"直接绕过登录页）
+    try:
+        session_store.clear()
+        logger.info("退出登录：本地登录会话已清除")
+    except Exception as e:
+        logger.warning(f"清除登录会话失败: {e}")
+
     logger.info("退出登录：凭据已清除")
 
     return {"success": True, "message": "已退出登录", "settings": public_settings()}

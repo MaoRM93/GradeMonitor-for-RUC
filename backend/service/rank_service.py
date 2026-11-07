@@ -5,7 +5,7 @@
 import requests
 from typing import Any, Optional
 
-from backend.auth.login import login_and_bind_jw
+from backend.auth.login import create_authenticated_session, saved_login_mode
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -55,11 +55,15 @@ def fetch_rank(
             "Authentication may have failed."
         )
 
-    # 注入认证头
+    # 注入认证头。userRoleCode 与 Accept 是教务网关（2026-11 起）的硬要求：
+    # 缺 userRoleCode 时业务层直接报
+    # security.SysPermissionService.userCurrentRole.isNull（HTTP 200，整单失败）。
     session.headers.update({
         "Authorization": f"Bearer {jwt_token}",
         "token": jwt_token,
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "userRoleCode": "student",
     })
 
     # 学期过滤：优先用学生本人成绩推导的真实学期代码（动态、含小学期）；
@@ -129,23 +133,20 @@ class RankService:
     管理 Session 生命周期，提供高层查询接口。
     """
 
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str, login_mode: str = ""):
         self.username = username
         self.password = password
+        # 未显式指定时沿用上次成功登录的方式
+        self.login_mode = login_mode or saved_login_mode()
 
     def _create_session(self) -> requests.Session:
-        """创建并认证一个新的 Session"""
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36"
-            ),
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        })
-        login_and_bind_jw(session, self.username, self.password)
-        return session
+        """创建并认证一个新的 Session（优先复用已保存会话）"""
+        return create_authenticated_session(
+            self.username,
+            self.password,
+            mode=self.login_mode,
+            prefer_saved=True,
+        )
 
     def fetch_latest_rank(
         self, semesters: Optional[list[str]] = None

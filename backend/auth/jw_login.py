@@ -33,6 +33,14 @@ JW_BASE = "https://jw.ruc.edu.cn"
 SEC_API = JW_BASE + "/secService"
 LOGIN_PAGE = JW_BASE + "/Njw2017/login.html"
 
+# 成绩接口地址（探活与查询共用同一 resourceCode/apiCode）
+GRADE_API_URL = (
+    JW_BASE
+    + "/resService/jwxtpt/v1/xsd/cjgl_xsxdsq/findKccjList"
+    "?resourceCode=XSMH0526"
+    "&apiCode=jw.xsd.xsdInfo.controller.CjglKccjckController.findKccjList"
+)
+
 _KAPTCHA_HEADER = {"KAPTCHA-KEY-GENERATOR-REDIS": "securityKaptchaRedisServiceAdapter"}
 
 # 教务网关（2026-11 起）要求的固定请求头
@@ -231,3 +239,88 @@ def token_valid(session: requests.Session, skew_seconds: int = 300) -> bool:
     """jw token 是否仍在有效期内（预留 skew 秒余量）"""
     exp = token_expiry(session)
     return bool(exp and exp > time.time() + skew_seconds)
+
+
+# 探活结果
+PROBE_OK = "ok"              # 服务端认可当前会话
+PROBE_EXPIRED = "expired"    # 服务端明确表示会话/票据已失效（需续期或重登）
+PROBE_ERROR = "error"        # 网络异常等无法判定（调用方应保持原样，不要误判失效）
+
+
+def probe_session(session: requests.Session, timeout: int = 20) -> str:
+    """向服务端探活，确认会话**真的**还能用（token_valid 只查本地 exp）
+
+    背景（2026-11-07 真机故障）：教务系统的 JWT 有效期 12 小时，但服务端
+    的会话记录（SESSION / sid）可能更早被清理。此时本地 `token_valid()`
+    仍然返回 True，于是后台任务带着"看起来有效"的 cookie 一路 401：
+
+        {"errorCode":"security.httpstatu.401.1006",
+         "errorMessage":"The Claim 'sid' value doesn't match the required one."}
+
+    结果是成绩查询在 diff 之前就抛异常，永远拿不到 new/changed，通知静默失效。
+    所以恢复会话后必须打一次真实请求确认，401.1006 时降级到 CASTGC 静默续期。
+
+    用 pageSize=1 的极小请求，代价可忽略。
+
+    Returns:
+        PROBE_OK / PROBE_EXPIRED / PROBE_ERROR
+    """
+    jwt_token = session.cookies.get("token", domain="jw.ruc.edu.cn")
+    if not jwt_token:
+        return PROBE_EXPIRED
+
+    headers = {
+        "Authorization": f"Bearer {jwt_token}",
+        "token": jwt_token,
+        "Accept": "application/json",
+        "userRoleCode": "student",
+    }
+    payload = {
+        "pyfa007id": "1",
+        "jczy013id": [],
+        "fxjczy005id": "",
+        "cjckflag": "xsdcjck",
+        "kthList": [],
+        "page": {
+            "pageIndex": 1,
+            "pageSize": 1,
+            "orderBy": '[{"field":"jczy013id","sortType":"asc"}]',
+        },
+    }
+
+    try:
+        resp = session.post(
+            GRADE_API_URL, json=payload, headers=headers, timeout=timeout
+        )
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"会话探活请求失败（按无法判定处理）: {e}")
+        return PROBE_ERROR
+
+    if resp.status_code in (401, 403):
+        logger.info(f"会话探活：服务端返回 HTTP {resp.status_code}，判定会话已失效")
+        return PROBE_EXPIRED
+
+    if resp.status_code != 200:
+        logger.warning(f"会话探活：HTTP {resp.status_code}，按无法判定处理")
+        return PROBE_ERROR
+
+    try:
+        body = resp.json()
+    except Exception:
+        logger.warning("会话探活：响应不是 JSON，按无法判定处理")
+        return PROBE_ERROR
+
+    error_code = str(body.get("errorCode") or "")
+    error_message = str(body.get("errorMessage") or "")
+
+    # 401.1006 = "The Claim 'sid' value doesn't match the required one."
+    if error_code.endswith("401.1006") or "sid" in error_message.lower():
+        logger.info(f"会话探活：服务端判定 sid 失效（{error_code}），需要续期")
+        return PROBE_EXPIRED
+
+    if error_code == "success":
+        return PROBE_OK
+
+    # 其他业务错误（权限、参数等）说明会话本身是通的，不能据此判定失效
+    logger.warning(f"会话探活：业务返回 {error_code} {error_message}，按会话有效处理")
+    return PROBE_OK

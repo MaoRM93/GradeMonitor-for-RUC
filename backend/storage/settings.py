@@ -17,6 +17,7 @@ import os
 from backend.storage.cache import (
     APPDATA_DIR,
     APP_NAME,
+    atomic_write_json,
     ensure_data_dir,
     get_data_dir,
     get_data_file_path,
@@ -90,8 +91,7 @@ def _migrate_plaintext_password(raw: dict) -> None:
         # 从原始数据中移除并重写文件
         raw.pop("password", None)
         try:
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(raw, f, ensure_ascii=False, indent=2)
+            atomic_write_json(SETTINGS_FILE, raw)
             logger.info("明文密码已迁移，settings.json 已重写（不含密码）")
         except Exception as e:
             logger.warning(f"重写 settings.json 失败（明文仍存在，请检查权限）: {e}")
@@ -140,8 +140,8 @@ def save_settings(settings: dict) -> None:
             else:
                 clear_password()
 
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    # 原子写：设置文件损坏会导致登录方式/凭据全部丢失，必须防中断
+    atomic_write_json(SETTINGS_FILE, payload)
 
 
 def public_settings() -> dict:

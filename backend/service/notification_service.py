@@ -223,21 +223,16 @@ def _show(title: str, message: str, record: bool = True) -> None:
     """
     if record:
         try:
-            import json as _json
-
             from datetime import datetime
 
-            from backend.storage.cache import get_data_file_path
+            from backend.storage.cache import atomic_write_json, get_data_file_path
 
             _data = {
                 "title": title,
                 "message": message,
                 "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
-            with open(
-                get_data_file_path("recent_change.json"), "w", encoding="utf-8"
-            ) as _f:
-                _json.dump(_data, _f, ensure_ascii=False, indent=2)
+            atomic_write_json(get_data_file_path("recent_change.json"), _data)
         except Exception as e:
             logger.debug(f"记录最近通知失败: {e}")
 

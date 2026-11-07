@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from backend.utils.logger import get_logger
@@ -164,10 +165,45 @@ def load_local_grades() -> dict | None:
     return {}
 
 
+def atomic_write_json(path: str, data) -> None:
+    """原子写 JSON：先写同目录临时文件再 os.replace
+
+    为什么必须原子（2026-11-07 真机故障）：原实现直接 open(..., "w") 覆盖，
+    写入过程被中断（App 被杀、断电、多线程并发写）会留下截断文件。真机上
+    出现过 `Extra data: line 2009 column 4 (char 42166)` 的损坏，52 门课
+    只能抢救回 49 门，3 门凭空消失——恢复后它们会被当成"新增课程"误发通知。
+
+    临时文件与目标同目录（保证同一文件系统，os.replace 才是原子操作），
+    写完 fsync 再替换，并沿用原文件权限。
+    """
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".tmp-", suffix=".json", dir=directory
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        # 保留目标文件原有权限；目标不存在时 mkstemp 的 0600 也够用
+        try:
+            os.chmod(tmp_path, os.stat(path).st_mode & 0o777)
+        except OSError:
+            pass
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def save_local_grades(grades_dict: dict) -> None:
-    """保存成绩数据到本地缓存"""
-    with open(LOCAL_GRADES_FILE, "w", encoding="utf-8") as f:
-        json.dump(grades_dict, f, ensure_ascii=False, indent=2)
+    """保存成绩数据到本地缓存（原子写，避免中断导致 JSON 损坏）"""
+    atomic_write_json(LOCAL_GRADES_FILE, grades_dict)
+    logger.debug(f"写入成绩缓存: {LOCAL_GRADES_FILE}  ({len(grades_dict)} 门)")
 
 
 def derive_semesters_from_local_grades() -> list[str]:
@@ -191,7 +227,6 @@ def derive_semesters_from_local_grades() -> list[str]:
         if len(parts) == 3 and all(p.isdigit() for p in parts):
             codes.add(code)
     return sorted(codes, reverse=True)
-    logger.info(f"写入成绩缓存: {LOCAL_GRADES_FILE}  ({len(grades_dict)} 门)")
 
 
 def _normalize_value(val):
@@ -262,9 +297,8 @@ def load_local_ranks() -> dict:
 
 
 def save_local_ranks(ranks_dict: dict) -> None:
-    """保存排名数据到本地缓存"""
-    with open(LOCAL_RANKS_FILE, "w", encoding="utf-8") as f:
-        json.dump(ranks_dict, f, ensure_ascii=False, indent=2)
+    """保存排名数据到本地缓存（原子写）"""
+    atomic_write_json(LOCAL_RANKS_FILE, ranks_dict)
     logger.debug("Saved ranks to cache")
 
 
@@ -285,12 +319,10 @@ def increment_query_count() -> int:
     """查询次数 +1 并持久化，返回新值"""
     current = load_total_query_count()
     current += 1
-    with open(STATS_FILE, "w", encoding="utf-8") as f:
-        json.dump({"total_queries": current}, f, ensure_ascii=False, indent=2)
+    atomic_write_json(STATS_FILE, {"total_queries": current})
     return current
 
 
 def reset_query_count() -> None:
     """重置查询计数"""
-    with open(STATS_FILE, "w", encoding="utf-8") as f:
-        json.dump({"total_queries": 0}, f, ensure_ascii=False, indent=2)
+    atomic_write_json(STATS_FILE, {"total_queries": 0})

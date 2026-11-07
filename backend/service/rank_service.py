@@ -5,7 +5,11 @@
 import requests
 from typing import Any, Optional
 
-from backend.auth.login import create_authenticated_session, saved_login_mode
+from backend.auth.login import (
+    background_login_mode,
+    create_authenticated_session,
+    force_relogin,
+)
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -136,17 +140,21 @@ class RankService:
     def __init__(self, username: str, password: str, login_mode: str = ""):
         self.username = username
         self.password = password
-        # 未显式指定时沿用上次成功登录的方式
-        self.login_mode = login_mode or saved_login_mode()
+        # 未显式指定时用后台安全入口（避免落到需要验证码的 CAS 上）
+        self.login_mode = login_mode or background_login_mode()
 
-    def _create_session(self) -> requests.Session:
+    def _create_session(self, prefer_saved: bool = True) -> requests.Session:
         """创建并认证一个新的 Session（优先复用已保存会话）"""
         return create_authenticated_session(
             self.username,
             self.password,
             mode=self.login_mode,
-            prefer_saved=True,
+            prefer_saved=prefer_saved,
         )
+
+    def _relogin_session(self) -> requests.Session:
+        """丢弃落盘会话，强制用凭据重新登录（用于 401 自愈）"""
+        return force_relogin(self.username, self.password, self.login_mode)
 
     def fetch_latest_rank(
         self, semesters: Optional[list[str]] = None
@@ -167,6 +175,20 @@ class RankService:
                     logger.warning(
                         f"动态学期列表查询被拒({e})，回退历史列表重试"
                     )
-            return fetch_rank(session)
+            try:
+                return fetch_rank(session)
+            except Exception as e:
+                # 服务端会话失效（401.1006）→ 强制重登后重试一次，
+                # 否则监控循环整轮白跑（2026-11-07 真机故障）
+                text = str(e)
+                if not ("401" in text or "sid" in text.lower()):
+                    raise
+                logger.warning(f"排名查询遇认证失效，强制重登后重试一次: {e}")
+                session.close()
+                session = self._relogin_session()
+                return fetch_rank(session)
         finally:
-            session.close()
+            try:
+                session.close()
+            except Exception:
+                pass

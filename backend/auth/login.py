@@ -240,7 +240,9 @@ def create_authenticated_session(
     if prefer_saved:
         payload = session_store.load() or {}
         saved_mode = payload.get("login_mode") or ""
-        if saved_mode == actual and try_restore_session(session):
+        # 只要落盘会话可用就复用，不因"上次登录入口"与当前设置不同而放弃：
+        # 一个有效会话对任何入口都有效，而复用能避免 CAS 再要一次验证码。
+        if saved_mode and try_restore_session(session):
             return session
 
     try:
@@ -251,6 +253,12 @@ def create_authenticated_session(
         except Exception:
             pass
         raise
+
+    # 登录后立即探活：登录成功但服务端会话异常（风控/多端顶号）时尽早暴露，
+    # 不要等到监控循环里 401 才失败。
+    state = jw_login.probe_session(session)
+    if state == jw_login.PROBE_EXPIRED:
+        logger.warning("刚登录的会话探活即判定失效，本次查询可能失败")
     return session
 
 
@@ -260,6 +268,63 @@ def saved_login_mode() -> str:
 
     payload = session_store.load() or {}
     return normalize_mode(payload.get("login_mode") or "")
+
+
+def background_login_mode() -> str:
+    """后台任务（成绩/排名/监控）应使用的登录入口
+
+    后台无人值守，**不能选需要验证码的入口**——CAS 一到期就会抛
+    KIND_CAPTCHA_REQUIRED 让整轮查询失败。教务系统直连（jw）与 CAS 用的是
+    同一套微人大账号，且通常不需要验证码，因此后台优先用它：
+      · 上次登录方式不需要验证码 → 沿用它
+      · 上次是 CAS 等需要验证码的入口 → 回落到默认入口（jw）
+    """
+    saved = saved_login_mode()
+    if saved and not mode_needs_captcha(saved):
+        return saved
+    return DEFAULT_MODE
+
+
+def force_relogin(
+    username: str,
+    password: str,
+    preferred_mode: str = "",
+) -> requests.Session:
+    """丢弃落盘会话，用凭据强制重新登录（后台 401 自愈用）
+
+    与 `create_authenticated_session` 的区别：不复用落盘会话，且入口若需要
+    验证码会自动回落到默认入口，保证无人值守场景不会卡在验证码上。
+
+    Args:
+        username: 学号
+        password: 密码
+        preferred_mode: 首选入口（空则用 background_login_mode()）
+
+    Returns:
+        已认证的 requests.Session
+    """
+    from backend.auth import cas_login, jw_login, session_store
+
+    try:
+        session_store.clear()
+    except Exception as e:
+        logger.warning(f"清除落盘会话失败（继续重登）: {e}")
+
+    mode = normalize_mode(preferred_mode or background_login_mode())
+    if mode_needs_captcha(mode):
+        logger.info(f"后台重登：入口 {mode} 需要验证码，回落默认入口 {DEFAULT_MODE}")
+        mode = DEFAULT_MODE
+
+    session = cas_login.new_session() if mode == MODE_CAS else jw_login.new_session()
+    try:
+        login_by_mode(session, username, password, mode=mode)
+    except Exception:
+        try:
+            session.close()
+        except Exception:
+            pass
+        raise
+    return session
 
 
 def login_by_mode(
@@ -316,9 +381,14 @@ def try_restore_session(session: requests.Session) -> bool:
 
     流程：
       1. 读落盘的 cookie 灌进 session
-      2. jw token 还在有效期（12h）→ 直接可用
-      3. 否则若有 CASTGC → 静默续期（不弹验证码）
+      2. jw token 本地未过期 → 再向服务端**探活**确认（关键，见下）
+      3. 服务端判定失效（401.1006 sid 不匹配）→ 用 CASTGC 静默续期
       4. 都不行 → 返回 False，由用户重新登录
+
+    为什么本地 exp 校验不够（2026-11-07 真机故障）：JWT 有效期 12 小时，
+    但服务端会话记录可能更早被清理。此时 `token_valid()` 仍返回 True，
+    后台任务带着"看起来有效"的 cookie 一路 401.1006，成绩查询在 diff 前
+    就抛异常，通知因此静默失效。所以必须打一次真实请求探活。
 
     Returns:
         True 表示会话可用
@@ -335,13 +405,30 @@ def try_restore_session(session: requests.Session) -> bool:
         return False
 
     if jw_login.token_valid(session):
-        logger.info("已保存的教务会话仍在有效期内，免登录恢复成功")
-        return True
+        # 本地 exp 通过，但必须再问一次服务端：会话可能已被提前清理
+        state = jw_login.probe_session(session)
+        if state == jw_login.PROBE_OK:
+            logger.info("已保存的教务会话经探活确认有效，免登录恢复成功")
+            return True
+        if state == jw_login.PROBE_EXPIRED:
+            logger.info("教务 token 本地未过期但服务端已失效，改用 CASTGC 静默续期")
+        else:
+            # 网络异常等无法判定：保守沿用原会话，避免网络抖动时误踢用户
+            logger.warning("会话探活无法判定（网络异常），暂时沿用已保存会话")
+            return True
+    else:
+        logger.info("教务 token 已过期，尝试用 CASTGC 静默续期")
 
-    logger.info("教务 token 已过期，尝试用 CASTGC 静默续期")
     if cas_login.silent_renew(session):
+        state = jw_login.probe_session(session)
+        if state == jw_login.PROBE_EXPIRED:
+            logger.info("静默续期后探活仍判定失效，需要重新登录")
+            return False
         try:
-            session_store.save(session_store.snapshot(session), login_mode=payload.get("login_mode", ""))
+            session_store.save(
+                session_store.snapshot(session),
+                login_mode=payload.get("login_mode", ""),
+            )
         except Exception:
             pass
         return True

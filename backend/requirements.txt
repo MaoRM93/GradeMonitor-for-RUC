@@ -10,3 +10,6 @@ requests>=2.32.0
 beautifulsoup4>=4.12.0
 # 仅 Windows 需要（macOS/Linux 走系统通知，代码里是惰性导入）
 win11toast>=0.35; sys_platform == "win32"
+# 仅 Windows 需要：DPAPI 加密会话 Cookie（backend/auth/session_store.py 惰性导入）。
+# 缺失时不会报错，但会静默退化为 base64 明文存储，因此显式声明。
+pywin32>=306; sys_platform == "win32"

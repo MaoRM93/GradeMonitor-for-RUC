@@ -10,11 +10,22 @@
 import logging
 import os
 import sys
+import tempfile
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 # ---------- 日志目录 ----------
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _windows_appdata_root() -> Path:
+    """Windows 上取可用的 Roaming 根目录，避免 APPDATA 缺失时拼出相对路径。"""
+    for key in ("APPDATA", "LOCALAPPDATA"):
+        value = os.environ.get(key, "")
+        if value and os.path.isabs(value):
+            return Path(value)
+    home = os.path.expanduser("~")
+    return Path(home) / "AppData" / "Roaming"
 
 
 def _resolve_log_dir() -> Path:
@@ -42,7 +53,7 @@ def _resolve_log_dir() -> Path:
         / "GradeMonitor"
         / "logs"
         if sys.platform == "darwin"
-        else Path(os.environ.get("APPDATA", "")) / "GradeMonitor" / "logs"
+        else _windows_appdata_root() / "GradeMonitor" / "logs"
     )
     candidates.append(Path(os.path.expanduser("~")) / ".grademonitor" / "logs")
 
@@ -55,7 +66,7 @@ def _resolve_log_dir() -> Path:
             return candidate
         except OSError:
             continue
-    fallback = Path("/tmp") / "GradeMonitor" / "logs"
+    fallback = Path(tempfile.gettempdir()) / "GradeMonitor" / "logs"
     try:
         fallback.mkdir(parents=True, exist_ok=True)
     except OSError:

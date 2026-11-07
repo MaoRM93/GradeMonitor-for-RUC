@@ -1,5 +1,9 @@
 ; GradeMonitor 安装脚本 (Inno Setup)
 ; 小白用户：双击 setup.exe → 一路下一步 → 完成即可使用
+;
+; 路径说明：本脚本内的相对路径均以「脚本所在目录」(.data/) 为基准，
+; 因此仓库可以放在任意盘符/目录下，不再写死 C:\Projects\GradeMonitor8。
+; 若需临时覆盖，可在命令行用 /DOutputDir=... 之类的方式传定义。
 
 [Setup]
 AppId={{7B8A9C0D-1E2F-3A4B-5C6D-7E8F9A0B1C2D}
@@ -14,9 +18,9 @@ VersionInfoCompany=GradeMonitor
 DefaultDirName={localappdata}\Programs\GradeMonitor
 DefaultGroupName=GradeMonitor
 DisableProgramGroupPage=yes
-OutputDir=C:\Projects\GradeMonitor8\dist
+OutputDir=..\dist
 OutputBaseFilename=GradeMonitor_Ver.108.1.0.103_setup
-SetupIconFile=C:\Projects\GradeMonitor8\frontend\assets\app_icon.ico
+SetupIconFile=..\frontend\assets\app_icon.ico
 UninstallDisplayIcon={app}\grademonitor.exe
 Compression=lzma2
 SolidCompression=yes
@@ -32,7 +36,7 @@ RestartApplications=no
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
-Source: "C:\Projects\GradeMonitor8\.data\staging\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
+Source: "staging\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
 
 [InstallDelete]
 ; 旧版快捷方式可能缓存了旧的 exe 图标，先删除再由 [Icons] 重建。

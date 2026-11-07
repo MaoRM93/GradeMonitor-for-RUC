@@ -94,6 +94,32 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 > 关闭窗口不会退出程序。如需彻底退出，请通过系统托盘图标选择「退出」。
 
+### Windows 端构建（开发者）
+
+打包链路由 `scripts/build_windows.ps1` 统一驱动，需在本机具备：
+
+- Flutter SDK（3.47+）与 Visual Studio 2022 生成工具（含 C++ 桌面工作负载）
+- Inno Setup 6（`ISCC.exe`）
+- 任意 Python 3.10+（用于 `prepare_staging.py`，会用它生成便携运行时）
+
+```powershell
+# 首次 / 需要重建便携 Python 运行时
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -RebuildRuntime
+
+# 日常打包（复用已有 runtime\tools）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+
+# 只跑 staging，不编译安装包
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -SkipFlutter -SkipInstaller
+```
+
+脚本会先校验版本号三处落点（`frontend/pubspec.yaml`、`frontend/windows/runner/Runner.rc`、
+`.data/setup.iss`）一致，再依次执行 `flutter build windows --release` → `.data/prepare_staging.py`
+→ `ISCC.exe`，产物为 `dist\GradeMonitor_Ver.<版本>_setup.exe`。
+
+> 注意：项目必须放在 **NTFS** 分区上构建。Flutter 会为插件创建符号链接，
+> exFAT/FAT32 上会报 `ERROR_INVALID_FUNCTION` 而构建失败。
+
 ### macOS 端
 
 1. 下载 `GradeMonitor_108.x.x.xxx_macOS_arm64.zip`，解压后将 `GradeMonitor.app` 拖入「应用程序」文件夹。

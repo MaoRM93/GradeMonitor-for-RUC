@@ -3,6 +3,7 @@
 import glob
 import os
 import shutil
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,16 +14,54 @@ DATA_DIR = os.path.join(ROOT, ".data")
 STAGING = os.path.join(DATA_DIR, "staging")
 
 # VC++ 运行库（应用本地部署，确保"不缺运行库"）
-# 自动查找当前 VS Build Tools 安装的 x64 CRT 目录，避免写死版本号。
-_VC_REDIST_ROOT = os.path.join(
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools",
-    "VC", "Redist", "MSVC",
+# 自动查找本机 Visual Studio / Build Tools 安装的 x64 CRT 目录，避免写死版本号。
+_VSWHERE = os.path.join(
+    os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    "Microsoft Visual Studio", "Installer", "vswhere.exe",
 )
-_vc_redist_candidates = sorted(
-    glob.glob(os.path.join(_VC_REDIST_ROOT, "*", "x64", "Microsoft.VC*.CRT")),
-    reverse=True,
-)
-VC_REDIST = _vc_redist_candidates[0] if _vc_redist_candidates else ""
+_VS_ROOTS = [
+    os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    os.environ.get("ProgramFiles", r"C:\Program Files"),
+]
+
+
+def _find_vc_redist():
+    """返回最新的 x64 CRT 目录；找不到返回空串。
+
+    优先用 vswhere 询问真实安装路径（覆盖 Community / Professional /
+    Enterprise / BuildTools 各种组合），失败则回退到目录扫描。
+    """
+    roots = []
+    if os.path.isfile(_VSWHERE):
+        try:
+            out = subprocess.run(
+                [_VSWHERE, "-latest", "-products", "*",
+                 "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                 "-property", "installationPath"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout.strip()
+            if out:
+                roots.append(os.path.join(out.splitlines()[0].strip(),
+                                          "VC", "Redist", "MSVC"))
+        except Exception:
+            pass
+
+    for base in _VS_ROOTS:
+        if not base:
+            continue
+        for edition in ("BuildTools", "Community", "Professional", "Enterprise"):
+            roots.append(os.path.join(base, "Microsoft Visual Studio", "2022",
+                                      edition, "VC", "Redist", "MSVC"))
+
+    candidates = []
+    for root in roots:
+        candidates.extend(glob.glob(os.path.join(root, "*", "x64", "Microsoft.VC*.CRT")))
+    # 目录名形如 14.44.35211，按版本号排序取最新
+    candidates.sort(reverse=True)
+    return candidates[0] if candidates else ""
+
+
+VC_REDIST = _find_vc_redist()
 
 
 def main():

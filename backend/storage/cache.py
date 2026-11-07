@@ -19,21 +19,37 @@ APP_NAME = "GradeMonitor"
 # 支持通过环境变量 GRADEMONITOR_DATA_DIR 自定义数据目录
 _env_data_dir = os.environ.get("GRADEMONITOR_DATA_DIR", "")
 
+
+def _windows_appdata_base() -> str:
+    """返回 Windows 下可用的 Roaming 根目录。
+
+    APPDATA 缺失时（例如以服务/受限环境启动）退到 LOCALAPPDATA，
+    再退到 ~/AppData/Roaming，最后退到用户主目录，避免拼出相对路径。
+    """
+    for key in ("APPDATA", "LOCALAPPDATA"):
+        value = os.environ.get(key, "")
+        if value and os.path.isabs(value):
+            return value
+    home = os.path.expanduser("~")
+    roaming = os.path.join(home, "AppData", "Roaming")
+    return roaming if home and home != "~" else os.getcwd()
+
+
 if _env_data_dir:
-    _default_appdata = _env_data_dir
+    _default_appdata = os.path.abspath(os.path.expanduser(_env_data_dir))
 elif sys.platform == "darwin":
     _default_appdata = os.path.join(
         os.path.expanduser("~"), "Library", "Application Support", APP_NAME
     )
 else:
-    _default_appdata = os.path.join(os.environ.get("APPDATA", ""), APP_NAME)
+    _default_appdata = os.path.join(_windows_appdata_base(), APP_NAME)
 
 
 def _resolve_data_dir() -> str:
     """选择可写入的数据目录。
-    优先级: ~/Library/Application Support/GradeMonitor → ~/.grademonitor → /tmp/GradeMonitor
+    优先级: 平台标准应用数据目录 → ~/.grademonitor → 系统临时目录
     """
-    # 1. 标准 macOS 应用数据目录（跨重启持久）
+    # 1. 平台标准应用数据目录（跨重启持久）
     try:
         os.makedirs(_default_appdata, exist_ok=True)
         test_file = os.path.join(_default_appdata, ".write_test")
@@ -56,12 +72,12 @@ def _resolve_data_dir() -> str:
         logger.warning(f"数据目录（home fallback）: {home_fallback}")
         return home_fallback
     except (PermissionError, OSError) as e:
-        logger.error(f"备选 home 目录也不可用 ({e}), 回退到 /tmp（重启后数据将丢失！）")
+        logger.error(f"备选 home 目录也不可用 ({e}), 回退到临时目录（重启后数据将丢失！）")
 
-    # 3. 最终回退（仅 /tmp，重启后清空）
-    fallback = os.path.join("/tmp", APP_NAME)
+    # 3. 最终回退（系统临时目录，重启后清空）
+    fallback = os.path.join(tempfile.gettempdir(), APP_NAME)
     os.makedirs(fallback, exist_ok=True)
-    logger.error(f"数据目录（/tmp fallback - 非持久！）: {fallback}")
+    logger.error(f"数据目录（临时目录 fallback - 非持久！）: {fallback}")
     return fallback
 
 APPDATA_DIR = _resolve_data_dir()

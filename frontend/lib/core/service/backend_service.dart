@@ -227,17 +227,24 @@ class BackendService {
 
   /// 解析包含 backend/ 目录的项目根目录
   ///
-  /// 从环境变量、包内 Resources、开发机项目目录、当前目录、可执行文件位置
-  /// 五个起点向上查找，找到含有 backend/api/app.py 的目录即为后端根目录。
+  /// 从环境变量、安装目录、开发机项目目录、当前目录等起点向上查找，
+  /// 找到含有 backend/api/app.py 的目录即为后端根目录。
+  ///
+  /// 顺序至关重要：安装目录必须排在**当前工作目录之前**。Windows 安装后
+  /// 从仓库目录（或任意目录）启动 exe 时，CWD 可能恰好是另一份带 backend
+  /// 的开发检出，若先匹配 CWD 就会跑起仓库里的后端（错误的工作目录、错误的
+  /// 依赖环境），表现为"安装版启动后行为异常"。
   String? _resolveBackendRoot() {
     final candidates = <String>[
       Platform.environment['GRADEMONITOR_BACKEND_ROOT'] ?? '',
-      // 打包态：backend 与便携 Python 被塞进 .app/Contents/Resources，
+      // 打包态：Windows 为 exe 同级目录，macOS 为 .app/Contents/Resources。
       // 这是正式安装后唯一真实存在的候选，必须排在最前。
       _bundleResourcesPath() ?? '',
       // 开发机固定项目路径（仅开发机存在，用户机器上通常落空）
       '/Applications/Projects/GradeDetector_4',
+      // 开发态（flutter run）：CWD 才是项目根目录
       Directory.current.path,
+      // 兜底：可执行文件所在目录
       File(Platform.resolvedExecutable).parent.path,
     ];
 
@@ -259,10 +266,18 @@ class BackendService {
     return null;
   }
 
-  /// 返回 .app 包内的 Contents/Resources 绝对路径
+  /// 返回安装目录（backend/ 与 runtime/ 所在目录）
   ///
-  /// 仅 macOS 打包态有效；开发态（直接跑 flutter run）返回 null。
+  /// - Windows：exe 同级目录（staging 布局把 backend/ 与 runtime/tools/ 放在
+  ///   grademonitor.exe 旁边）。开发态该目录下没有 backend/，向上查找会落空，
+  ///   自然回退到其它候选。
+  /// - macOS：.app/Contents/Resources。
+  /// - 其它：null。
   String? _bundleResourcesPath() {
+    if (Platform.isWindows) {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      return exeDir.existsSync() ? exeDir.path : null;
+    }
     if (!Platform.isMacOS) return null;
     final exe = Platform.resolvedExecutable;
     final macosDir = File(exe).parent; // .../Contents/MacOS

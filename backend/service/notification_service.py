@@ -203,6 +203,21 @@ def _ensure_win_aumid() -> None:
         logger.warning(f"Windows AUMID 注册失败（通知可能无法显示）: {e}")
 
 
+def _win_toast_launch_target() -> str:
+    """返回点击 Windows Toast 时要激活的命令行（带引号），不可用时返回空串。
+
+    win11toast 的 `on_click` 传字符串时会写入 toast 的 `launch` 属性，
+    Windows 以 activationType="protocol" 用 ShellExecute 执行它。这里指向
+    应用本体 exe：exe 启动后由 main.cpp 的单实例互斥体检测到已有实例，
+    直接把主窗口还原并置前，然后自身退出——因此点击通知即可回到主界面，
+    不会重复拉起后端进程。
+    """
+    app_exe = os.environ.get("GRADEMONITOR_APP_PATH", "")
+    if not app_exe or not os.path.isfile(app_exe):
+        return ""
+    return f'"{app_exe}"'
+
+
 def _show(title: str, message: str, record: bool = True) -> None:
     """发送 macOS/Windows 系统通知。
 
@@ -257,8 +272,15 @@ def _show(title: str, message: str, record: bool = True) -> None:
         elif sys.platform == "win32":
             try:
                 from win11toast import notify
+
                 _ensure_win_aumid()
-                notify(title, message, app_id=_WIN_AUMID)
+                # on_click 传字符串 → 写入 toast 的 launch 属性；点击通知时
+                # ShellExecute 该命令行，由单实例互斥体把主窗口还原置前。
+                launch = _win_toast_launch_target()
+                if launch:
+                    notify(title, message, app_id=_WIN_AUMID, on_click=launch)
+                else:
+                    notify(title, message, app_id=_WIN_AUMID)
                 logger.info(f"Notification sent via win11toast: {title}")
             except ImportError:
                 logger.warning("win11toast 未安装，请执行: pip install win11toast")

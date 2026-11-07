@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +42,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   /// 退出后回退成登录表单，供用户重新登录。
   bool _loggedIn = false;
   bool _isLoggingOut = false;
+
+  // 登录入口与验证码（与欢迎向导一致）
+  List<LoginMode> _loginModes = const [];
+  String _loginMode = 'jw';
+  bool _modeNeedsCaptcha = false;
+  bool _captchaRequiredByServer = false;
+  final _captchaCtrl = TextEditingController();
+  String _captchaId = '';
+  String _captchaImage = '';
+  bool _captchaLoading = false;
+
+  bool get _showCaptcha => _modeNeedsCaptcha || _captchaRequiredByServer;
 
   // 监控设置
   bool _autoMonitor = false;
@@ -95,8 +108,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _showMenubarIcon = s.showMenubarIcon;
     _hideUnknownCourses = s.hideUnknownCourses;
     _prevShowMenubarIcon = s.showMenubarIcon;
+    _loginMode = s.loginMode;
     _loaded = true;
     setState(() {});
+
+    // 登录入口列表与验证码：失败不阻塞设置页
+    _loadLoginModes();
 
     if (!s.showMenubarIcon) {
       await TrayService().destroy();
@@ -226,6 +243,41 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   Widget _buildLoginForm(ColorScheme colorScheme) {
     return Column(
       children: [
+        // 登录入口选择（教务系统 / CAS / 传统）
+        if (_loginModes.isNotEmpty)
+          Row(
+            children: [
+              Text(
+                '登录入口',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: colorScheme.onSurface.withValues(alpha: .6),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _loginMode,
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  items: _loginModes
+                      .map(
+                        (m) => DropdownMenuItem(
+                          value: m.id,
+                          child: Text(
+                            m.needsCaptcha ? '${m.name}（需验证码）' : m.name,
+                            style: const TextStyle(fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _onLoginModeChanged,
+                ),
+              ),
+            ],
+          ),
+        if (_loginModes.isNotEmpty) const SizedBox(height: 8),
         TextField(
           controller: _usernameCtrl,
           decoration: const InputDecoration(
@@ -258,11 +310,88 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     : Icons.visibility_rounded,
                 size: 20,
               ),
-              onPressed: () =>
-                  setState(() => _hidePassword = !_hidePassword),
+              onPressed: () => setState(() => _hidePassword = !_hidePassword),
             ),
           ),
         ),
+        if (_showCaptcha) ...[
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _captchaCtrl,
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  enableSuggestions: false,
+                  autocorrect: false,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: '验证码',
+                    hintText: '4 位数字',
+                    counterText: '',
+                    prefixIcon: Icon(Icons.verified_rounded, size: 20),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _captchaLoading ? null : _refreshCaptcha,
+                child: Container(
+                  width: 116,
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: colorScheme.outlineVariant.withValues(alpha: .5),
+                    ),
+                    color: Colors.white,
+                  ),
+                  child: _captchaLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : _captchaImage.isEmpty
+                      ? Text(
+                          '点击获取',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colorScheme.onSurface.withValues(alpha: .55),
+                          ),
+                        )
+                      : Image.memory(
+                          base64Decode(
+                            _captchaImage.contains(',')
+                                ? _captchaImage.split(',').last
+                                : _captchaImage,
+                          ),
+                          width: 108,
+                          height: 42,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                        ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '看不清？点击图片刷新验证码',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: colorScheme.onSurface.withValues(alpha: .5),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         Row(
           children: [
@@ -446,13 +575,90 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _saveSettings({'hide_unknown_courses': v});
   }
 
+  /// 加载登录入口列表，并按当前入口决定是否预取验证码
+  Future<void> _loadLoginModes() async {
+    final modes = await ref.read(settingsProvider.notifier).fetchLoginModes();
+    if (!mounted) return;
+    var selected = _loginMode;
+    if (modes.isNotEmpty && !modes.any((m) => m.id == selected)) {
+      selected = modes
+          .firstWhere((m) => m.recommended, orElse: () => modes.first)
+          .id;
+    }
+    setState(() {
+      _loginModes = modes;
+      _loginMode = selected;
+      _syncModeCaptcha();
+    });
+  }
+
+  /// 入口变化后同步验证码状态
+  void _syncModeCaptcha() {
+    final hit = _loginModes.where((m) => m.id == _loginMode);
+    _modeNeedsCaptcha = hit.isNotEmpty && hit.first.needsCaptcha;
+    if (_showCaptcha) {
+      _refreshCaptcha();
+    } else {
+      _captchaId = '';
+      _captchaImage = '';
+      _captchaCtrl.clear();
+    }
+  }
+
+  void _onLoginModeChanged(String? id) {
+    if (id == null || id == _loginMode) return;
+    setState(() {
+      _loginMode = id;
+      _captchaRequiredByServer = false;
+      _syncModeCaptcha();
+    });
+  }
+
+  /// 拉取新验证码
+  Future<void> _refreshCaptcha() async {
+    if (_captchaLoading) return;
+    setState(() => _captchaLoading = true);
+    final result = await ref
+        .read(settingsProvider.notifier)
+        .fetchLoginCaptcha(_loginMode);
+    if (!mounted) return;
+    setState(() {
+      _captchaLoading = false;
+      if (result != null) {
+        _captchaId = result.$1;
+        _captchaImage = result.$2;
+        _captchaCtrl.clear();
+      } else {
+        _captchaId = '';
+        _captchaImage = '';
+      }
+    });
+  }
+
   Future<void> _testLogin() async {
     setState(() {
       _isLoggingIn = true;
     });
     final result = await ref
         .read(settingsProvider.notifier)
-        .login(_usernameCtrl.text.trim(), _passwordCtrl.text);
+        .login(
+          _usernameCtrl.text.trim(),
+          _passwordCtrl.text,
+          mode: _loginMode,
+          captcha: _captchaCtrl.text.trim(),
+          captchaId: _captchaId,
+        );
+    // 后端要求验证码（教务系统风控）：补出输入框并取码
+    if (!result.success && result.captchaRequired && !_showCaptcha) {
+      if (mounted) {
+        setState(() {
+          _captchaRequiredByServer = true;
+          _syncModeCaptcha();
+        });
+      }
+    } else if (!result.success && _showCaptcha) {
+      _refreshCaptcha();
+    }
     if (result.success) {
       final notifier = ref.read(settingsProvider.notifier);
       final current = ref.read(settingsProvider);
@@ -462,6 +668,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         // 避免设置对象（密码为空）覆盖掉刚保存的凭据。
         hasPassword: true,
         rememberMe: _rememberMe,
+        loginMode: _loginMode,
         autoMonitorEnabled: _autoMonitor,
         rankMonitorEnabled: _rankMonitor,
         intervalSeconds: _intervalValue.toInt(),
@@ -526,13 +733,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   void _showUpdateDialog(UpdateCheckResult result) {
-    showDialog<void>(context: context, builder: (_) => _UpdateInfoDialog(result: result));
+    showDialog<void>(
+      context: context,
+      builder: (_) => _UpdateInfoDialog(result: result),
+    );
   }
 
   @override
   void dispose() {
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
+    _captchaCtrl.dispose();
     super.dispose();
   }
 
@@ -586,12 +797,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(height: 28),
 
-              // ---- ① 账号 ----
-              _SectionTitle(title: '账号', icon: Icons.account_circle_rounded),
-              const SizedBox(height: 12),
+              // ---- ① 账号（无分组标题：头像与学号本身已足够说明）----
               GlassCard(
                 padding: const EdgeInsets.all(20),
-                child: _loggedIn ? _buildAccountRow(colorScheme) : _buildLoginForm(colorScheme),
+                child: _loggedIn
+                    ? _buildAccountRow(colorScheme)
+                    : _buildLoginForm(colorScheme),
               ),
               const SizedBox(height: 24),
 
@@ -963,7 +1174,128 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
 /// 自动检查（开启程序/每小时）发现新版本时由主壳调用，弹同一个更新弹窗
 void showUpdateFoundDialog(BuildContext context, UpdateCheckResult result) {
-  showDialog<void>(context: context, builder: (_) => _UpdateInfoDialog(result: result));
+  showDialog<void>(
+    context: context,
+    builder: (_) => _UpdateInfoDialog(result: result),
+  );
+}
+
+/// 当前版本高于 GitHub 最新 Release（预发行副本）时由主壳调用
+void showPreReleaseDialog(BuildContext context, UpdateCheckResult result) {
+  showDialog<void>(
+    context: context,
+    builder: (_) => _PreReleaseDialog(result: result),
+  );
+}
+
+/// 「您可能在使用预发行版本」弹窗
+///
+/// 触发条件：本机版本号 > GitHub 最新正式 Release 版本号，说明用户装的是
+/// 开发者尚未正式发布的预览副本（或版本号被手动改过）。用红色警示样式，
+/// 同时提供「下载正式版」直达最新 Release 页面。
+class _PreReleaseDialog extends StatelessWidget {
+  final UpdateCheckResult result;
+  const _PreReleaseDialog({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final current = UpdateService().currentVersion;
+    final latest = result.latestVersion;
+    final danger = const Color(0xFFD32F2F);
+
+    return AlertDialog(
+      icon: Icon(Icons.warning_amber_rounded, color: danger, size: 34),
+      title: const Text('您可能在使用预发行版本'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '您所使用的版本超过了当前开发者发布的最新版本。',
+              style: TextStyle(fontSize: 13.5, height: 1.6),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: danger.withValues(alpha: .07),
+                border: Border.all(color: danger.withValues(alpha: .35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _kvRow('当前版本号', current.isEmpty ? '未知' : current, danger),
+                  const SizedBox(height: 6),
+                  _kvRow(
+                    'GitHub 最新 Release',
+                    latest.isEmpty ? '未知' : latest,
+                    danger,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '如您正在使用开发者提供的预览副本，请忽略该消息；'
+              '否则，请点击「下载正式版」按钮重新安装正式版本。',
+              style: TextStyle(fontSize: 13.5, height: 1.6),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('好'),
+        ),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: danger),
+          onPressed: () {
+            Navigator.of(context).pop();
+            UpdateService().openInBrowser(
+              '${UpdateService.repoUrl}/releases/latest',
+            );
+          },
+          icon: const Icon(Icons.download_rounded, size: 18),
+          label: const Text('下载正式版'),
+        ),
+      ],
+    );
+  }
+
+  Widget _kvRow(String label, String value, Color color) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 148,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: color.withValues(alpha: .85),
+            ),
+          ),
+        ),
+        Expanded(
+          child: SelectableText(
+            value,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// 「发现新版本」弹窗：
@@ -1074,7 +1406,8 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
     if (manifest == null) {
       setState(() {
         _phase = _DownloadPhase.manual;
-        _installHint = '该版本未提供与本安装包对应的签名清单，无法验证完整性，'
+        _installHint =
+            '该版本未提供与本安装包对应的签名清单，无法验证完整性，'
             '已停止自动安装。请手动安装并自行确认来源。';
       });
       return;
@@ -1089,7 +1422,8 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       setState(() {
         _phase = _DownloadPhase.failed;
         _errorText = '安装包校验失败：${check.reason}';
-        _installHint = '校验未通过，已阻止自动安装。请删除该文件后重新下载，'
+        _installHint =
+            '校验未通过，已阻止自动安装。请删除该文件后重新下载，'
             '或前往官方下载页手动获取。';
         _verifyFailed = true;
       });
@@ -1177,7 +1511,8 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
         if (_asset != null)
           FilledButton.icon(
             onPressed: _busy ? null : _onPrimary,
-            icon: _phase == _DownloadPhase.downloading ||
+            icon:
+                _phase == _DownloadPhase.downloading ||
                     _phase == _DownloadPhase.preparing ||
                     _phase == _DownloadPhase.installing
                 ? const SizedBox(
@@ -1185,10 +1520,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Icon(
-                    _switchIcon(),
-                    size: 18,
-                  ),
+                : Icon(_switchIcon(), size: 18),
             label: Text(_primaryLabel()),
           ),
       ],
@@ -1292,9 +1624,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
           LinearProgressIndicator(value: _progress > 0 ? _progress : null),
           const SizedBox(height: 6),
           Text(
-            _progress > 0
-                ? '${(_progress * 100).toStringAsFixed(0)}%'
-                : '连接中…',
+            _progress > 0 ? '${(_progress * 100).toStringAsFixed(0)}%' : '连接中…',
             style: sub,
           ),
         ];
@@ -1303,14 +1633,13 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
           const SizedBox(height: 10),
           Row(
             children: [
-              Icon(Icons.check_circle_rounded, size: 16, color: AppTheme.success),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '已下载到「下载」文件夹：$nameLabel',
-                  style: sub,
-                ),
+              Icon(
+                Icons.check_circle_rounded,
+                size: 16,
+                color: AppTheme.success,
               ),
+              const SizedBox(width: 6),
+              Expanded(child: Text('已下载到「下载」文件夹：$nameLabel', style: sub)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1344,9 +1673,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text('正在退出应用并自动替换安装，请勿关闭此窗口。', style: sub),
-              ),
+              Expanded(child: Text('正在退出应用并自动替换安装，请勿关闭此窗口。', style: sub)),
             ],
           ),
         ];
@@ -1361,9 +1688,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
                 color: AppTheme.warning,
               ),
               const SizedBox(width: 6),
-              Expanded(
-                child: Text('自动安装未完成：$_installHint', style: sub),
-              ),
+              Expanded(child: Text('自动安装未完成：$_installHint', style: sub)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1381,7 +1706,11 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
           const SizedBox(height: 10),
           Row(
             children: [
-              Icon(Icons.error_outline_rounded, size: 16, color: AppTheme.error),
+              Icon(
+                Icons.error_outline_rounded,
+                size: 16,
+                color: AppTheme.error,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1413,7 +1742,11 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       color: on.withValues(alpha: .78),
     );
     return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-      a: TextStyle(fontSize: 12.5, color: cs.primary, decoration: TextDecoration.underline),
+      a: TextStyle(
+        fontSize: 12.5,
+        color: cs.primary,
+        decoration: TextDecoration.underline,
+      ),
       p: base(null),
       h1: base('700').copyWith(fontSize: 18, color: on, height: 1.4),
       h2: base('700').copyWith(fontSize: 16, color: on, height: 1.4),
@@ -1441,7 +1774,9 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       ),
       blockquote: base(null).copyWith(color: on.withValues(alpha: .55)),
       blockquoteDecoration: BoxDecoration(
-        border: Border(left: BorderSide(color: cs.primary.withValues(alpha: .5), width: 3)),
+        border: Border(
+          left: BorderSide(color: cs.primary.withValues(alpha: .5), width: 3),
+        ),
       ),
     );
   }

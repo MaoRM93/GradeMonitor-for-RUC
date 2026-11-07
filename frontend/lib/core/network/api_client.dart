@@ -105,10 +105,27 @@ class ApiClient {
 
   // ---- Auth ----
 
-  Future<Response> login(String username, String password) async {
+  /// 登录
+  ///
+  /// [mode] 登录入口：`jw`（教务系统直连，默认）/ `cas`（统一身份认证）/
+  /// `vruc`（传统）。[captcha] 验证码文本，[captchaId] 为取码时返回的
+  /// 会话 id —— 必须一起回传，因为验证码与服务端会话绑定。
+  Future<Response> login(
+    String username,
+    String password, {
+    String mode = 'jw',
+    String captcha = '',
+    String captchaId = '',
+  }) async {
     final resp = await dio.post(
       ApiPath.login,
-      data: {'username': username, 'password': password},
+      data: {
+        'username': username,
+        'password': password,
+        'mode': mode,
+        'captcha': captcha,
+        'captcha_id': captchaId,
+      },
     );
     // 全局 validateStatus 放行了 4xx，这里必须手动把失败状态转为异常，
     // 否则 401（密码错误）会被上层误判为登录成功
@@ -120,6 +137,21 @@ class ApiClient {
       );
     }
     return resp;
+  }
+
+  /// 获取登录入口列表（欢迎向导「选择登录入口」页用）
+  Future<Response> getLoginModes() async {
+    return dio.get(ApiPath.loginModes);
+  }
+
+  /// 获取登录验证码（base64 内联图片 + 会话 id）
+  Future<Response> getLoginCaptcha({String mode = 'jw'}) async {
+    return dio.post(ApiPath.loginCaptcha, data: {'mode': mode});
+  }
+
+  /// 查询本地保存的登录会话是否仍可用（免登录）
+  Future<Response> getSessionStatus() async {
+    return dio.get(ApiPath.sessionStatus);
   }
 
   /// 退出登录：后端会停止监控、清除已保存的凭据，并重置欢迎向导标记。

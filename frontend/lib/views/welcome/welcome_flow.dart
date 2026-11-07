@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -54,18 +55,50 @@ class WelcomeFlow extends ConsumerStatefulWidget {
 }
 
 class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
-  int _page = 0;
+  // 页面序列：0 欢迎 → 1 法律性声明 → 2 选择登录入口 → 3 账号登录
+  // → 4 监控设置 → 5 通知设置 → 6 完成
+  static const int _pIntro = 0;
+  static const int _pAgreement = 1;
+  static const int _pLoginMode = 2;
+  static const int _pAccount = 3;
+  static const int _pMonitor = 4;
+  static const int _pNotify = 5;
+  static const int _pConfirm = 6;
+
+  int _page = _pIntro;
 
   // ---- 法律声明页 ----
   bool _agreed = false;
   int _countdown = 10;
   Timer? _countdownTimer;
 
+  // ---- 登录入口选择页 ----
+  List<LoginMode> _loginModes = const [];
+  String _loginMode = 'jw';
+  bool _modesLoading = false;
+  bool _modesLoaded = false;
+
   // ---- 账号页 ----
   final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _captchaCtrl = TextEditingController();
   bool _hidePassword = true;
   bool _verifying = false;
+
+  // ---- 验证码 ----
+  /// 当前选中的入口是否**固定**需要验证码（CAS）
+  bool _modeNeedsCaptcha = false;
+
+  /// 登录失败后后端临时要求验证码（教务系统触发风控时）
+  bool _captchaRequiredByServer = false;
+
+  /// 验证码会话 id 与图片（base64 data URI）
+  String _captchaId = '';
+  String _captchaImage = '';
+  bool _captchaLoading = false;
+
+  bool get _showCaptcha =>
+      _modeNeedsCaptcha || _captchaRequiredByServer;
 
   // ---- 监控设置页 ----
   bool _autoMonitor = false;
@@ -86,6 +119,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     // 账号/密码输入实时刷新主按钮可用状态
     _usernameCtrl.addListener(_refreshState);
     _passwordCtrl.addListener(_refreshState);
+    _captchaCtrl.addListener(_refreshState);
   }
 
   void _refreshState() {
@@ -104,7 +138,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   /// 从总欢迎页进入顺序设置：此刻才开始协议阅读倒计时
   void _startFromIntro() {
-    setState(() => _page = 1);
+    setState(() => _page = _pAgreement);
     _startCountdown();
   }
 
@@ -117,6 +151,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     _countdownTimer?.cancel();
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
+    _captchaCtrl.dispose();
     super.dispose();
   }
 
@@ -138,15 +173,17 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   String _primaryLabel() {
     switch (_page) {
-      case 0:
+      case _pIntro:
         return '开始';
-      case 1:
+      case _pAgreement:
         // 倒计时提醒仅出现在按钮内部
         return _countdown > 0 ? '请再阅读 $_countdown 秒' : '同意';
-      case 2:
+      case _pLoginMode:
+        return _modesLoading ? '正在加载...' : '下一步';
+      case _pAccount:
         return _verifying ? '正在验证...' : '下一步';
-      case 3:
-      case 4:
+      case _pMonitor:
+      case _pNotify:
         return '下一步';
       default:
         return _saving ? '正在保存...' : '好';
@@ -155,49 +192,144 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   bool _primaryEnabled() {
     switch (_page) {
-      case 0:
+      case _pIntro:
         return true;
-      case 1:
+      case _pAgreement:
         return _agreed && _countdown <= 0;
-      case 2:
-        return _usernameCtrl.text.trim().isNotEmpty &&
+      case _pLoginMode:
+        return !_modesLoading && _loginMode.isNotEmpty;
+      case _pAccount:
+        final base = _usernameCtrl.text.trim().isNotEmpty &&
             _passwordCtrl.text.isNotEmpty &&
             !_verifying;
-      case 3:
-      case 4:
+        // 需要验证码时，必须填满 4 位才能提交
+        if (_showCaptcha) {
+          return base && _captchaCtrl.text.trim().length >= 4;
+        }
+        return base;
+      case _pMonitor:
+      case _pNotify:
         return true;
       default:
         return !_saving;
     }
   }
 
-  /// 账号页（page 2）点击主按钮：先做真实登录验证，失败留在本页
+  /// 加载登录入口列表（进入「选择登录入口」页时调用一次）
+  Future<void> _loadLoginModes() async {
+    if (_modesLoaded || _modesLoading) return;
+    setState(() => _modesLoading = true);
+    final modes = await ref.read(settingsProvider.notifier).fetchLoginModes();
+    if (!mounted) return;
+    // 默认选中推荐入口（教务系统直连）
+    var selected = _loginMode;
+    if (modes.isNotEmpty && !modes.any((m) => m.id == selected)) {
+      selected = modes.firstWhere((m) => m.recommended, orElse: () => modes.first).id;
+    }
+    setState(() {
+      _loginModes = modes;
+      _loginMode = selected;
+      _modesLoading = false;
+      _modesLoaded = true;
+      _applyModeCaptchaFlag();
+    });
+  }
+
+  /// 入口切换后同步「是否需要验证码」并预取验证码
+  void _applyModeCaptchaFlag() {
+    final mode = _loginModes.where((m) => m.id == _loginMode);
+    _modeNeedsCaptcha = mode.isNotEmpty && mode.first.needsCaptcha;
+    if (_showCaptcha) {
+      _refreshCaptcha();
+    } else {
+      _captchaId = '';
+      _captchaImage = '';
+      _captchaCtrl.clear();
+    }
+  }
+
+  /// 选择一个登录入口
+  void _selectLoginMode(String id) {
+    if (id == _loginMode) return;
+    setState(() {
+      _loginMode = id;
+      _captchaRequiredByServer = false;
+      _applyModeCaptchaFlag();
+    });
+  }
+
+  /// 拉取一张新验证码（切换入口 / 验证失败 / 用户点击刷新）
+  Future<void> _refreshCaptcha() async {
+    if (_captchaLoading) return;
+    setState(() => _captchaLoading = true);
+    final result =
+        await ref.read(settingsProvider.notifier).fetchLoginCaptcha(_loginMode);
+    if (!mounted) return;
+    setState(() {
+      _captchaLoading = false;
+      if (result != null) {
+        _captchaId = result.$1;
+        _captchaImage = result.$2;
+        _captchaCtrl.clear();
+      } else {
+        _captchaId = '';
+        _captchaImage = '';
+      }
+    });
+    if (result == null && mounted) {
+      ToastHost().show('验证码获取失败，请点击图片重试');
+    }
+  }
+
+  /// 账号页点击主按钮：先做真实登录验证，失败留在本页
   Future<void> _onPrimary() async {
     switch (_page) {
-      case 0:
+      case _pIntro:
         _startFromIntro();
         break;
-      case 1:
-        setState(() => _page = 2);
+      case _pAgreement:
+        setState(() => _page = _pLoginMode);
+        _loadLoginModes();
         break;
-      case 2:
+      case _pLoginMode:
+        setState(() => _page = _pAccount);
+        // 进入账号页时按入口决定是否立刻取一张验证码
+        if (_showCaptcha && _captchaImage.isEmpty) {
+          _refreshCaptcha();
+        }
+        break;
+      case _pAccount:
         setState(() => _verifying = true);
-        final result = await ref
-            .read(settingsProvider.notifier)
-            .login(_usernameCtrl.text.trim(), _passwordCtrl.text);
+        final result = await ref.read(settingsProvider.notifier).login(
+              _usernameCtrl.text.trim(),
+              _passwordCtrl.text,
+              mode: _loginMode,
+              captcha: _captchaCtrl.text.trim(),
+              captchaId: _captchaId,
+            );
         if (!mounted) return;
         setState(() => _verifying = false);
         if (!result.success) {
           ToastHost().show(result.message);
+          // 后端要求验证码（教务系统风控）：动态补出输入框并取码
+          if (result.captchaRequired && !_showCaptcha) {
+            setState(() {
+              _captchaRequiredByServer = true;
+              _applyModeCaptchaFlag();
+            });
+          } else if (_showCaptcha) {
+            // 验证码错误/过期：立刻换一张，让用户直接重输
+            _refreshCaptcha();
+          }
           return;
         }
-        setState(() => _page = 3);
+        setState(() => _page = _pMonitor);
         break;
-      case 3:
-        setState(() => _page = 4);
+      case _pMonitor:
+        setState(() => _page = _pNotify);
         break;
-      case 4:
-        setState(() => _page = 5);
+      case _pNotify:
+        setState(() => _page = _pConfirm);
         break;
       default:
         await _finish();
@@ -216,6 +348,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
       hasPassword: true,
       // 密码始终记住（曾有的"记住密码"开关已移除）
       rememberMe: true,
+      loginMode: _loginMode,
       autoMonitorEnabled: _autoMonitor,
       rankMonitorEnabled: _rankMonitor,
       intervalSeconds: _intervalValue.toInt(),
@@ -310,7 +443,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   }
 
   Widget _buildBackRow(ColorScheme cs) {
-    if (_page == 0) return const SizedBox.shrink();
+    if (_page == _pIntro) return const SizedBox.shrink();
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
@@ -327,7 +460,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   Widget _buildBottomBar(ColorScheme cs) {
     // 法律声明页：同意 / 不同意并排
-    if (_page == 1) {
+    if (_page == _pAgreement) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(0, 10, 0, 52),
         child: Row(
@@ -419,15 +552,17 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   Widget _buildPage(ColorScheme cs) {
     switch (_page) {
-      case 0:
+      case _pIntro:
         return _buildIntroPage(cs);
-      case 1:
+      case _pAgreement:
         return _buildAgreementPage(cs);
-      case 2:
+      case _pLoginMode:
+        return _buildLoginModePage(cs);
+      case _pAccount:
         return _buildAccountPage(cs);
-      case 3:
+      case _pMonitor:
         return _buildMonitorPage(cs);
-      case 4:
+      case _pNotify:
         return _buildNotifyPage(cs);
       default:
         return _buildConfirmPage(cs);
@@ -623,7 +758,160 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     );
   }
 
-  // ---- Page 2: 账号登录 ----
+  // ---- Page 2: 选择登录入口 ----
+  Widget _buildLoginModePage(ColorScheme cs) {
+    return _contentGroup(
+      460,
+      SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _pageHeader(
+              cs,
+              Icons.login_rounded,
+              '选择登录入口',
+              '不同入口的登录方式略有差别，之后可在设置中修改。',
+              inkShift: 8.2,
+            ),
+            const SizedBox(height: 20),
+            if (_modesLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  ),
+                ),
+              )
+            else
+              ..._loginModes.map((m) => _buildModeTile(cs, m)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 单个登录入口选项卡片
+  Widget _buildModeTile(ColorScheme cs, LoginMode m) {
+    final selected = _loginMode == m.id;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _selectLoginMode(m.id),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: selected
+                ? cs.primary.withValues(alpha: .07)
+                : cs.surfaceContainerHighest.withValues(alpha: .25),
+            border: Border.all(
+              color: selected
+                  ? cs.primary.withValues(alpha: .7)
+                  : cs.outlineVariant.withValues(alpha: .45),
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 20,
+                  color: selected
+                      ? cs.primary
+                      : cs.onSurface.withValues(alpha: .35),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          m.name,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: cs.onSurface,
+                          ),
+                        ),
+                        if (m.recommended) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.primary.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '推荐',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: cs.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (m.needsCaptcha) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.tertiary.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '需验证码',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: cs.tertiary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      m.description,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: cs.onSurface.withValues(alpha: .6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---- Page 3: 账号登录 ----
   Widget _buildAccountPage(ColorScheme cs) {
     return _contentGroup(
       400,
@@ -634,7 +922,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _pageHeader(cs, Icons.person_outline, '账户',
-                '配置您的 ShuZhi RUC 或 vRUC 账户，我们不会收集您的信息。',
+                '登录入口：${_currentModeName()}。我们不会收集您的信息。',
                 inkShift: 10.4),
             const SizedBox(height: 24),
             TextField(
@@ -673,8 +961,95 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               ),
             ),
             // 密码始终保存（记住密码），无需用户勾选
+
+            // 需要验证码的入口（或教务系统触发风控时）才显示
+            if (_showCaptcha) ...[
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _captchaCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: '验证码',
+                        hintText: '4 位数字',
+                        isDense: true,
+                        counterText: '',
+                        prefixIcon: Icon(Icons.verified_outlined, size: 18),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _buildCaptchaImage(cs),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '看不清？点击图片可刷新验证码',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: .5),
+                ),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// 当前登录入口的显示名
+  String _currentModeName() {
+    final hit = _loginModes.where((m) => m.id == _loginMode);
+    if (hit.isNotEmpty) return hit.first.name;
+    return _loginMode == 'cas' ? 'CAS 统一身份验证' : '教务系统';
+  }
+
+  /// 验证码图片（点击刷新）；加载中显示占位
+  Widget _buildCaptchaImage(ColorScheme cs) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: _captchaLoading ? null : _refreshCaptcha,
+      child: Container(
+        width: 120,
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: .5)),
+          color: Colors.white,
+        ),
+        child: _captchaLoading
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : _captchaImage.isEmpty
+                ? Text(
+                    '点击获取',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: cs.onSurface.withValues(alpha: .55),
+                    ),
+                  )
+                : Image.memory(
+                    base64Decode(_captchaImage.contains(',')
+                        ? _captchaImage.split(',').last
+                        : _captchaImage),
+                    width: 112,
+                    height: 40,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  ),
       ),
     );
   }

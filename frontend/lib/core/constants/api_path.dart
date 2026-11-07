@@ -7,6 +7,9 @@ class ApiPath {
 
   // Auth
   static const String login = '/api/login';
+  static const String loginCaptcha = '/api/login/captcha';
+  static const String loginModes = '/api/login/modes';
+  static const String sessionStatus = '/api/session/status';
   static const String logout = '/api/logout';
 
   // Data

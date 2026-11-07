@@ -17,6 +17,8 @@ class AppSettings {
   final String password;
   final bool hasPassword;
   final bool rememberMe;
+  /// 登录入口：jw（教务系统直连，默认）/ cas（统一身份认证）/ vruc（传统）
+  final String loginMode;
   final String notifyMode;
   final String startTime;
   final String endTime;
@@ -35,6 +37,7 @@ class AppSettings {
     this.password = '',
     this.hasPassword = false,
     this.rememberMe = false,
+    this.loginMode = 'jw',
     this.notifyMode = '详细',
     this.startTime = '08:00',
     this.endTime = '23:00',
@@ -56,6 +59,7 @@ class AppSettings {
       password: json['password']?.toString() ?? '',
       hasPassword: json['has_password'] ?? false,
       rememberMe: json['remember_me'] ?? false,
+      loginMode: json['login_mode']?.toString() ?? 'jw',
       notifyMode: json['notify_mode']?.toString() ?? '详细',
       startTime: json['start_time']?.toString() ?? '08:00',
       endTime: json['end_time']?.toString() ?? '23:00',
@@ -78,6 +82,7 @@ class AppSettings {
       // 普通保存为 '' → 不带该键，后端保持既有密码不被清除。
       if (password.isNotEmpty) 'password': password,
       'remember_me': rememberMe,
+      'login_mode': loginMode,
       'notify_mode': notifyMode,
       'start_time': startTime,
       'end_time': endTime,
@@ -98,6 +103,7 @@ class AppSettings {
     String? password,
     bool? hasPassword,
     bool? rememberMe,
+    String? loginMode,
     String? notifyMode,
     String? startTime,
     String? endTime,
@@ -116,6 +122,7 @@ class AppSettings {
       password: password ?? this.password,
       hasPassword: hasPassword ?? this.hasPassword,
       rememberMe: rememberMe ?? this.rememberMe,
+      loginMode: loginMode ?? this.loginMode,
       notifyMode: notifyMode ?? this.notifyMode,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
@@ -135,9 +142,52 @@ class AppSettings {
 class LoginResult {
   final bool success;
   final String message;
-  /// 失败分类：credentials / maintenance / network（null 表示非后端分类的失败）
+
+  /// 失败分类：credentials / maintenance / network / campus_network /
+  /// sso_failed / captcha_required / captcha_invalid
+  /// （null 表示非后端分类的失败）
   final String? kind;
-  const LoginResult({required this.success, required this.message, this.kind});
+
+  /// 本次登录是否需要验证码（前端据此弹出验证码输入框）
+  final bool captchaRequired;
+
+  /// 实际使用的登录方式（成功时由后端回传）
+  final String mode;
+
+  const LoginResult({
+    required this.success,
+    required this.message,
+    this.kind,
+    this.captchaRequired = false,
+    this.mode = 'jw',
+  });
+}
+
+/// 登录入口（后端 `/api/login/modes` 返回的一项）
+class LoginMode {
+  final String id;
+  final String name;
+  final String description;
+  final bool needsCaptcha;
+  final bool recommended;
+
+  const LoginMode({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.needsCaptcha,
+    required this.recommended,
+  });
+
+  factory LoginMode.fromJson(Map<String, dynamic> json) {
+    return LoginMode(
+      id: json['id']?.toString() ?? 'jw',
+      name: json['name']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      needsCaptcha: json['needs_captcha'] == true,
+      recommended: json['recommended'] == true,
+    );
+  }
 }
 
 /// 登录失败文案（与 `backend/auth/login.py` 的 USER_MESSAGES 保持一致，
@@ -146,6 +196,10 @@ class LoginErrorText {
   static const String credentials = '您输入的账号或密码错误，请检查后重试';
   static const String maintenance = '教务系统正在维护中，请稍候';
   static const String network = '无法连接到服务器，请检查您的网络连接';
+  static const String campusNetwork = '当前不在校园网内，请连接校园网后重试';
+  static const String ssoFailed = '登录凭证已失效，请重新登录';
+  static const String captchaRequired = '本次登录需要验证码，请填写验证码后重试';
+  static const String captchaInvalid = '验证码不正确，请重新输入';
 
   static String of(String? kind) {
     switch (kind) {
@@ -155,6 +209,14 @@ class LoginErrorText {
         return maintenance;
       case 'network':
         return network;
+      case 'campus_network':
+        return campusNetwork;
+      case 'sso_failed':
+        return ssoFailed;
+      case 'captcha_required':
+        return captchaRequired;
+      case 'captcha_invalid':
+        return captchaInvalid;
       default:
         return credentials;
     }
@@ -177,6 +239,15 @@ class LoginErrorText {
       message = of(kind);
     }
     return (kind, message);
+  }
+
+  /// 后端是否要求补验证码（401 detail 里的 captcha_required）
+  static bool captchaRequiredFrom(dynamic data) {
+    if (data is Map) {
+      final detail = data['detail'];
+      if (detail is Map) return detail['captcha_required'] == true;
+    }
+    return false;
   }
 }
 
@@ -209,20 +280,43 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  Future<LoginResult> login(String username, String password) async {
-    _log.info('尝试登录: $username');
+  /// 登录
+  ///
+  /// [mode] 登录入口：jw（教务系统直连，默认）/ cas（统一身份认证）/
+  /// vruc（传统）。[captcha]/[captchaId] 用于需要验证码的入口（CAS）。
+  Future<LoginResult> login(
+    String username,
+    String password, {
+    String mode = 'jw',
+    String captcha = '',
+    String captchaId = '',
+  }) async {
+    _log.info('尝试登录: $username (方式=$mode)');
     try {
-      await _api.login(username, password);
-      _log.info('登录成功');
+      final resp = await _api.login(
+        username,
+        password,
+        mode: mode,
+        captcha: captcha,
+        captchaId: captchaId,
+      );
+      final actualMode =
+          (resp.data is Map ? resp.data['mode']?.toString() : null) ?? mode;
+      _log.info('登录成功（方式=$actualMode）');
       // 登录验证通过后立即把凭据交给后端安全存储（钥匙串/DPAPI）。
       // 这是**唯一**会向后端提交密码的路径。
       await _api.updateSettings({
         'username': username,
         'password': password,
         'remember_me': true,
+        'login_mode': actualMode,
       });
       _log.info('凭据已交由后端安全存储保存');
-      return const LoginResult(success: true, message: '登录验证成功，凭据已自动保存');
+      return LoginResult(
+        success: true,
+        message: '登录验证成功，凭据已自动保存',
+        mode: actualMode,
+      );
     } on DioException catch (e) {
       _log.error('DioException: ${e.message}', e);
       // 连不上后端 / 超时，本质上都属于「网络不通」，统一用同一句文案，
@@ -239,11 +333,18 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           kind: 'network',
         );
       } else if (e.response?.statusCode == 401) {
-        // 后端把失败分成三类（凭据错误 / 维护中 / 网络不通），
+        // 后端把失败分成多类（凭据错误 / 维护中 / 网络不通 / 需要验证码），
         // 这里按 kind 原样使用后端给的中文文案，不再一律报「密码错误」。
         final (kind, message) = LoginErrorText.fromResponse(e.response?.data);
-        _log.warning('登录失败 [$kind]: $message');
-        return LoginResult(success: false, message: message, kind: kind);
+        final needCaptcha = LoginErrorText.captchaRequiredFrom(e.response?.data);
+        _log.warning('登录失败 [$kind]: $message (需要验证码=$needCaptcha)');
+        return LoginResult(
+          success: false,
+          message: message,
+          kind: kind,
+          captchaRequired: needCaptcha,
+          mode: mode,
+        );
       } else {
         return LoginResult(
           success: false,
@@ -253,6 +354,65 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     } catch (e) {
       _log.error('login error', e);
       return LoginResult(success: false, message: '登录失败：${e.toString()}');
+    }
+  }
+
+  /// 获取可用登录入口（失败时回落到内置三项，保证向导不会卡住）
+  Future<List<LoginMode>> fetchLoginModes() async {
+    try {
+      final resp = await _api.getLoginModes();
+      final data = resp.data;
+      final list = (data is Map ? data['modes'] : null) as List?;
+      if (list == null || list.isEmpty) return _fallbackModes;
+      return list
+          .whereType<Map>()
+          .map((e) => LoginMode.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e) {
+      _log.warning('fetchLoginModes 失败，使用内置入口: $e');
+      return _fallbackModes;
+    }
+  }
+
+  static const List<LoginMode> _fallbackModes = [
+    LoginMode(
+      id: 'jw',
+      name: '教务系统',
+      description: '无需验证码，登录最快，推荐使用',
+      needsCaptcha: false,
+      recommended: true,
+    ),
+    LoginMode(
+      id: 'cas',
+      name: 'CAS 统一身份验证',
+      description: '学校统一认证平台，需要输入验证码；登录后可 7 天免登录',
+      needsCaptcha: true,
+      recommended: false,
+    ),
+    LoginMode(
+      id: 'vruc',
+      name: '传统登录',
+      description: '旧版登录方式，官方即将停止支持',
+      needsCaptcha: false,
+      recommended: false,
+    ),
+  ];
+
+  /// 获取验证码图片（base64 data URI）与会话 id
+  ///
+  /// 返回 `(captchaId, imageDataUri)`；失败返回 null。
+  Future<(String, String)?> fetchLoginCaptcha(String mode) async {
+    try {
+      final resp = await _api.getLoginCaptcha(mode: mode);
+      final data = resp.data;
+      if (data is! Map) return null;
+      final id = data['captcha_id']?.toString() ?? '';
+      final image = data['image']?.toString() ?? '';
+      if (id.isEmpty || image.isEmpty) return null;
+      return (id, image);
+    } catch (e) {
+      _log.error('fetchLoginCaptcha 失败: $e');
+      return null;
     }
   }
 }

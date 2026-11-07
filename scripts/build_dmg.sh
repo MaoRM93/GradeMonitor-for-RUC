@@ -6,9 +6,21 @@
 #   ./scripts/build_dmg.sh <app 路径> <版本号> [输出路径]
 #
 # 例：
-#   ./scripts/build_dmg.sh ~/Desktop/GradeMonitor.app 108.0.0.111
+#   ./scripts/build_dmg.sh ~/Desktop/GradeMonitor.app 108.0.0.114
 #
-# 产物：~/Desktop/GradeMonitor-<版本号>-macOS.dmg
+# 产物：~/Desktop/GradeMonitor_<版本号>_macOS_<架构>.dmg
+#       例：GradeMonitor_108.0.0.114_macOS_arm64.dmg
+#
+# 命名规范（自 114 起生效）：Name_Version_System_Architecture.<ext>
+#   - 分隔符为下划线，不是连字符
+#   - 该文件名会被直接当作 GitHub Release 资产名，而客户端
+#     UpdateVerifier.selectForAsset() 按【资产名严格相等】匹配签名清单，
+#     所以产物名必须与上传时的资产名逐字符一致，不要事后改名。
+#   - 签名时用本脚本打印的路径即可（basename 已是资产名）。
+#
+# 架构标识可用环境变量覆盖：
+#   GM_ARCH=x86_64 ./scripts/build_dmg.sh ...
+#   默认 arm64（与历史资产名保持一致；产物本身是 universal 二进制）。
 #
 # 窗口布局由一个隐藏的 .DS_Store 承载：Finder 第一次打开挂载的镜像时
 # 就是"App 在左、Applications 在右、中间箭头"的样子，用户只需拖一次。
@@ -17,7 +29,8 @@ set -euo pipefail
 
 APP_PATH="${1:?用法: build_dmg.sh <app路径> <版本号> [输出路径]}"
 VERSION="${2:?缺少版本号}"
-OUT_PATH="${3:-$HOME/Desktop/GradeMonitor-${VERSION}-macOS.dmg}"
+ARCH="${GM_ARCH:-arm64}"
+OUT_PATH="${3:-$HOME/Desktop/GradeMonitor_${VERSION}_macOS_${ARCH}.dmg}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -59,12 +72,29 @@ MOUNT_POINT="/Volumes/$VOL_NAME"
 
 cleanup() {
   # 无论成功失败都卸载、删临时目录
-  if [[ -d "$MOUNT_POINT" ]]; then
-    hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null || true
+  # 注意：本脚本挂载的卷名可能与历史残留同名，实际挂载点会被系统改名成
+  # "GradeMonitor 1"，所以这里按本次镜像路径反查实际挂载点，并顺带清理同名残留卷。
+  if [[ -n "${ACTUAL_MOUNT:-}" && -d "${ACTUAL_MOUNT:-}" ]]; then
+    hdiutil detach "$ACTUAL_MOUNT" -force -quiet 2>/dev/null || true
   fi
+  for d in "$MOUNT_POINT" "$MOUNT_POINT 1" "$MOUNT_POINT 2"; do
+    if [[ -d "$d" ]]; then
+      hdiutil detach "$d" -force -quiet 2>/dev/null || true
+    fi
+  done
   rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
+
+# 预清理：如果上次异常退出残留了同名卷（/Volumes/GradeMonitor），
+# 新镜像会被挂载成 "GradeMonitor 1"，而脚本早期版本会误写只读的残留挂载点。
+echo "==> 清理历史残留挂载卷"
+for d in "$MOUNT_POINT" "$MOUNT_POINT 1" "$MOUNT_POINT 2"; do
+  if [[ -d "$d" ]]; then
+    echo "    卸载残留卷: $d"
+    hdiutil detach "$d" -force -quiet 2>/dev/null || true
+  fi
+done
 
 echo "==> 生成背景图"
 BG_DIR="$WORK_DIR/background"
@@ -154,12 +184,27 @@ hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$OUT_PATH" >/d
 
 SIZE="$(stat -f%z "$OUT_PATH")"
 SHA="$(shasum -a 256 "$OUT_PATH" | awk '{print $1}')"
+OUT_NAME="$(basename "$OUT_PATH")"
+EXPECT_NAME="GradeMonitor_${VERSION}_macOS_${ARCH}.dmg"
 
 echo ""
 echo "────────────────────────────────────────────────"
 echo "✓ DMG 已生成: $OUT_PATH"
+echo "  资产名  : $OUT_NAME"
 echo "  体积    : $((SIZE / 1024 / 1024)) MB ($SIZE bytes)"
 echo "  sha256  : $SHA"
 echo "────────────────────────────────────────────────"
-echo "验证方式: open \"$OUT_PATH\""
-echo "签名发布: ./scripts/sign_release.sh \"$OUT_PATH\" macos $VERSION"
+if [[ "$OUT_NAME" != "$EXPECT_NAME" ]]; then
+  echo ""
+  echo "⚠️  产物名不符合发布资产命名规范"
+  echo "    实际: $OUT_NAME"
+  echo "    期望: $EXPECT_NAME"
+  echo "    上传 GitHub 时资产名必须与签名清单的 file= 逐字符一致，"
+  echo "    否则客户端 selectForAsset() 匹配不到清单，自动安装会被拒绝。"
+fi
+echo ""
+echo "下一步："
+echo "  1) 验证    : open \"$OUT_PATH\""
+echo "  2) 签名    : ./scripts/sign_release.sh \"$OUT_PATH\" macos $VERSION"
+echo "              然后把清单块贴进 Release 正文（每个资产一块）"
+echo "  3) 上传    : 资产名用 ${OUT_NAME}（不要改名）"

@@ -5,7 +5,15 @@
 #   scripts/sign_release.sh <安装包路径> <macos|windows> <版本号>
 #
 # 示例:
-#   scripts/sign_release.sh ~/Desktop/GradeMonitor-108.0.0.111-macOS-arm64.zip macos 108.0.0.111
+#   scripts/sign_release.sh ~/Desktop/GradeMonitor_108.0.0.114_macOS_arm64.dmg macos 108.0.0.114
+#   scripts/sign_release.sh ~/Desktop/GradeMonitor_108.0.0.114_Windows_x64.zip windows 108.0.0.114
+#
+# 资产命名规范（自 114 起）：Name_Version_System_Architecture.<ext>
+#   - 分隔符是下划线，不是连字符
+#   - Windows 包不再带 -Setup
+#   - **本脚本用「文件名的 basename」作为清单的 file= 字段**，而客户端
+#     UpdateVerifier.selectForAsset() 按资产名严格相等匹配。因此传入的文件
+#     必须已经是上传到 GitHub 时用的资产名，不要传临时名或本地别名。
 #
 # 依赖: openssl（macOS 自带 LibreSSL 即可）、shasum
 #

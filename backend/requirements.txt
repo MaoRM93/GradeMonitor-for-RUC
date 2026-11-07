@@ -2,7 +2,11 @@
 # 启动: uvicorn backend.api.app:app --host 127.0.0.1 --port 18923
 fastapi>=0.115.0
 uvicorn>=0.30.0
+# /ws/events 需要 WebSocket 实现；缺它时 uvicorn 报
+# "No supported WebSocket library detected"，前端一直重连失败。
+websockets>=12.0
 pydantic>=2.7.0
 requests>=2.32.0
 beautifulsoup4>=4.12.0
-win11toast>=0.35
+# 仅 Windows 需要（macOS/Linux 走系统通知，代码里是惰性导入）
+win11toast>=0.35; sys_platform == "win32"

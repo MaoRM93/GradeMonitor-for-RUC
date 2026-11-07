@@ -172,8 +172,13 @@ class BackendService {
   }
 
   /// 查找可用的 Python 解释器
+  ///
+  /// 优先级：包内便携解释器 → 项目 .venv → 系统/Homebrew python。
+  /// 打包态的 .app 里只有包内便携解释器存在（其余候选在用户机器上不存在），
+  /// 所以包内路径必须排在第一位。
   Future<String?> _findPython() async {
     final root = _resolveBackendRoot() ?? Directory.current.path;
+    final bundleResources = _bundleResourcesPath();
 
     // 候选解释器：Windows 与 macOS/Linux 分别提供
     final candidates = <String>[];
@@ -186,7 +191,12 @@ class BackendService {
         'py',
       ]);
     } else {
+      // 包内便携 Python（打包态唯一可用来源）
+      if (bundleResources != null) {
+        candidates.add('$bundleResources/runtime/python/bin/python3');
+      }
       candidates.addAll([
+        '$root/runtime/python/bin/python3',
         '$root/.venv/bin/python',
         '/opt/homebrew/bin/python3.11',
         'python3',
@@ -217,13 +227,15 @@ class BackendService {
 
   /// 解析包含 backend/ 目录的项目根目录
   ///
-  /// 从环境变量、开发机项目目录、当前目录、可执行文件位置四个起点向上查找，
-  /// 找到含有 backend/api/app.py 的目录即为后端根目录。
+  /// 从环境变量、包内 Resources、开发机项目目录、当前目录、可执行文件位置
+  /// 五个起点向上查找，找到含有 backend/api/app.py 的目录即为后端根目录。
   String? _resolveBackendRoot() {
     final candidates = <String>[
       Platform.environment['GRADEMONITOR_BACKEND_ROOT'] ?? '',
-      // 开发机固定项目路径：打包后的 .app 从 Finder 启动时，
-      // 当前目录与 exe 相对路径都找不到 backend/，以此兜底
+      // 打包态：backend 与便携 Python 被塞进 .app/Contents/Resources，
+      // 这是正式安装后唯一真实存在的候选，必须排在最前。
+      _bundleResourcesPath() ?? '',
+      // 开发机固定项目路径（仅开发机存在，用户机器上通常落空）
       '/Applications/Projects/GradeDetector_4',
       Directory.current.path,
       File(Platform.resolvedExecutable).parent.path,
@@ -243,6 +255,20 @@ class BackendService {
         if (parent.path == dir.path) break;
         dir = parent;
       }
+    }
+    return null;
+  }
+
+  /// 返回 .app 包内的 Contents/Resources 绝对路径
+  ///
+  /// 仅 macOS 打包态有效；开发态（直接跑 flutter run）返回 null。
+  String? _bundleResourcesPath() {
+    if (!Platform.isMacOS) return null;
+    final exe = Platform.resolvedExecutable;
+    final macosDir = File(exe).parent; // .../Contents/MacOS
+    if (macosDir.path.endsWith('/MacOS')) {
+      final resources = '${macosDir.parent.path}/Resources';
+      if (Directory(resources).existsSync()) return resources;
     }
     return null;
   }

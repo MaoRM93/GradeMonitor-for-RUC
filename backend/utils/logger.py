@@ -15,11 +15,62 @@ from pathlib import Path
 
 # ---------- 日志目录 ----------
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_LOG_DIR = _PROJECT_ROOT / "logs"
 
-os.makedirs(_LOG_DIR, exist_ok=True)
+
+def _resolve_log_dir() -> Path:
+    """选择可写入的日志目录。
+
+    开发态（仓库内运行）沿用 <项目根>/logs，便于直接看文件。
+    打包态（后端被塞进 GradeMonitor.app/Contents/Resources）时项目根在
+    已签名 bundle 内部——即便文件系统可写也绝不能往里写，否则会破坏
+    代码签名封印（Sealed Resources），下次启动可能被判"已损坏"。
+    因此打包态一律写到与前端日志同级的应用数据目录
+    （~/Library/Application Support/GradeMonitor/logs），两边日志可一起排查。
+    """
+    candidates = []
+    # 打包态判定：项目根落在某个 .app 包内部
+    in_bundle = ".app/Contents/" in str(_PROJECT_ROOT)
+    if not in_bundle:
+        candidates.append(_PROJECT_ROOT / "logs")
+    env_dir = os.environ.get("GRADEMONITOR_DATA_DIR", "")
+    if env_dir:
+        candidates.append(Path(env_dir) / "logs")
+    candidates.append(
+        Path(os.path.expanduser("~"))
+        / "Library"
+        / "Application Support"
+        / "GradeMonitor"
+        / "logs"
+        if sys.platform == "darwin"
+        else Path(os.environ.get("APPDATA", "")) / "GradeMonitor" / "logs"
+    )
+    candidates.append(Path(os.path.expanduser("~")) / ".grademonitor" / "logs")
+
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_test"
+            probe.write_text("ok")
+            probe.unlink()
+            return candidate
+        except OSError:
+            continue
+    fallback = Path("/tmp") / "GradeMonitor" / "logs"
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return fallback
+
+
+_LOG_DIR = _resolve_log_dir()
 
 LOG_FILE = _LOG_DIR / "backend.log"
+
+
+def get_log_dir() -> Path:
+    """返回当前生效的日志目录（供 /api/dev/open-log-dir 等使用）"""
+    return _LOG_DIR
 
 # ---------- 日志格式 ----------
 _LOG_FORMAT = logging.Formatter(

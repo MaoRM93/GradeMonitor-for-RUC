@@ -26,6 +26,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
   ///
   /// GPA 口径与表内「绩点」列一致：`jd` 是学分绩点（绩点×学分），
   /// 因此学期 GPA = Σjd ÷ Σxf，与 `GradeCourse.avgGpa` 的单课口径同源。
+  ///
+  /// **PF 制（两级制）课程不参与 GPA 计算**：既不计入分子 Σjd，
+  /// 也不计入分母 Σxf（与教务系统 `sumxf`/`pjxfjd` 口径一致）。
+  /// 门数仍按该学期全部课程统计（与下方表格所见门数一致）。
   List<_SemesterStat> _semesterStats(List<GradeCourse> list) {
     final grouped = <String, List<GradeCourse>>{};
     for (final g in list) {
@@ -37,7 +41,13 @@ class _GradesPageState extends ConsumerState<GradesPage> {
       var credits = 0.0;
       var jdSum = 0.0;
       var counted = 0;
+      var passFail = 0;
       for (final c in courses) {
+        // PF 制课程（P/F、合格/不合格…）整体剔除，不参与 GPA 与学分合计
+        if (CoreGpaUtil.isPassFail(c)) {
+          passFail++;
+          continue;
+        }
         final xf = double.tryParse(c.xf);
         final jd = double.tryParse(c.jd);
         if (xf == null || xf <= 0 || jd == null) continue;
@@ -50,7 +60,9 @@ class _GradesPageState extends ConsumerState<GradesPage> {
           term: term,
           count: courses.length,
           countedCourses: counted,
+          passFailCourses: passFail,
           credits: credits,
+          jdSum: jdSum,
           gpa: credits > 0 ? jdSum / credits : null,
         ),
       );
@@ -415,9 +427,23 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   // 外边距 28 与上方警告条、学期统计卡一致，随窗口宽度自适应。
                   return LayoutBuilder(
                     builder: (context, constraints) {
-                      final widths = _adaptiveWidths(
-                        constraints.maxWidth - 28 * 2 - 2,
-                      );
+                      // 可用宽度 = 内容区宽度 − 左右各 28 的外边距，与上方警告条、
+                      // 学期统计卡（均为 Padding 28）完全一致。
+                      // 再减去容器边框 1px×2：BoxDecoration 的 border 会 inset 子节点，
+                      // 表格实际可用宽度比容器外框窄 2px，不减会让表格溢出 2px 并出现
+                      // 一条无意义的横向滚动条。
+                      // 列宽总和 + 表格自身留白(_tableChrome) 恰好等于该宽度，
+                      // 从而表格与上方卡片左右严格对齐。
+                      final available = constraints.maxWidth - 28 * 2 - 2;
+                      final widths = _adaptiveWidths(available);
+                      final tableWidth =
+                          widths.fold<double>(0, (a, b) => a + b) +
+                          _tableChrome;
+                      // 正常窗口下 tableWidth == available（精确铺满）；窗口过窄时
+                      // tableWidth > available，由外层横向滚动兜底。
+                      final contentWidth = tableWidth < available
+                          ? available
+                          : tableWidth;
                       return Container(
                         margin: const EdgeInsets.fromLTRB(28, 4, 28, 14),
                         clipBehavior: Clip.antiAlias,
@@ -429,49 +455,52 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                         ),
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 表头（固定，不随数据滚动）
-                              DataTable(
-                                sortColumnIndex: _sortColumnIndex,
-                                sortAscending: _sortAscending,
-                                headingRowColor: WidgetStateProperty.all(
-                                  colorScheme.surfaceContainerHighest
-                                      .withValues(alpha: .5),
+                          child: SizedBox(
+                            width: contentWidth,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 表头（固定，不随数据滚动）
+                                DataTable(
+                                  sortColumnIndex: _sortColumnIndex,
+                                  sortAscending: _sortAscending,
+                                  headingRowColor: WidgetStateProperty.all(
+                                    colorScheme.surfaceContainerHighest
+                                        .withValues(alpha: .5),
+                                  ),
+                                  headingTextStyle: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                  columnSpacing: 8,
+                                  horizontalMargin: 8,
+                                  columns: _headColumnsFor(widths),
+                                  rows: const [],
                                 ),
-                                headingTextStyle: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: colorScheme.onSurface,
-                                ),
-                                columnSpacing: 8,
-                                horizontalMargin: 8,
-                                columns: _headColumnsFor(widths),
-                                rows: const [],
-                              ),
-                              // 数据区（仅该区域垂直滚动，表头恒定在上方）
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  child: DataTable(
-                                    headingRowHeight: 0,
-                                    dataTextStyle: TextStyle(
-                                      fontSize: 12,
-                                      color: colorScheme.onSurface,
+                                // 数据区（仅该区域垂直滚动，表头恒定在上方）
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    child: DataTable(
+                                      headingRowHeight: 0,
+                                      dataTextStyle: TextStyle(
+                                        fontSize: 12,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                      columnSpacing: 8,
+                                      horizontalMargin: 8,
+                                      columns: _bodyColumnsFor(widths),
+                                      rows: sorted
+                                          .map(
+                                            (course) =>
+                                                _dataRow(course, colorScheme),
+                                          )
+                                          .toList(),
                                     ),
-                                    columnSpacing: 8,
-                                    horizontalMargin: 8,
-                                    columns: _bodyColumnsFor(widths),
-                                    rows: sorted
-                                        .map(
-                                          (course) =>
-                                              _dataRow(course, colorScheme),
-                                        )
-                                        .toList(),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -508,13 +537,11 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     ColorScheme colorScheme,
     List<_SemesterStat> stats,
   ) {
-    // 汇总行：全部学期的合计
+    // 汇总行：全部学期的合计（PF 制课程不计入学分与 GPA）
     final totalCount = stats.fold<int>(0, (a, s) => a + s.count);
     final totalCredits = stats.fold<double>(0, (a, s) => a + s.credits);
-    final totalJd = stats.fold<double>(
-      0,
-      (a, s) => a + (s.gpa ?? 0) * s.credits,
-    );
+    final totalJd = stats.fold<double>(0, (a, s) => a + s.jdSum);
+    final totalPassFail = stats.fold<int>(0, (a, s) => a + s.passFailCourses);
     final totalGpa = totalCredits > 0 ? totalJd / totalCredits : null;
 
     return Padding(
@@ -548,17 +575,21 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  'GPA = Σ学分绩点 ÷ Σ学分',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: colorScheme.onSurface.withValues(alpha: .45),
+                Flexible(
+                  child: Text(
+                    'GPA = Σ学分绩点 ÷ Σ学分（PF 制课程不计入）',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: colorScheme.onSurface.withValues(alpha: .45),
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const Spacer(),
                 Text(
                   '合计 $totalCount 门 · ${totalCredits.toStringAsFixed(1)} 学分 · '
-                  'GPA ${totalGpa == null ? '-' : totalGpa.toStringAsFixed(2)}',
+                  'GPA ${totalGpa == null ? '-' : totalGpa.toStringAsFixed(2)}'
+                  '${totalPassFail > 0 ? ' · PF $totalPassFail 门' : ''}',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
@@ -617,6 +648,14 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                               null,
                               emphasize: true,
                             ),
+                            if (s.passFailCourses > 0) ...[
+                              const SizedBox(width: 6),
+                              _statChip(
+                                colorScheme,
+                                'PF ${s.passFailCourses} 门不计',
+                                null,
+                              ),
+                            ],
                           ],
                         ),
                       ],
@@ -684,22 +723,72 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     124, // 平均学分绩点
   ];
 
-  /// DataTable 的固定开销：列间距 8 × 7 + 左右外边距 8 × 2
-  static const double _tableChrome = 8 * 7 + 8 * 2;
+  /// 各列最小宽度。
+  ///
+  /// 除「课程名称」外，其余列的固有宽度就是其**内容不可再压缩的下限**（表头文字
+  /// 含排序箭头 + 单元格内边距）。低于该值 Flutter 会抛 RenderFlex overflow
+  /// （界面出现黄黑警示条），因此压缩只允许发生在「课程名称」这一列；
+  /// 窗口再窄则退回本组宽度，由外层横向滚动兜底。
+  static const List<double> _minWidths = [
+    150, // 学期
+    120, // 课程名称（唯一可压缩列）
+    72, // 学分
+    96, // 平时成绩
+    96, // 期末成绩
+    96, // 加权成绩
+    72, // 绩点
+    124, // 平均学分绩点
+  ];
 
-  /// 按可用宽度自适应列宽：
-  /// - 窗口足够宽时，把多出来的空间全部给「课程名称」列，使表格铺满整行
-  ///   （与上方警告条、学期统计卡的左右边界对齐）；
-  /// - 窗口过窄时退回固有宽度，由外层横向滚动兜底，不会挤压数字列。
+  /// DataTable 的额外开销。
+  ///
+  /// 注意：`columnSpacing` / `horizontalMargin` 只决定单元格**内边距**，而内边距
+  /// 是画在 `FixedColumnWidth` 的列宽**内部**的（见 flutter/lib/src/material/
+  /// data_table.dart 的 `_buildDataCell`：padding 由 cell 自己消费）。
+  /// 因此表格的总宽度 == Σ列宽，不需要再额外加间距与外边距——否则表格会比
+  /// 上方统计卡窄掉 72px，这正是"表格宽度没修好"的真实原因。
+  static const double _tableChrome = 0;
+
+  /// 按可用宽度自适应列宽，保证表格**始终精确铺满**可用宽度：
+  /// - 空间富余：多出来的宽度全部给「课程名称」列；
+  /// - 空间不足：先把「课程名称」压到最小，再按各列可压缩比例等比压缩其余列；
+  /// - 极端窄窗口（连最小宽度都放不下）：退回最小宽度，由外层横向滚动兜底。
   ///
   /// 表头表与数据表必须使用同一组宽度，否则两表列会错位。
   List<double> _adaptiveWidths(double availableWidth) {
-    final natural =
-        _naturalWidths.fold<double>(0, (a, b) => a + b) + _tableChrome;
-    final target = availableWidth > natural ? availableWidth : natural;
-    final extra = target - natural;
+    final target = availableWidth - _tableChrome;
+    final natural = _naturalWidths.fold<double>(0, (a, b) => a + b);
+    final minSum = _minWidths.fold<double>(0, (a, b) => a + b);
     final widths = List<double>.from(_naturalWidths);
-    if (extra > 0) widths[1] += extra; // 多出的空间给课程名称列
+
+    if (target >= natural) {
+      // 富余：全部给课程名称列
+      widths[1] += target - natural;
+      return widths;
+    }
+    if (target <= minSum) {
+      // 过窄：退回最小宽度，外层横向滚动
+      return List<double>.from(_minWidths);
+    }
+
+    // 压缩：先压课程名称，再按可压缩比例压其余列
+    var deficit = natural - target;
+    final courseShrink = (widths[1] - _minWidths[1]).clamp(0.0, deficit);
+    widths[1] -= courseShrink;
+    deficit -= courseShrink;
+    if (deficit > 0) {
+      const flexible = [0, 2, 3, 4, 5, 6, 7];
+      final spare = flexible.fold<double>(
+        0,
+        (a, i) => a + (widths[i] - _minWidths[i]),
+      );
+      if (spare > 0) {
+        final ratio = deficit / spare;
+        for (final i in flexible) {
+          widths[i] -= (widths[i] - _minWidths[i]) * ratio;
+        }
+      }
+    }
     return widths;
   }
 
@@ -742,14 +831,11 @@ class _GradesPageState extends ConsumerState<GradesPage> {
         ),
         DataCell(
           Center(
-            child: SizedBox(
-              width: 200,
-              child: Text(
-                course.kcname,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-              ),
+            child: Text(
+              course.kcname,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),
@@ -794,14 +880,20 @@ class _SemesterStat {
   /// 学期名（如「2025-2026学年秋季学期」）
   final String term;
 
-  /// 该学期课程门数（含无学分/无绩点的课程）
+  /// 该学期课程门数（含 PF 制、无学分/无绩点的课程）
   final int count;
 
-  /// 参与 GPA 计算的课程数（有学分且有学分绩点）
+  /// 参与 GPA 计算的课程数（有学分且有学分绩点，且不是 PF 制）
   final int countedCourses;
 
-  /// 学分合计
+  /// 参与 GPA 计算的学分合计（不含 PF 制课程）
   final double credits;
+
+  /// 参与 GPA 计算的学分绩点合计（不含 PF 制课程）
+  final double jdSum;
+
+  /// 该学期 PF 制（通过/不通过）课程门数，不计入 GPA
+  final int passFailCourses;
 
   /// 学期 GPA = Σ学分绩点 ÷ Σ学分；无有效课程时为 null
   final double? gpa;
@@ -811,6 +903,8 @@ class _SemesterStat {
     required this.count,
     required this.countedCourses,
     required this.credits,
+    required this.jdSum,
+    required this.passFailCourses,
     required this.gpa,
   });
 }

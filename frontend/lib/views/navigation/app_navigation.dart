@@ -10,6 +10,7 @@ import '../scheme/scheme_page.dart';
 import '../settings/settings_page.dart';
 import '../welcome/welcome_flow.dart';
 import '../../core/service/update_service.dart';
+import '../../core/service/nav_signal.dart';
 import '../../core/service/session_service.dart';
 import '../../widgets/toast_host.dart';
 
@@ -59,6 +60,8 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     UpdateService.preReleaseFound.addListener(_onPreReleaseFound);
     // 设置页退出登录 → 切回欢迎向导重新登录
     SessionService.logoutSignal.addListener(_onLoggedOut);
+    // 跨页面导航请求（仪表板「查看完整成绩 →」等）
+    navRequest.addListener(_onNavRequest);
     // 首帧渲染后再检查欢迎页，确保 context 可用
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkWelcomeWithRetry();
@@ -94,7 +97,24 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     UpdateService.updateFound.removeListener(_onAutoUpdateFound);
     UpdateService.preReleaseFound.removeListener(_onPreReleaseFound);
     SessionService.logoutSignal.removeListener(_onLoggedOut);
+    navRequest.removeListener(_onNavRequest);
     super.dispose();
+  }
+
+  /// 响应跨页面导航请求：切换左侧导航目的地
+  void _onNavRequest() {
+    final target = navRequest.value;
+    if (target == null) return;
+    navRequest.value = null;
+    if (!mounted) return;
+    final dest = switch (target) {
+      AppNavTarget.dashboard => NavDestination.dashboard,
+      AppNavTarget.grades => NavDestination.grades,
+      AppNavTarget.scheme => NavDestination.scheme,
+      AppNavTarget.settings => NavDestination.settings,
+    };
+    if (dest == _currentDest) return;
+    setState(() => _currentDest = dest);
   }
 
   /// 设置页退出登录后：回到欢迎向导，让用户重新登录
@@ -310,9 +330,13 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                     children: [
                       Material(
                         elevation: 0,
-                        color: colorScheme.surface.withValues(alpha: .4),
+                        // 侧栏用固定色块与右侧内容区拉开色差（浅色偏冷的灰蓝，
+                        // 深色更深一档），不再靠分割线区分
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF131C29)
+                            : const Color(0xFFE9EFF7),
                         child: SizedBox(
-                          width: 110,
+                          width: 132,
                           child: Column(
                             children: [
                               const SizedBox(height: 40),
@@ -338,8 +362,10 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                                 ),
                               ),
                               const SizedBox(height: 28),
-                              const Divider(indent: 16, endIndent: 16),
-                              const Spacer(),
+                              // 导航组上下留白按 1:2 分配：上方窄、下方宽，
+                              // 整组相对几何中心上移约一个条目的高度（≈60），
+                              // 视觉重心才落在侧栏正中
+                              const Spacer(flex: 1),
                               ...NavDestination.values.map((dest) {
                                 final selected = _currentDest == dest;
                                 return _NavItem(
@@ -350,8 +376,7 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                                       setState(() => _currentDest = dest),
                                 );
                               }),
-                              const Spacer(),
-                              const Divider(indent: 16, endIndent: 16),
+                              const Spacer(flex: 2),
                               Padding(
                                 padding: const EdgeInsets.only(
                                   bottom: 16,
@@ -375,11 +400,6 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                             ],
                           ),
                         ),
-                      ),
-                      VerticalDivider(
-                        width: 1,
-                        thickness: .5,
-                        color: colorScheme.outlineVariant,
                       ),
                       Expanded(child: _buildPage(_currentDest)),
                     ],
@@ -544,11 +564,6 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
             onTap: _onTitleTap,
             child: const Text('开发者工具'),
           ),
-          const SizedBox(height: 4),
-          const Text(
-            '请在开发者指导下使用',
-            style: TextStyle(fontSize: 11, color: Colors.grey),
-          ),
         ],
       ),
       content: SizedBox(
@@ -558,17 +573,6 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── 快捷操作 ──
-              const Text(
-                '快捷操作',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.grey,
-                  letterSpacing: .5,
-                ),
-              ),
-              const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -586,20 +590,7 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              const Divider(height: 1),
-              const SizedBox(height: 14),
-              // ── 维护操作 ──
-              const Text(
-                '维护操作',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.grey,
-                  letterSpacing: .5,
-                ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -640,20 +631,7 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
                   }),
                 ],
               ),
-              const SizedBox(height: 14),
-              const Divider(height: 1),
-              const SizedBox(height: 14),
-              // ── 轮询设置 ──
-              const Text(
-                '自定义轮询间隔（覆盖设置页中设定的间隔时间）',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.grey,
-                  letterSpacing: .5,
-                ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   SizedBox(
@@ -675,9 +653,14 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     '秒',
-                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: .55),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   FilledButton.tonalIcon(
@@ -687,20 +670,7 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              const Divider(height: 1),
-              const SizedBox(height: 14),
-              // ── 欢迎页设置 ──
-              const Text(
-                '欢迎页设置',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.grey,
-                  letterSpacing: .5,
-                ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   const Text('始终在启动时弹出欢迎页：', style: TextStyle(fontSize: 12)),
@@ -751,8 +721,6 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
               // ── 状态信息 ──
               if (_loading || _msg != null) ...[
                 const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 10),
                 Row(
                   children: [
                     if (_loading)
@@ -803,7 +771,9 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
       icon: Icon(icon, size: 16),
       label: Text(label, style: const TextStyle(fontSize: 12)),
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: Colors.grey.shade400),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outline.withValues(alpha: .7),
+        ),
         elevation: 0,
       ),
     );

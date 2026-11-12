@@ -75,6 +75,31 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   String _formatGpa(double v) =>
       _precise5 ? v.toStringAsFixed(5) : v.toStringAsFixed(2);
 
+  /// 是否已勾选方案：未选（null）时下方三块进入置灰禁用态
+  bool get _hasSelection => _scheme != null;
+
+  /// 灰度矩阵：把任意前景色（含主题主色、红/绿语义色）压成同亮度灰，
+  /// 这样置灰不依赖硬编码黑白，深浅色主题都成立。
+  static const ColorFilter _grayscale = ColorFilter.matrix(<double>[
+    0.2126, 0.7152, 0.0722, 0, 0, //
+    0.2126, 0.7152, 0.0722, 0, 0, //
+    0.2126, 0.7152, 0.0722, 0, 0, //
+    0, 0, 0, 1, 0, //
+  ]);
+
+  /// 整块置灰 + 屏蔽交互（不改布局尺寸、不禁用外层滚动）：
+  /// ColorFiltered 去色 + Opacity 降不透明度，再用 IgnorePointer 只挡这一块的手势。
+  Widget _dimBlock(Widget child) {
+    if (_hasSelection) return child;
+    return IgnorePointer(
+      ignoring: true, // 未选方案：这三块不吃手势（外层滚动不受影响）
+      child: ColorFiltered(
+        colorFilter: _grayscale,
+        child: Opacity(opacity: .45, child: child),
+      ),
+    );
+  }
+
   // ---------- 数值解析 ----------
 
   /// 解析 0–4.0 的输入；空白返回 null（待输入），非法也返回 null
@@ -150,14 +175,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                   color: colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                '根据您的实际情况计算您的 811/82 结果',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: colorScheme.onSurface.withValues(alpha: .5),
-                ),
-              ),
               const SizedBox(height: 20),
               _buildWarningBanner(),
               const SizedBox(height: 12),
@@ -167,7 +184,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               const SizedBox(height: 16),
               _buildInputsRow(colorScheme),
               const SizedBox(height: 16),
-              _buildResultCard(colorScheme),
+              _dimBlock(_buildResultCard(colorScheme)),
             ],
           ),
         ),
@@ -400,9 +417,13 @@ class _SchemePageState extends ConsumerState<SchemePage> {
         children: [
           Expanded(child: _buildCoreCard(cs)),
           const SizedBox(width: 10),
-          Expanded(child: _inputCard(cs, kind: _InputKind.academic)),
+          Expanded(
+            child: _dimBlock(_inputCard(cs, kind: _InputKind.academic)),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _inputCard(cs, kind: _InputKind.comprehensive)),
+          Expanded(
+            child: _dimBlock(_inputCard(cs, kind: _InputKind.comprehensive)),
+          ),
         ],
       ),
     );
@@ -419,7 +440,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isAcademic ? '学术科研能力' : '素质拓展',
+            isAcademic ? '学术科研能力' : '素质拓展能力',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -443,7 +464,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               ),
               decoration: InputDecoration(
                 counterText: '',
-                hintText: enabled ? '0 – 4.0' : '素质拓展不参与 82 方案',
+                hintText: enabled ? '0 – 4.0' : '素质拓展能力不参与 82 方案',
                 hintStyle: TextStyle(
                   fontSize: 13,
                   color: cs.onSurface.withValues(alpha: .35),
@@ -492,7 +513,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
           '请补齐${core == null ? '核心绩' : ''}${core == null && academic == null ? '、' : ''}'
           '${academic == null ? '学术科研能力' : ''}'
           '${(_scheme == '811' && comprehensive == null) ? (core == null || academic == null ? '、' : '') : ''}'
-          '${(_scheme == '811' && comprehensive == null) ? '素质拓展' : ''}${_scheme == '82' ? '' : ''}'
+          '${(_scheme == '811' && comprehensive == null) ? '素质拓展能力' : ''}${_scheme == '82' ? '' : ''}'
           '后自动出结果';
     }
 

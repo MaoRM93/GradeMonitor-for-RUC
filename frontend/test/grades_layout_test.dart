@@ -117,16 +117,15 @@ void main() {
     });
   }
 
-  testWidgets('按学期统计排除 PF 制课程（合计 52 门 / 91.0 学分 / GPA 3.74）', (
+  testWidgets('各学期统计排除 PF 制课程，概览行已移除', (
     tester,
   ) async {
     await _pumpPage(tester, const Size(1440, 900));
-    // 合计行：门数按全部课程计，学分与 GPA 只计非 PF 课程
-    expect(find.textContaining('合计 52 门'), findsOneWidget);
-    expect(find.textContaining('91.0 学分'), findsOneWidget);
-    expect(find.textContaining('GPA 3.74'), findsOneWidget);
-    expect(find.textContaining('PF 6 门'), findsOneWidget);
-    // 各学期口径（与教务 sumxf/pjxfjd 一致）
+    // 概览行（合计/PF 门数）已按设计要求移除，只保留各学期卡片
+    expect(find.textContaining('按学期统计'), findsNothing);
+    expect(find.textContaining('合计 52 门'), findsNothing);
+    expect(find.textContaining('PF 6 门'), findsNothing);
+    // 各学期口径（与教务 sumxf/pjxfjd 一致；PF 课程仍不计入 GPA）
     expect(find.text('14 门'), findsOneWidget);
     expect(find.text('26.0 学分'), findsOneWidget);
     expect(find.text('GPA 3.78'), findsOneWidget);

@@ -131,7 +131,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(28, 44, 28, 6),
+              padding: const EdgeInsets.fromLTRB(28, 44, 28, 14),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -140,19 +140,6 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                     fontSize: 28,
                     fontWeight: FontWeight.w700,
                     color: colorScheme.onSurface,
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '查看您的全部成绩，您可以点击表头分别排序每一项指标',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: colorScheme.onSurface.withValues(alpha: .5),
                   ),
                 ),
               ),
@@ -175,35 +162,68 @@ class _GradesPageState extends ConsumerState<GradesPage> {
               child: Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        hintText: '搜索课程名称...',
-                        hintStyle: const TextStyle(fontSize: 12),
-                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
-                        prefixIconConstraints: const BoxConstraints(
-                          minWidth: 34,
-                          minHeight: 34,
+                    // 搜索框与右侧「学期 / 范围」下拉框同高同圆角（4 / 圆角 4），
+                    // 样式直接覆盖主题里的大圆角填充框，保持一行对齐。
+                    child: SizedBox(
+                      height: 34,
+                      child: TextField(
+                        controller: _searchController,
+                        style: const TextStyle(fontSize: 13),
+                        textAlignVertical: TextAlignVertical.center,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: true,
+                          fillColor: colorScheme.surface,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          hintText: '搜索课程名称...',
+                          hintStyle: const TextStyle(fontSize: 12),
+                          prefixIcon: const Icon(
+                            Icons.search_rounded,
+                            size: 16,
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: 30,
+                          ),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  icon: const Icon(
+                                    Icons.clear_rounded,
+                                    size: 16,
+                                  ),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() => _searchQuery = '');
+                                  },
+                                )
+                              : null,
+                          suffixIconConstraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: 30,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(4),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(4),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(4),
+                            borderSide: BorderSide(
+                              color: colorScheme.primary,
+                              width: 1.2,
+                            ),
+                          ),
                         ),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.clear_rounded, size: 18),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  setState(() => _searchQuery = '');
-                                },
-                              )
-                            : null,
-                        suffixIconConstraints: const BoxConstraints(
-                          minWidth: 34,
-                          minHeight: 34,
-                        ),
+                        onChanged: (v) => setState(() => _searchQuery = v),
                       ),
-                      onChanged: (v) => setState(() => _searchQuery = v),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -447,59 +467,72 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                       return Container(
                         margin: const EdgeInsets.fromLTRB(28, 4, 28, 14),
                         clipBehavior: Clip.antiAlias,
+                        // 表格底色：浅色模式为纯白（cs.surface 即 0xFFFFFFFF），
+                        // 深色模式自动跟随主题深色 surface，无需写死白色。
                         decoration: BoxDecoration(
+                          color: colorScheme.surface,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: colorScheme.onSurface.withValues(alpha: .25),
-                          ),
                         ),
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: SizedBox(
                             width: contentWidth,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // 表头（固定，不随数据滚动）
-                                DataTable(
-                                  sortColumnIndex: _sortColumnIndex,
-                                  sortAscending: _sortAscending,
-                                  headingRowColor: WidgetStateProperty.all(
-                                    colorScheme.surfaceContainerHighest
-                                        .withValues(alpha: .5),
-                                  ),
-                                  headingTextStyle: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: colorScheme.onSurface,
-                                  ),
-                                  columnSpacing: 8,
-                                  horizontalMargin: 8,
-                                  columns: _headColumnsFor(widths),
-                                  rows: const [],
-                                ),
-                                // 数据区（仅该区域垂直滚动，表头恒定在上方）
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    child: DataTable(
-                                      headingRowHeight: 0,
-                                      dataTextStyle: TextStyle(
-                                        fontSize: 12,
-                                        color: colorScheme.onSurface,
+                            // DataTable 本体不自带底色，用 ColoredBox 铺满 surface：
+                            // 浅色下即纯白，深色下为深色 surface，跟随主题。
+                            child: ColoredBox(
+                              color: colorScheme.surface,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // 表头（固定，不随数据滚动）
+                                  DataTable(
+                                    sortColumnIndex: _sortColumnIndex,
+                                    sortAscending: _sortAscending,
+                                    // 表头底色比数据区更深一档（主色淡淡叠在灰底上）
+                                    headingRowColor: WidgetStateProperty.all(
+                                      Color.alphaBlend(
+                                        colorScheme.primary.withValues(
+                                          alpha: .12,
+                                        ),
+                                        colorScheme.surfaceContainerHighest,
                                       ),
-                                      columnSpacing: 8,
-                                      horizontalMargin: 8,
-                                      columns: _bodyColumnsFor(widths),
-                                      rows: sorted
-                                          .map(
-                                            (course) =>
-                                                _dataRow(course, colorScheme),
-                                          )
-                                          .toList(),
+                                    ),
+                                    headingTextStyle: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: colorScheme.onSurface,
+                                    ),
+                                    columnSpacing: 8,
+                                    horizontalMargin: 8,
+                                    columns: _headColumnsFor(widths),
+                                    rows: const [],
+                                  ),
+                                  // 数据区（仅该区域垂直滚动，表头恒定在上方）
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      child: DataTable(
+                                        headingRowHeight: 0,
+                                        dataRowColor: WidgetStatePropertyAll(
+                                          colorScheme.surface,
+                                        ),
+                                        dataTextStyle: TextStyle(
+                                          fontSize: 12,
+                                          color: colorScheme.onSurface,
+                                        ),
+                                        columnSpacing: 8,
+                                        horizontalMargin: 8,
+                                        columns: _bodyColumnsFor(widths),
+                                        rows: sorted
+                                            .map(
+                                              (course) =>
+                                                  _dataRow(course, colorScheme),
+                                            )
+                                            .toList(),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -531,140 +564,113 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     });
   }
 
-  /// 表头列：显式列宽，与数据表共用同一组列宽配置
-  /// 学期统计卡片：每个学期一行，显示门数 / 学分 / GPA
+  /// 学期统计卡片：每个学期一张等宽卡片，显示门数 / 学分 / GPA
+  ///
+  /// 只呈现各学期结果，不再显示算法说明、合计概览与 PF 门数；
+  /// 数据口径仍完全来自 [_semesterStats]（PF 制课程不计入学分与 GPA）。
   Widget _buildSemesterStats(
     ColorScheme colorScheme,
     List<_SemesterStat> stats,
   ) {
-    // 汇总行：全部学期的合计（PF 制课程不计入学分与 GPA）
-    final totalCount = stats.fold<int>(0, (a, s) => a + s.count);
-    final totalCredits = stats.fold<double>(0, (a, s) => a + s.credits);
-    final totalJd = stats.fold<double>(0, (a, s) => a + s.jdSum);
-    final totalPassFail = stats.fold<int>(0, (a, s) => a + s.passFailCourses);
-    final totalGpa = totalCredits > 0 ? totalJd / totalCredits : null;
-
     return Padding(
+      // 左右边距 28 与下方成绩表格完全一致，卡片行左右边界与表格对齐
       padding: const EdgeInsets.fromLTRB(28, 0, 28, 10),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: colorScheme.onSurface.withValues(alpha: .18),
-          ),
-          color: colorScheme.surfaceContainerHighest.withValues(alpha: .28),
-        ),
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.insights_rounded,
-                  size: 16,
-                  color: colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '按学期统计',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    'GPA = Σ学分绩点 ÷ Σ学分（PF 制课程不计入）',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colorScheme.onSurface.withValues(alpha: .45),
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '合计 $totalCount 门 · ${totalCredits.toStringAsFixed(1)} 学分 · '
-                  'GPA ${totalGpa == null ? '-' : totalGpa.toStringAsFixed(2)}'
-                  '${totalPassFail > 0 ? ' · PF $totalPassFail 门' : ''}',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.primary,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            // 学期较多时自动换行（不引入横向滚动条，避免末尾卡片被截断）
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final s in stats)
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      color: colorScheme.surface,
-                      border: Border.all(
-                        color: colorScheme.onSurface.withValues(alpha: .12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 每行放几张：卡片最小宽度 150，其余按可用宽度均分，
+          // 从而每行都铺满 28…宽度-28，且同一行卡片尺寸一致。
+          const gap = 8.0;
+          const minCardWidth = 150.0;
+          final available = constraints.maxWidth;
+          var perRow =
+              ((available + gap) / (minCardWidth + gap)).floor().clamp(1, 8);
+          if (perRow > stats.length) perRow = stats.length;
+          if (perRow < 1) perRow = 1;
+          final cardWidth = (available - gap * (perRow - 1)) / perRow;
+          final rows = <Widget>[];
+          for (var i = 0; i < stats.length; i += perRow) {
+            final chunk = stats.sublist(
+              i,
+              (i + perRow) > stats.length ? stats.length : i + perRow,
+            );
+            rows.add(
+              Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 0 : gap),
+                child: Row(
+                  children: [
+                    for (var j = 0; j < chunk.length; j++) ...[
+                      if (j > 0) const SizedBox(width: gap),
+                      SizedBox(
+                        width: cardWidth,
+                        height: 80,
+                        child: _semesterCard(colorScheme, chunk[j]),
                       ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          s.term,
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurface,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _statChip(
-                              colorScheme,
-                              '${s.count} 门',
-                              Icons.menu_book_rounded,
-                            ),
-                            const SizedBox(width: 8),
-                            _statChip(
-                              colorScheme,
-                              '${s.credits.toStringAsFixed(1)} 学分',
-                              Icons.school_rounded,
-                            ),
-                            const SizedBox(width: 8),
-                            _statChip(
-                              colorScheme,
-                              'GPA ${s.gpa == null ? '-' : s.gpa!.toStringAsFixed(2)}',
-                              null,
-                              emphasize: true,
-                            ),
-                            if (s.passFailCourses > 0) ...[
-                              const SizedBox(width: 6),
-                              _statChip(
-                                colorScheme,
-                                'PF ${s.passFailCourses} 门不计',
-                                null,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: rows,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _semesterCard(ColorScheme colorScheme, _SemesterStat s) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: colorScheme.surface,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            s.term,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          // 卡片宽度固定：容纳不下时等比缩小，避免溢出
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _statChip(colorScheme, '${s.count} 门', Icons.menu_book_rounded),
+                const SizedBox(width: 8),
+                _statChip(
+                  colorScheme,
+                  '${s.credits.toStringAsFixed(1)} 学分',
+                  Icons.school_rounded,
+                ),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: _statChip(
+              colorScheme,
+              'GPA ${s.gpa == null ? '-' : s.gpa!.toStringAsFixed(2)}',
+              null,
+              emphasize: true,
+            ),
+          ),
+        ],
       ),
     );
   }

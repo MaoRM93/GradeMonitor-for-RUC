@@ -88,6 +88,12 @@ class _ToastCardState extends State<_ToastCard>
     // 透明 Material 包裹：浮层脱离 Material 树时文字会回退调试字体
     // （黄色双下划线 + 加粗），显式指定字体家族、字重、无装饰规避
     final baseStyle = Theme.of(context).textTheme.bodyMedium;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 圆角：单行短文本保持胶囊造型；一旦换行（或多行）就改用固定 22，
+    // 否则 999 的超大半径在高度变大时会被压成畸形椭圆，圆角看起来是坏的。
+    final isPill = !widget.message.contains('\n') && widget.message.length <= 18;
+    final radius = BorderRadius.circular(isPill ? 999 : 22);
 
     return IgnorePointer(
       child: Align(
@@ -101,15 +107,17 @@ class _ToastCardState extends State<_ToastCard>
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 480),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 13,
+                  horizontal: 24,
+                  vertical: 14,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFECECEC),
-                  borderRadius: BorderRadius.circular(999),
+                  color: isDark
+                      ? const Color(0xFF2C2C2E)
+                      : const Color(0xFFECECEC),
+                  borderRadius: radius,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: .16),
+                      color: Colors.black.withValues(alpha: isDark ? .45 : .16),
                       blurRadius: 22,
                       offset: const Offset(0, 8),
                       spreadRadius: 0,
@@ -123,7 +131,7 @@ class _ToastCardState extends State<_ToastCard>
                     fontSize: 15,
                     fontWeight: FontWeight.w400,
                     height: 1.35,
-                    color: Colors.black,
+                    color: isDark ? const Color(0xFFF2F2F7) : Colors.black,
                     decoration: TextDecoration.none,
                   ),
                 ),

@@ -13,6 +13,8 @@ import 'core/service/notification_service.dart';
 import 'core/network/websocket_service.dart';
 import 'views/navigation/app_navigation.dart';
 import 'views/disabled/disabled_page.dart';
+import 'views/disabled/developer_notice_page.dart';
+import 'views/notice/broadcast_toast.dart';
 import 'core/service/update_service.dart';
 import 'widgets/toast_host.dart';
 
@@ -170,11 +172,32 @@ class _GradeMonitorAppState extends State<GradeMonitorApp> with WindowListener {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
-      // 禁用开关生效时切换显示 DisabledScreen 替代 AppNavigation
-      home: ValueListenableBuilder<bool>(
-        valueListenable: UpdateService.disabled,
-        builder: (context, isDisabled, child) {
-          return isDisabled ? const DisabledScreen() : const AppNavigation();
+      // 全屏提示优先级：禁用态 → 禁用页；否则开发者提醒 → 提醒页；否则 App。
+      // 两个 notifier 一起监听，任意一个变化即重建（不 push 路由，
+      // 因此提醒页关闭后会自动回到 AppNavigation）。
+      home: AnimatedBuilder(
+        animation: Listenable.merge([
+          UpdateService.disabled,
+          UpdateService.releaseNotice,
+        ]),
+        builder: (context, child) {
+          final notice = UpdateService.releaseNotice.value;
+          if (UpdateService.disabled.value) {
+            // 传入停用记录，让正文（Markdown）随探测结果到达而刷新
+            return DisabledScreen(
+              notice: notice?.kind == NoticeKind.killSwitch ? notice : null,
+            );
+          }
+          if (notice != null && notice.kind == NoticeKind.developerNotice) {
+            return DeveloperNoticeScreen(notice: notice);
+          }
+          // 广播提示卡浮在业务界面右上角，不占用路由，关闭后原地消失
+          return const Stack(
+            children: [
+              AppNavigation(),
+              Positioned(top: 30, right: 26, child: BroadcastToast()),
+            ],
+          );
         },
       ),
     );

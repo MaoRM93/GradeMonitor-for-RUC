@@ -39,14 +39,9 @@ class GlassCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor ?? theme.cardTheme.color,
         borderRadius: BorderRadius.circular(borderRadius),
-        border:
-            border ??
-            Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: .06)
-                  : Colors.black.withValues(alpha: .05),
-              width: .5,
-            ),
+        // 卡片靠底色 + 阴影与背景区分，不再画描边分割线；
+        // 需要描边时由调用方显式传 border。
+        border: border,
         boxShadow: [
           BoxShadow(
             color: isDark

@@ -93,11 +93,46 @@ class UpdateCheckResult {
   SignedManifest? get manifest => manifests.isEmpty ? null : manifests.first;
 }
 
+/// 提示的类别
+enum NoticeKind {
+  /// 停用页（红色）：114.514 / 114.513 存在时触发，确认后退出程序
+  killSwitch,
+
+  /// 开发者重要提醒页（蓝色）：114.515 存在时触发，确认后仅关闭页面
+  developerNotice,
+
+  /// 通知广播：114 号段里 513/514/515 之外的 tag（如 114.100），
+  /// 只在程序右上角弹一张提示卡，正文纯文本展示，点「好」关闭。
+  broadcast,
+}
+
+/// 一次被命中的 Release 提示记录（原文 body 交给 Markdown 渲染）
+class ReleaseNotice {
+  final NoticeKind kind;
+
+  /// '114.514' / '114.513' / '114.515'
+  final String tag;
+
+  /// 预留标题（release name，可为空）
+  final String title;
+
+  /// release body，Markdown 原文
+  final String body;
+
+  const ReleaseNotice({
+    required this.kind,
+    required this.tag,
+    this.title = '',
+    required this.body,
+  });
+}
+
 /// GitHub Release 更新与全局禁用服务
 ///
 /// - 检查更新：GitHub Releases API（收纯文本后手动 jsonDecode），
 ///   超时 20 秒，失败后最多重试 3 次
-/// - 远程停用开关：最新 Release tag 等于 [killSwitchVersion] 时全屏禁用应用
+/// - 远程停用开关：按 tag 精确请求 114.514 / 114.513，存在即全屏禁用应用
+/// - 开发者提醒：按 tag 精确请求 114.515，存在即弹蓝色提醒页（不禁用）
 /// - 防滥用检测（双通道）：
 ///   · 客户端滑动窗口：60 秒内查询超过阈值主动禁用
 ///   · 后端标记轮询：读取后端监控状态中的滥用标记
@@ -134,8 +169,38 @@ class UpdateService {
   static const String _latestReleaseApi =
       'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
 
-  /// 停用开关：GitHub 最新 Release 的 tag 等于此值时全屏禁用应用
+  /// 停用开关（主）：GitHub Release 存在该 tag 时全屏禁用应用
   static const String killSwitchVersion = '114.514';
+
+  /// 停用开关（备）：514 不存在时的次级停用 tag
+  static const String killSwitchVersionFallback = '114.513';
+
+  /// 开发者重要提醒页对应的 Release tag
+  static const String developerNoticeVersion = '114.515';
+
+  /// 通知广播号段：tag 的**首段**是 114（如 `114.100`）。
+  ///
+  /// 只认首段，末位是 114 的版本号（如 `108.1.0.114`）不属于号段，
+  /// 仍按正常「检查更新」处理。
+  static const String noticeSeriesPrefix = '114';
+
+  /// 号段内已被专用页面占用的 tag，其余同类 tag 走右上角提示
+  static const List<String> reservedNoticeTags = [
+    killSwitchVersion,
+    killSwitchVersionFallback,
+    developerNoticeVersion,
+  ];
+
+  /// Release 列表（含全部 tag 与 body），用于在 114 号段里找当前广播条目
+  static const String _releasesListApi =
+      'https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=50';
+
+  /// 按 tag 精确取单个 Release 的 API 前缀
+  ///
+  /// 不用 `/releases/latest`：latest 只能看到最新一条，无法区分
+  /// 「tag 被删除」与「tag 存在但 body 为空」，也看不到非最新 tag。
+  static const String _releaseByTagApiPrefix =
+      'https://api.github.com/repos/$repoOwner/$repoName/releases/tags/';
 
   /// 发行状态：'Release' 正式版 / 'Beta' 测试版（主页左下角展示，发布时手动更新）
   // ignore: constant_identifier_names
@@ -164,8 +229,37 @@ class UpdateService {
   final List<int> _queryTimestamps = [];
   bool _abuseTriggered = false;
 
+  /// 本进程内是否由 Release 停用开关拉起了禁用态
+  /// （区分「Release 停用」与「滥用停用」，避免清除时误解除滥用禁用）
+  bool _killSwitchActive = false;
+
+  /// 已在本进程内被用户关闭过的开发者提醒 tag（不落盘：下次启动重新判定）
+  final Set<String> _dismissedDeveloperTags = {};
+
+  /// 已在本进程内被用户关闭过的广播 tag（不落盘：下次启动重新判定）
+  final Set<String> _dismissedBroadcastTags = {};
+
+  /// 上一次**明确**判定出的停用 tag（null = 明确无停用）。
+  ///
+  /// 用于网络抖动时保守沿用：探测结果为「未知」时不改动界面。
+  String? _lastKillTag;
+
+  /// checkReleaseNotices 并发保护（启动与每小时定时器可能撞车）
+  Future<void>? _noticeInFlight;
+
   /// 全局禁用状态（static）：main.dart 监听后自动切换到禁用页
   static final ValueNotifier<bool> disabled = ValueNotifier<bool>(false);
+
+  /// 当前应展示的全屏 Release 提示（null = 正常显示 App）
+  ///
+  /// - [NoticeKind.killSwitch]：停用页（红色，确认后退出程序）
+  /// - [NoticeKind.developerNotice]：开发者提醒页（蓝色，确认后仅关闭）
+  ///
+  /// 与 [disabled] 分工：[disabled] 表示「App 被停用」，可由停用页、
+  /// 客户端防滥用或后端滥用标记置真；本 notifier 只承载页面要渲染的
+  /// Release 正文，停用页从它取 body。
+  static final ValueNotifier<ReleaseNotice?> releaseNotice =
+      ValueNotifier<ReleaseNotice?>(null);
 
   /// 自动检查（启动/每小时）发现新版本时的广播：主壳监听后弹出更新弹窗。
   /// 手动检查不写入（设置页自己处理 UI）。
@@ -176,6 +270,13 @@ class UpdateService {
   /// （即用户装的是开发者尚未正式发布的预览副本）。主壳监听后弹红色提示框。
   static final ValueNotifier<UpdateCheckResult?> preReleaseFound =
       ValueNotifier<UpdateCheckResult?>(null);
+
+  /// 右上角通知广播（114 号段里除 513/514/515 之外的 tag）。
+  ///
+  /// null = 没有待展示的广播。主壳把它渲染成右上角的小提示卡，
+  /// 点「好」调用 [dismissBroadcast] 关闭。
+  static final ValueNotifier<ReleaseNotice?> broadcastNotice =
+      ValueNotifier<ReleaseNotice?>(null);
 
   /// 运行时完整版本号（如 108.1.0.100），未加载完成时为空字符串
   String _currentVersion = '';
@@ -196,12 +297,16 @@ class UpdateService {
     // 静默检查：开启程序时检查一次（发现更新时经 updateFound 广播弹窗）
     unawaited(checkForUpdate(silent: true));
 
+    // Release 提示检查（停用页 / 开发者提醒）独立于 checkForUpdate 运行：
+    // 即使检查更新因网络失败抛错，这里的结果依然能驱动界面。
+    unawaited(checkReleaseNotices());
+
     // 之后每小时静默检查一次
     _updateTimer?.cancel();
-    _updateTimer = Timer.periodic(
-      const Duration(hours: 1),
-      (_) => unawaited(checkForUpdate(silent: true)),
-    );
+    _updateTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      unawaited(checkForUpdate(silent: true));
+      unawaited(checkReleaseNotices());
+    });
 
     // 后端滥用标记轮询
     _abuseTimer?.cancel();
@@ -324,12 +429,31 @@ class UpdateService {
             _log.warning('该 Release 未附带本平台签名清单，自动安装将被拒绝');
           }
 
-          // 远程停用开关：最新 Release tag 等于 killSwitchVersion 时
-          // 全屏禁用应用（main.dart 监听 disabled 自动切换禁用页）
-          if (latestVersion == killSwitchVersion) {
-            _log.warning('命中远程停用开关（最新版本 $latestVersion），应用进入禁用状态');
-            disabled.value = true;
-            return const UpdateCheckResult(ok: false, error: '当前版本已被停用');
+          // 远程停用开关：统一交给 [checkReleaseNotices] 按 tag 精确判定，
+          // 这里不再自己比 tag，避免同一 tag 两套判断互相打架。
+          if (isKillSwitchTag(tag)) {
+            await checkReleaseNotices();
+            if (disabled.value) {
+              _log.warning('命中远程停用开关（$tag），应用进入禁用状态');
+              return const UpdateCheckResult(ok: false, error: '当前版本已被停用');
+            }
+            return UpdateCheckResult(ok: true, latestVersion: latestVersion);
+          }
+
+          // 114 号段是「通知广播」专用通道（513/514/515 走全屏页，其余走上
+          // 右上角提示卡）。这类 tag 绝不参与版本比较：既不弹更新弹窗，
+          // 也不弹预发行告警，避免一条通知把所有人的更新提示顶掉。
+          // 判定只认首段，`108.1.0.114` 这类末位 114 仍照常检查更新。
+          if (isNoticeSeriesTag(tag)) {
+            _log.info('Release $tag 属于通知号段，跳过版本比较');
+            unawaited(checkReleaseNotices());
+            return UpdateCheckResult(
+              ok: true,
+              latestVersion: latestVersion,
+              releaseNotes: releaseNotes,
+              assets: assets,
+              manifests: manifests,
+            );
           }
 
           final hasUpdate = _isNewer(latestVersion, _currentVersion);
@@ -369,6 +493,308 @@ class UpdateService {
     } finally {
       _checking = false;
     }
+  }
+
+  // ---- Release 提示（停用页 / 开发者提醒）----
+
+  /// 是否为停用类 tag
+  static bool isKillSwitchTag(String tag) {
+    final t = tag.trim();
+    return t == killSwitchVersion || t == killSwitchVersionFallback;
+  }
+
+  /// 是否属于通知广播号段（首段为 114，如 `114.100`）。
+  ///
+  /// 判定只看**首段**：`108.1.0.114` 的 114 在末位，不属于号段，
+  /// 仍需照常当作版本号参与检查更新。
+  static bool isNoticeSeriesTag(String tag) {
+    final t = tag.trim().replaceFirst(RegExp(r'^[vV]'), '');
+    if (t.isEmpty) return false;
+    final head = t.split('.').first;
+    return head == noticeSeriesPrefix;
+  }
+
+  /// 号段内但未被专用页面占用的 tag（走右上角提示卡）
+  static bool isBroadcastTag(String tag) {
+    final t = tag.trim();
+    if (!isNoticeSeriesTag(t)) return false;
+    return !reservedNoticeTags.contains(t);
+  }
+
+  /// 关闭开发者提醒页：仅清空提示状态，回到 AppNavigation，不退出软件。
+  ///
+  /// [disabled] 保持 false —— 提醒页从不让 App 进入禁用态。
+  static void dismissDeveloperNotice() {
+    final notice = releaseNotice.value;
+    if (notice == null || notice.kind != NoticeKind.developerNotice) return;
+    _instance._dismissedDeveloperTags.add(notice.tag);
+    releaseNotice.value = null;
+    _instance._log.info('开发者提醒已关闭: ${notice.tag}');
+  }
+
+  /// 关闭右上角通知广播卡片（仅清 UI 状态，不落盘：下次启动重新判定）
+  static void dismissBroadcast() {
+    final notice = broadcastNotice.value;
+    if (notice == null) return;
+    _instance._dismissedBroadcastTags.add(notice.tag);
+    broadcastNotice.value = null;
+    _instance._log.info('通知广播已关闭: ${notice.tag}');
+  }
+
+  /// 清除停用态（开发者后门 / 外部调用）：同时复位 disabled 与提示记录。
+  ///
+  /// 这是人为的应急出口，故**强制**回到可用状态（与旧后门行为一致）；
+  /// 自动流程不使用它 —— 自动解除只走 [_clearKillSwitch]，不会误解除滥用禁用。
+  static void clearKillSwitchNotice() {
+    final service = _instance;
+    final notice = releaseNotice.value;
+    if (notice != null && notice.kind == NoticeKind.killSwitch) {
+      releaseNotice.value = null;
+    }
+    service._killSwitchActive = false;
+    disabled.value = false;
+    service._log.info('停用态已被手动清除');
+  }
+
+  /// 逐个 tag 请求 `/releases/tags/<tag>`，据此决定是否展示提示页。
+  ///
+  /// 删除语义：
+  /// - **404** → 该 tag 已被删除（确定结果），本次启动不再因它弹任何东西
+  /// - **200** → 存在，body 可为空（空则页面用兜底文案）
+  /// - 其他错误（限流 403 / 超时 / 被劫持）→ 未知，**保守处理**：
+  ///   不认定删除，也不改变上次已确定的界面状态，避免网络抖动闪红屏
+  ///
+  /// 本方法不落盘任何「已禁用」状态，每次启动都实时判定，删除即恢复正常。
+  Future<void> checkReleaseNotices() {
+    // 串行化：启动与每小时定时器可能同时触发，复用同一个在途请求
+    final inFlight = _noticeInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _runReleaseNoticeCheck();
+    _noticeInFlight = future;
+    return future.whenComplete(() => _noticeInFlight = null);
+  }
+
+  Future<void> _runReleaseNoticeCheck() async {
+    try {
+      final probes = await Future.wait([
+        _probeReleaseTag(killSwitchVersion),
+        _probeReleaseTag(killSwitchVersionFallback),
+        _probeReleaseTag(developerNoticeVersion),
+      ]);
+      final primary = probes[0];
+      final fallback = probes[1];
+      final developer = probes[2];
+
+      // 1) 停用判定：514 优先；514 明确删除时回落到 513；
+      //    任一探测为「未知」则沿用上一次已确定的 tag，不动界面。
+      final String? desired;
+      if (primary.exists == true) {
+        desired = killSwitchVersion;
+      } else if (primary.exists == false) {
+        if (fallback.exists == true) {
+          desired = killSwitchVersionFallback;
+        } else if (fallback.exists == false) {
+          desired = null; // 两个 tag 都不存在 → 不弹禁用页，正常启动
+        } else {
+          desired = _lastKillTag; // 513 未知：保留上次已知状态
+        }
+      } else {
+        desired = _lastKillTag; // 514 未知：保留上次已知状态
+      }
+
+      _lastKillTag = desired;
+      if (desired == null) {
+        _clearKillSwitch();
+      } else if (desired == killSwitchVersion && primary.exists == true) {
+        _applyKillSwitch(killSwitchVersion, primary);
+      } else if (desired == killSwitchVersionFallback &&
+          fallback.exists == true) {
+        _applyKillSwitch(killSwitchVersionFallback, fallback);
+      }
+      // desired 非空但本次没拿到该 tag 的 body：上次已渲染的内容保持不变
+
+      // 2) 开发者提醒判定（独立于停用）：禁用态优先，提醒页不覆盖禁用页
+      if (disabled.value) return;
+      if (developer.exists == true) {
+        if (_dismissedDeveloperTags.contains(developerNoticeVersion)) return;
+        _applyDeveloperNotice(developerNoticeVersion, developer);
+      } else if (developer.exists == false) {
+        // tag 已删除：撤下提醒页，并清掉关闭记录（下次若重建则重新提醒）
+        _dismissedDeveloperTags.remove(developerNoticeVersion);
+        final current = releaseNotice.value;
+        if (current != null &&
+            current.kind == NoticeKind.developerNotice &&
+            current.tag == developerNoticeVersion) {
+          releaseNotice.value = null;
+        }
+      }
+
+      // 3) 广播通知（114 号段里除 513/514/515 之外的 tag）：右上角提示卡
+      await _checkBroadcast();
+    } catch (e) {
+      // 任何异常都不改界面：宁可这次不弹，也不误弹/误清
+      _log.warning('Release 提示检查异常（保持原状态）: $e');
+    }
+  }
+
+  /// 在 114 号段里找一条待广播的 Release（最新的一条），展示到右上角。
+  ///
+  /// 用列表接口一次取回全部 Release：号段 tag 是按需新增/删除的，
+  /// 没有固定名称可逐个探测。列表为空或网络异常时**不动**界面，
+  /// 已展示的卡片不会被莫名其妙撤掉。
+  Future<void> _checkBroadcast() async {
+    try {
+      final response = await _dio.get<String>(
+        _releasesListApi,
+        options: Options(responseType: ResponseType.plain),
+      );
+      if (response.statusCode != 200 || response.data == null) return;
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(response.data!);
+      } catch (_) {
+        return;
+      }
+      if (decoded is! List) return;
+
+      _TagProbe? hit;
+      String? hitTag;
+      for (final raw in decoded) {
+        if (raw is! Map<String, dynamic>) continue;
+        final tag = _normalizeVersion((raw['tag_name'] ?? '').toString());
+        if (!isBroadcastTag(tag)) continue;
+        hitTag = tag;
+        hit = _TagProbe(
+          exists: true,
+          title: (raw['name'] ?? '').toString().trim(),
+          body: (raw['body'] ?? '').toString().trim(),
+        );
+        // 列表按发布时间倒序，第一条命中即最新
+        break;
+      }
+
+      if (hitTag == null || hit == null) {
+        // 号段里没有任何广播条目：撤下卡片，并清掉本次进程的关闭记录
+        _dismissedBroadcastTags.clear();
+        final current = broadcastNotice.value;
+        if (current != null && current.kind == NoticeKind.broadcast) {
+          broadcastNotice.value = null;
+        }
+        return;
+      }
+      if (_dismissedBroadcastTags.contains(hitTag)) return;
+      if (disabled.value) return;
+      final current = broadcastNotice.value;
+      final same =
+          current != null &&
+          current.kind == NoticeKind.broadcast &&
+          current.tag == hitTag &&
+          current.body == hit.body;
+      if (same) return;
+      broadcastNotice.value = ReleaseNotice(
+        kind: NoticeKind.broadcast,
+        tag: hitTag,
+        title: hit.title,
+        body: hit.body,
+      );
+      _log.info('命中通知广播（$hitTag）');
+    } catch (e) {
+      _log.warning('广播通知检查失败（保持原状态）: $e');
+    }
+  }
+
+  /// 请求单个 tag 的 Release。404 才算「已删除」，其余错误一律 unknown。
+  Future<_TagProbe> _probeReleaseTag(String tag) async {
+    try {
+      final response = await _dio.get<String>(
+        '$_releaseByTagApiPrefix$tag',
+        options: Options(responseType: ResponseType.plain),
+      );
+      final status = response.statusCode;
+      if (status == 404) {
+        // 明确的删除信号
+        return const _TagProbe(exists: false);
+      }
+      if (status == 403) {
+        // 限流 / 需要认证：不是删除
+        _log.warning('Release $tag 查询被限流（403），保持原状态');
+        return const _TagProbe(exists: null);
+      }
+      if (status != 200 || response.data == null) {
+        _log.warning('Release $tag 查询返回 $status，保持原状态');
+        return const _TagProbe(exists: null);
+      }
+      final Object decoded;
+      try {
+        decoded = jsonDecode(response.data!);
+      } catch (_) {
+        _log.warning('Release $tag 返回非 JSON 内容，保持原状态');
+        return const _TagProbe(exists: null);
+      }
+      if (decoded is! Map<String, dynamic>) {
+        return const _TagProbe(exists: null);
+      }
+      return _TagProbe(
+        exists: true,
+        title: (decoded['name'] ?? '').toString().trim(),
+        body: (decoded['body'] ?? '').toString().trim(),
+      );
+    } catch (e) {
+      // 超时 / 连接失败 / 5xx：无法判定，绝不当作删除
+      _log.warning('Release $tag 查询失败（保持原状态）: $e');
+      return const _TagProbe(exists: null);
+    }
+  }
+
+  void _applyKillSwitch(String tag, _TagProbe probe) {
+    _killSwitchActive = true;
+    final current = releaseNotice.value;
+    final same =
+        current != null &&
+        current.kind == NoticeKind.killSwitch &&
+        current.tag == tag &&
+        current.body == probe.body;
+    if (!same) {
+      releaseNotice.value = ReleaseNotice(
+        kind: NoticeKind.killSwitch,
+        tag: tag,
+        title: probe.title,
+        body: probe.body,
+      );
+      _log.warning('命中远程停用开关（$tag），应用进入禁用状态');
+    }
+    if (!disabled.value) disabled.value = true;
+  }
+
+  void _clearKillSwitch() {
+    final current = releaseNotice.value;
+    if (current != null && current.kind == NoticeKind.killSwitch) {
+      releaseNotice.value = null;
+    }
+    if (!_killSwitchActive) return;
+    _killSwitchActive = false;
+    // 滥用类禁用与停用 tag 无关：tag 被删除时不能顺手把它解除
+    if (_abuseTriggered) return;
+    disabled.value = false;
+    _log.info('停用 tag 均已删除，恢复正常启动');
+  }
+
+  void _applyDeveloperNotice(String tag, _TagProbe probe) {
+    if (disabled.value) return;
+    final current = releaseNotice.value;
+    final same =
+        current != null &&
+        current.kind == NoticeKind.developerNotice &&
+        current.tag == tag &&
+        current.body == probe.body;
+    if (same) return;
+    releaseNotice.value = ReleaseNotice(
+      kind: NoticeKind.developerNotice,
+      tag: tag,
+      title: probe.title,
+      body: probe.body,
+    );
+    _log.info('命中开发者提醒 Release（$tag）');
   }
 
   /// 用系统默认浏览器打开链接
@@ -560,4 +986,18 @@ class UpdateService {
     final s = _normalizeVersion(version);
     return s.split('.').map((p) => int.tryParse(p.trim()) ?? 0).toList();
   }
+}
+
+/// 单个 tag 的探测结果
+///
+/// [exists] 三态：
+/// - true  → Release 存在（body 可能为空字符串）
+/// - false → 明确的 404，Release 已被删除
+/// - null  → 网络/限流/解析异常，**未知**，不得据此改动界面
+class _TagProbe {
+  final bool? exists;
+  final String title;
+  final String body;
+
+  const _TagProbe({required this.exists, this.title = '', this.body = ''});
 }

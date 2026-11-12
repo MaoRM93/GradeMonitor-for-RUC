@@ -15,6 +15,71 @@ logger = get_logger(__name__)
 _WIN_AUMID = "GradeMonitor.GradeMonitor"
 _win_aumid_registered = False
 
+# 结构化字段里最多写入的课程条数（仪表板卡片展示上限）
+_STRUCTURED_COURSE_LIMIT = 6
+# 取不到值时的占位符（前端直接拼接，不能用空串）
+_MISSING = "-"
+
+
+def _pick_value(course: dict, key: str) -> str:
+    """取课程字段的展示值，缺失/空值统一返回 '-'"""
+    value = course.get(key)
+    if value is None:
+        return _MISSING
+    text = str(value).strip()
+    return text if text else _MISSING
+
+
+def _course_name(course: dict) -> str:
+    """课程名：真实数据键为 kcname，兼容已结构化的 name 键"""
+    name = _pick_value(course, "kcname")
+    if name == _MISSING:
+        name = _pick_value(course, "name")
+    return name
+
+
+def _calc_pjxfjd(course: dict) -> str:
+    """单课平均学分绩点：绩点/学分，保留 1 位小数（最高 4.0）"""
+    try:
+        jd_val = float(course.get("jd", 0) or 0)
+        xf_val = float(course.get("xf", 1) or 1)
+    except (TypeError, ValueError):
+        return "N/A"
+    return f"{jd_val / xf_val:.1f}" if xf_val > 0 else "N/A"
+
+
+def _build_grades_extra(course_details: list = None,
+                        kind: str = "grades") -> dict:
+    """构造 recent_change.json 的结构化字段（向后兼容：不改动 title/message/at）。
+
+    - courseCount：本次传入的课程总数（不是截断后的条数）
+    - courses：最多 6 条，按传入顺序
+    - gpa 取 _calc_pjxfjd，无法计算/缺字段时记 '-'
+    """
+    courses = course_details or []
+    items: list[dict] = []
+    for course in courses[:_STRUCTURED_COURSE_LIMIT]:
+        if not isinstance(course, dict):
+            continue
+        # 绩点字段缺失或为空时不宜用 0 兜底，统一记为 '-'
+        gpa = _MISSING
+        if _pick_value(course, "jd") != _MISSING:
+            gpa = _calc_pjxfjd(course)
+            if gpa == "N/A":
+                gpa = _MISSING
+        items.append({
+            "name": _course_name(course),
+            "gpa": gpa,
+            "daily": _pick_value(course, "cjxm1"),
+            "final": _pick_value(course, "cjxm3"),
+            "weighted": _pick_value(course, "zcj"),
+        })
+    return {
+        "kind": kind,
+        "courseCount": len(courses),
+        "courses": items,
+    }
+
 
 def send_startup_notification(auto_monitor_enabled: bool,
                                start_time: str = "08:00",
@@ -47,7 +112,9 @@ def send_grades_notification(new_count: int, changed_count: int,
             正文逐门列出：课程名：平时xx 期末xx 加权xx 绩点x.x
     """
     if is_simple:
-        _show("您有成绩或排名更新", "")
+        # 简洁模式正文为空，但仍写入结构化字段供仪表板卡片消费
+        _structured = _build_grades_extra(course_details)
+        _show("您有成绩或排名更新", "", extra=_structured)
         return
 
     total = len(course_details) if course_details else 0
@@ -76,10 +143,8 @@ def send_grades_notification(new_count: int, changed_count: int,
             "pjxfjd": _calc_pjxfjd(course),
         }
 
-    def _calc_pjxfjd(course: dict) -> str:
-        jd_val = float(course.get("jd", 0) or 0)
-        xf_val = float(course.get("xf", 1) or 1)
-        return f"{jd_val / xf_val:.1f}" if xf_val > 0 else "N/A"
+    # recent_change.json 的结构化字段（一次构造，两种模式共用）
+    structured = _build_grades_extra(course_details)
 
     if total == 1:
         c = _format_course(course_details[0])
@@ -88,7 +153,7 @@ def send_grades_notification(new_count: int, changed_count: int,
             f"平时分：{c['cjxm1']}；期末分：{c['cjxm3']}；加权分：{c['zcj']}",
             f"平均学分绩点：{c['pjxfjd']}；班名：{bjpm}；年名：{pm}",
         ]
-        _show(title, "\n".join(lines))
+        _show(title, "\n".join(lines), extra=structured)
     else:
         first_name = course_details[0].get("kcname", "未知课程")
         title = f"您有成绩或排名更新：{first_name} 等 {total} 门"
@@ -96,13 +161,16 @@ def send_grades_notification(new_count: int, changed_count: int,
         for course in course_details:
             c = _format_course(course)
             lines.append(f"{c['name']}：平时{c['cjxm1']} 期末{c['cjxm3']} 加权{c['zcj']} 绩点{c['pjxfjd']}")
-        _show(title, "\n".join(lines))
+        _show(title, "\n".join(lines), extra=structured)
 
 
 def send_rank_notification(rank_data: dict, change_msgs: list = None,
                             is_simple: bool = False) -> None:
+    # 排名类通知同样写结构化字段，但不带课程明细
+    structured = {"kind": "rank", "courseCount": 0, "courses": []}
+
     if is_simple:
-        _show("您有成绩或排名更新", "")
+        _show("您有成绩或排名更新", "", extra=structured)
         return
 
     pm = rank_data.get("pm", "N/A")
@@ -116,7 +184,7 @@ def send_rank_notification(rank_data: dict, change_msgs: list = None,
     if change_msgs:
         lines.append("--- 变化 ---")
         lines.extend(change_msgs[:3])
-    _show(title, "\n".join(lines))
+    _show(title, "\n".join(lines), extra=structured)
 
 
 def send_test_notification(is_simple: bool = False,
@@ -218,7 +286,8 @@ def _win_toast_launch_target() -> str:
     return f'"{app_exe}"'
 
 
-def _show(title: str, message: str, record: bool = True) -> None:
+def _show(title: str, message: str, record: bool = True,
+          extra: dict | None = None) -> None:
     """发送 macOS/Windows 系统通知。
 
     **macOS 改为由 App 自身的原生通知通道投递**（前端
@@ -235,6 +304,13 @@ def _show(title: str, message: str, record: bool = True) -> None:
 
     [record] 是否持久化到 recent_change.json（仪表板「最新动态」读取汇总），
     测试/预览通知传 False 避免覆盖真实变动记录。
+
+    [extra] 额外写入 recent_change.json 的结构化字段（如 kind/courseCount/courses）。
+    只会**新增**键，title/message/at 的原有写入方式与格式完全不变，
+    因此系统通知与其他消费方不受影响。record=False 时不写文件，extra 被忽略。
+
+    注意：写文件与后续通知投递使用的是同一份 _data 语义 —— WebSocket 分支
+    与 osascript/win11toast 回退分支都只消费 title/message，互不影响。
     """
     if record:
         try:
@@ -247,6 +323,13 @@ def _show(title: str, message: str, record: bool = True) -> None:
                 "message": message,
                 "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
+            # 结构化字段：向后兼容地追加以供仪表板卡片消费
+            if extra:
+                for key, value in extra.items():
+                    if key in ("title", "message", "at"):
+                        # 保护原有三字段，禁止被 extra 覆盖
+                        continue
+                    _data[key] = value
             atomic_write_json(get_data_file_path("recent_change.json"), _data)
         except Exception as e:
             logger.debug(f"记录最近通知失败: {e}")

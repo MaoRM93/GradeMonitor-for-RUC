@@ -89,34 +89,36 @@ class _NoteBannerState extends State<NoteBanner> {
       decoration: BoxDecoration(
         color: mainColor.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: mainColor.withValues(alpha: widget.warning ? .35 : .3),
-        ),
       ),
       child: Stack(
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                widget.warning
-                    ? Icons.warning_amber_rounded
-                    : Icons.info_outline_rounded,
-                size: 20,
-                color: mainColor,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.warning
+                        ? Icons.warning_amber_rounded
+                        : Icons.info_outline_rounded,
+                    size: 20,
+                    color: mainColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: widget.warning
+                          ? AppTheme.error.withValues(alpha: .95)
+                          : cs.primary,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 7),
-              Text(
-                widget.title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: widget.warning
-                      ? AppTheme.error.withValues(alpha: .95)
-                      : cs.primary,
-                ),
-              ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 widget.text,
                 style: TextStyle(

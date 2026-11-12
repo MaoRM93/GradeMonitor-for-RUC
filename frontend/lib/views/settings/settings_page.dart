@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,7 @@ import '../../core/service/update_verifier.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/monitor_provider.dart';
 import '../../widgets/glass_card.dart';
+import '../../widgets/note_banner.dart';
 import '../../widgets/toast_host.dart';
 
 /// 系统设置页面（所有开关即时生效）
@@ -346,9 +348,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: colorScheme.outlineVariant.withValues(alpha: .5),
-                    ),
                     color: Colors.white,
                   ),
                   child: _captchaLoading
@@ -723,7 +722,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         _updateMessage = '检测到版本更新：${result.latestVersion}';
       } else {
         _updateStatus = _UpdateStatus.upToDate;
-        _updateMessage = '检查成功，当前已经是最新版本 $_versionDisplay';
+        _updateMessage = '当前已是最新版本。';
       }
     });
 
@@ -754,6 +753,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       context: context,
       initialTime: _startTime,
       helpText: '选择开始时间',
+      builder: (ctx, child) => Localizations.override(
+        context: ctx,
+        delegates: const [_ZhMaterialLocalizationsDelegate()],
+        child: child,
+      ),
     );
     if (picked != null) await _onStartTimeChanged(picked);
   }
@@ -763,6 +767,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       context: context,
       initialTime: _endTime,
       helpText: '选择结束时间',
+      builder: (ctx, child) => Localizations.override(
+        context: ctx,
+        delegates: const [_ZhMaterialLocalizationsDelegate()],
+        child: child,
+      ),
     );
     if (picked != null) await _onEndTimeChanged(picked);
   }
@@ -787,15 +796,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   color: colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                '您可以在此处调整程序的所有配置',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: colorScheme.onSurface.withValues(alpha: .5),
-                ),
-              ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
 
               // ---- ① 账号（无分组标题：头像与学号本身已足够说明）----
               GlassCard(
@@ -848,63 +849,51 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               GlassCard(
                 padding: const EdgeInsets.all(20),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 提示语放在开始/结束时间之上
+                    NoteBanner.info(
+                      persistKey: 'settings_monitor_time_tip',
+                      title: '提示',
+                      text:
+                          '通常，教师会在8:00至20:00之间录入并发布成绩。'
+                          '为避免给服务器造成过大负载，程序仅允许您最低设置 300 秒查询一次。'
+                          '如您有特殊需求，请联系开发者。',
+                    ),
+                    const SizedBox(height: 14),
+                    // 两个时间项：各自一张浅色圆角卡（标题在左上、大号时间在下、
+                    // 右下角一个展开箭头），中间用「至」连接，全程不画分割线
                     Row(
                       children: [
                         Expanded(
-                          child: ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text(
-                              '开始时间',
-                              style: TextStyle(fontSize: 13),
-                            ),
-                            trailing: Text(
-                              _startTime.format(context),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                          child: _TimeFieldCard(
+                            title: '开始时间',
+                            value: _startTime.format(context),
                             onTap: _pickStartTime,
                           ),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text(
-                              '结束时间',
-                              style: TextStyle(fontSize: 13),
-                            ),
-                            trailing: Text(
-                              _endTime.format(context),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          child: Text(
+                            '至',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: colorScheme.onSurface.withValues(
+                                alpha: .45,
                               ),
                             ),
+                          ),
+                        ),
+                        Expanded(
+                          child: _TimeFieldCard(
+                            title: '结束时间',
+                            value: _endTime.format(context),
                             onTap: _pickEndTime,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '出成绩时间通常为 8:00-18:00；为避免给服务器造成过大压力，轮询间隔仅允许最小设置 300 秒',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurface.withValues(alpha: .35),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '非窗口期内监控自动休眠',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurface.withValues(alpha: .35),
-                      ),
-                    ),
-                    const Divider(height: 24),
+                    const SizedBox(height: 18),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(
@@ -1077,58 +1066,66 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               const SizedBox(height: 12),
               GlassCard(
                 padding: const EdgeInsets.all(20),
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.cloud_download_rounded,
-                    color: colorScheme.primary,
-                  ),
-                  title: const Text(
-                    '检查更新',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 3),
-                      Text(
-                        '当前版本 $_versionDisplay',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.onSurface.withValues(alpha: .5),
-                        ),
-                      ),
-                      if (_updateStatus != _UpdateStatus.idle) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          _updateMessage,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _updateStatus == _UpdateStatus.checking
-                                ? colorScheme.onSurface.withValues(alpha: .45)
-                                : _updateStatus == _UpdateStatus.failed
-                                ? AppTheme.error
-                                : AppTheme.success,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  trailing: OutlinedButton.icon(
-                    onPressed: _updateStatus == _UpdateStatus.checking
-                        ? null
-                        : _checkUpdate,
-                    icon: _updateStatus == _UpdateStatus.checking
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh_rounded, size: 16),
-                    label: Text(
-                      _updateStatus == _UpdateStatus.checking ? '检查中…' : '立即检查',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cloud_download_rounded,
+                      color: colorScheme.primary,
                     ),
-                  ),
+                    const SizedBox(width: 16),
+                    // 去掉「检查更新」重复标题，只留版本号
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _versionDisplay,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              height: 1.3,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          if (_updateStatus != _UpdateStatus.idle) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              _updateMessage,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _updateStatus == _UpdateStatus.checking
+                                    ? colorScheme.onSurface.withValues(
+                                        alpha: .45,
+                                      )
+                                    : _updateStatus == _UpdateStatus.failed
+                                    ? AppTheme.error
+                                    : AppTheme.success,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    OutlinedButton.icon(
+                      onPressed: _updateStatus == _UpdateStatus.checking
+                          ? null
+                          : _checkUpdate,
+                      icon: _updateStatus == _UpdateStatus.checking
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh_rounded, size: 16),
+                      label: Text(
+                        _updateStatus == _UpdateStatus.checking
+                            ? '检查中…'
+                            : '立即检查',
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 24),
@@ -1201,17 +1198,32 @@ class _PreReleaseDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = UpdateService().currentVersion;
     final latest = result.latestVersion;
-    final danger = const Color(0xFFD32F2F);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final danger = isDark ? const Color(0xFFFF6B6B) : const Color(0xFFD32F2F);
 
     return AlertDialog(
-      icon: Icon(Icons.warning_amber_rounded, color: danger, size: 34),
-      title: const Text('您可能在使用预发行版本'),
+      // 底色跟随主题：浅色纯白、深色用卡片色，避免深色下出现刺眼白块
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+      surfaceTintColor: Colors.transparent,
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 460),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 图标独占一行且放大；标题换行到图标下方，两者均左对齐
+            Icon(Icons.warning_rounded, color: danger, size: 56),
+            const SizedBox(height: 14),
+            Text(
+              '您可能正在使用未发行的版本',
+              style: TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+                color: danger,
+              ),
+            ),
+            const SizedBox(height: 16),
             const Text(
               '您所使用的版本超过了当前开发者发布的最新版本。',
               style: TextStyle(fontSize: 13.5, height: 1.6),
@@ -1223,7 +1235,6 @@ class _PreReleaseDialog extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
                 color: danger.withValues(alpha: .07),
-                border: Border.all(color: danger.withValues(alpha: .35)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1253,7 +1264,11 @@ class _PreReleaseDialog extends StatelessWidget {
           child: const Text('好'),
         ),
         FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: danger),
+          // 去 GitHub 下载：主色蓝按钮（警示只体现在标题与版本信息上）
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF1565C0),
+            foregroundColor: Colors.white,
+          ),
           onPressed: () {
             Navigator.of(context).pop();
             UpdateService().openInBrowser(
@@ -1785,6 +1800,76 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
 /// 检查更新状态（四态 + 空闲初始态）
 enum _UpdateStatus { idle, checking, upToDate, hasUpdate, failed }
 
+/// 时间选择卡片：左上小标题、下方大号时间、右下角展开箭头。
+/// 只靠底色与圆角成形，不画任何边框/分割线。
+class _TimeFieldCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  const _TimeFieldCard({
+    required this.title,
+    required this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.onSurface.withValues(alpha: .035),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 11, 10, 9),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurface.withValues(alpha: .5),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w600,
+                          height: 1.1,
+                          letterSpacing: -.5,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 18,
+                    color: colorScheme.onSurface.withValues(alpha: .38),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 分区标题
 class _SectionTitle extends StatelessWidget {
   final String title;
@@ -1810,4 +1895,53 @@ class _SectionTitle extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 时间选择弹窗中文文案（项目未引入 flutter_localizations，
+/// 这里在 showTimePicker 的 builder 里局部覆盖 Material 默认英文文案）
+class _ZhMaterialLocalizations extends DefaultMaterialLocalizations {
+  const _ZhMaterialLocalizations();
+
+  @override
+  String get cancelButtonLabel => '取消';
+
+  @override
+  String get okButtonLabel => '好';
+
+  @override
+  String get timePickerDialHelpText => '选择时间';
+
+  @override
+  String get timePickerInputHelpText => '输入时间';
+
+  @override
+  String get timePickerHourModeAnnouncement => '选择小时';
+
+  @override
+  String get timePickerMinuteModeAnnouncement => '选择分钟';
+
+  @override
+  String get anteMeridiemAbbreviation => '上午';
+
+  @override
+  String get postMeridiemAbbreviation => '下午';
+}
+
+class _ZhMaterialLocalizationsDelegate
+    extends LocalizationsDelegate<MaterialLocalizations> {
+  const _ZhMaterialLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => true;
+
+  @override
+  Future<MaterialLocalizations> load(Locale locale) =>
+      SynchronousFuture<MaterialLocalizations>(
+        const _ZhMaterialLocalizations(),
+      );
+
+  @override
+  bool shouldReload(
+    covariant LocalizationsDelegate<MaterialLocalizations> old,
+  ) => false;
 }

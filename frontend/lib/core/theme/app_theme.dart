@@ -121,6 +121,16 @@ class AppTheme {
         groupAlignment: -.35,
       ),
 
+      // Dialog：显式给弹窗白底，避免 M3 默认的 surfaceContainerHigh 在浅色下偏灰蓝
+      dialogTheme: DialogThemeData(
+        backgroundColor: lightSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 12,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+
       // Input
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -270,6 +280,16 @@ class AppTheme {
         ),
         labelType: NavigationRailLabelType.all,
         groupAlignment: -.35,
+      ),
+
+      // Dialog：深色下用卡片色而非默认 surfaceContainerHigh，避免比背景还亮
+      dialogTheme: DialogThemeData(
+        backgroundColor: darkSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 12,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
       ),
 
       // Input

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/service/nav_signal.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/websocket_service.dart';
 import '../../providers/monitor_provider.dart';
@@ -174,15 +175,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   color: colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                '实时监控成绩更新状态',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: colorScheme.onSurface.withValues(alpha: .5),
-                ),
-              ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
               _buildMonitorCard(monitorState),
               const SizedBox(height: 18),
               _buildLatestCard(gradesAsync),
@@ -199,12 +192,15 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   Widget _buildMonitorCard(MonitorStatus status) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return SizedBox(
-      height: 88,
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Row(
-          children: [
+    // 监控状态行不再套白底卡片：状态与按钮直接落在页面背景上，
+    // 只靠文字颜色与两枚带浅色底的按钮区分层级。
+    // 去掉卡片后需要自行补足上下留白，否则与标题、最新出分卡贴得过紧。
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 20),
+      constraints: const BoxConstraints(minHeight: 56),
+      alignment: Alignment.centerLeft,
+      child: Row(
+        children: [
             PulsingStatusDot(active: status.isRunning),
             const SizedBox(width: 12),
             Text(
@@ -235,53 +231,73 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               loading: _isTogglingMonitor,
               onTap: _isTogglingMonitor ? null : _toggleMonitor,
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
-  /// 「最新动态」卡：优先展示最近一次变动（通知模块生成的真实内容）；
-  /// 无变动记录时回退显示最新一门成绩。
+  /// 「最新出分」卡：展示最近一次成绩（或排名）变动的结构化内容。
+  /// 数据源：后端 recent_change.json（courses 为结构化课程数组）。
   Widget _buildLatestCard(AsyncValue<List<GradeCourse>> gradesAsync) {
     final cs = Theme.of(context).colorScheme;
     final settings = ref.read(settingsProvider);
-    final subColor = cs.onSurface.withValues(alpha: .45);
     final tinyColor = cs.onSurface.withValues(alpha: .3);
-
     final change = _latestChange;
 
-    String tagText;
-    Color tagColor;
-    String title;
-    String detail;
-    String at = '';
+    final entries = _parseEntries(change, gradesAsync.asData?.value);
+    final at = (change?['at'] ?? '').toString();
 
-    if (change != null) {
+    // 小标题：1 门=课程名；2 门=「课程名 等 2 门」；3 门以上=n 门课程有更新
+    String subtitle;
+    String body;
+    var tagText = '最新出分';
+    var tagColor = AppTheme.success;
+    var empty = false;
+
+    if (entries.isNotEmpty) {
+      // 课程总数优先取后端 courseCount（courses 已按 6 条截断）
+      final rawCount = change?['courseCount'];
+      var n = rawCount is int && rawCount > 0 ? rawCount : entries.length;
+      // courses 可能因后端截断少于 courseCount，展示时不能超过实际条数
+      if (n > entries.length && entries.length < 3) n = entries.length;
+      if (n == 1) {
+        subtitle = entries.first.name;
+        body = _entryLine(entries.first, withName: false);
+      } else if (n == 2) {
+        subtitle = '${entries.first.name} 等 2 门';
+        body = '${_entryLine(entries[0], withName: true)}\n'
+            '${_entryLine(entries[1], withName: true)}';
+      } else {
+        subtitle = '$n 门课程有更新';
+        body = '多门成绩更新，请前往“成绩单”页面查看具体情况';
+      }
+    } else if (change != null) {
+      // 排名等其他变动，或后端尚未提供结构化字段时的兼容展示
       final raw = (change['title'] ?? '').toString();
       final idx = raw.indexOf('：');
-      tagText = '最新变动';
-      tagColor = AppTheme.success;
-      title = idx >= 0
-          ? raw.substring(idx + 1)
-          : (raw.isEmpty ? '成绩与排名更新' : raw);
+      subtitle = idx >= 0 ? raw.substring(idx + 1) : (raw.isEmpty ? '成绩与排名更新' : raw);
       final msg = (change['message'] ?? '').toString();
-      detail = msg.isEmpty ? '详情见「成绩单」' : msg.replaceAll('\n', '　·　');
-      at = (change['at'] ?? '').toString();
+      body = msg.isEmpty ? '详情见「成绩单」' : msg.replaceAll('\n', '　·　');
     } else {
+      empty = true;
+      tagText = '暂无更新';
+      tagColor = cs.onSurface.withValues(alpha: .45);
       final latest = _latestCourse(gradesAsync.asData?.value);
       if (latest == null) {
-        tagText = '暂无更新';
-        tagColor = subColor;
-        title = settings.username.isEmpty ? '请先在设置中配置账户' : '暂无成绩数据';
-        detail = '完成监控配置后，成绩与排名变动会第一时间展示在这里';
+        subtitle = settings.username.isEmpty ? '请先在设置中配置账户' : '暂无成绩数据';
+        body = '完成监控配置后，成绩与排名变动会第一时间展示在这里';
       } else {
-        tagText = '暂无更新 · 最新一门';
-        tagColor = subColor;
-        title = latest.kcname;
-        detail = '期末 ${latest.cjxm3.isEmpty ? '-' : latest.cjxm3}　·　'
-            '加权 ${latest.zcj.isEmpty ? '-' : latest.zcj}　·　'
-            '绩点 ${latest.jd.isEmpty ? '-' : latest.jd}';
+        subtitle = latest.kcname;
+        body = _entryLine(
+          _LatestEntry(
+            name: latest.kcname,
+            gpa: _avgGpaOf(latest),
+            daily: latest.cjxm1,
+            finalScore: latest.cjxm3,
+            weighted: latest.zcj,
+          ),
+          withName: false,
+        );
       }
     }
 
@@ -294,12 +310,29 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             children: [
               _TagChip(tagText, tagColor),
               const Spacer(),
-              Text(at, style: TextStyle(fontSize: 11.5, color: tinyColor)),
+              // 右上角：跳转成绩单页（蓝色文字按钮，无药丸形态）
+              TextButton(
+                onPressed: () => requestNav(AppNavTarget.grades),
+                style: TextButton.styleFrom(
+                  foregroundColor: cs.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  '查看完整成绩 →',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: cs.primary,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
           Text(
-            title,
+            subtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -310,14 +343,89 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            detail,
-            maxLines: 3,
+            body,
+            maxLines: 4,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 14, color: subColor, height: 1.6),
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.6,
+              color: empty
+                  ? cs.onSurface.withValues(alpha: .45)
+                  : cs.onSurface,
+            ),
           ),
+          if (at.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                at,
+                style: TextStyle(fontSize: 11.5, color: tinyColor),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 单门成绩正文：绩点 / 平时成绩 / 期末成绩 / 加权成绩
+  String _entryLine(_LatestEntry e, {required bool withName}) {
+    final prefix = withName ? '${e.name}： ' : '';
+    return '$prefix绩点：${e.gpa}   平时成绩：${_dashIfEmpty(e.daily)}   '
+        '期末成绩：${_dashIfEmpty(e.finalScore)}   加权成绩：${_dashIfEmpty(e.weighted)}';
+  }
+
+  String _dashIfEmpty(String v) => v.trim().isEmpty ? '-' : v.trim();
+
+  /// 平均学分绩点（Σ学分绩点 ÷ Σ学分，单课即 jd/xf），最高 4.0
+  String _avgGpaOf(GradeCourse c) {
+    final xf = double.tryParse(c.xf) ?? 0;
+    final jd = double.tryParse(c.jd) ?? 0;
+    if (xf <= 0) return '0.0';
+    return (jd / xf).toStringAsFixed(1);
+  }
+
+  /// 解析后端结构化 courses；缺失时回退到本地最新一门成绩
+  List<_LatestEntry> _parseEntries(
+    Map<String, dynamic>? change,
+    List<GradeCourse>? grades,
+  ) {
+    final raw = change?['courses'];
+    final list = <_LatestEntry>[];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is! Map) continue;
+        final m = Map<String, dynamic>.from(item);
+        final name = (m['name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        list.add(
+          _LatestEntry(
+            name: name,
+            gpa: _dashIfEmpty((m['gpa'] ?? '').toString()),
+            daily: (m['daily'] ?? '').toString(),
+            finalScore: (m['final'] ?? '').toString(),
+            weighted: (m['weighted'] ?? '').toString(),
+          ),
+        );
+      }
+    }
+    if (list.isNotEmpty) return list;
+
+    // 后端旧格式（无 courses）：若标题里带课程名且本地有对应课程则补齐字段
+    if (change != null) return const [];
+
+    final latest = _latestCourse(grades);
+    if (latest == null) return const [];
+    return [
+      _LatestEntry(
+        name: latest.kcname,
+        gpa: _avgGpaOf(latest),
+        daily: latest.cjxm1,
+        finalScore: latest.cjxm3,
+        weighted: latest.zcj,
+      ),
+    ];
   }
 
   /// 取最新一门成绩：最新学期（xnxq 降序）中后端列表的最后一门
@@ -386,7 +494,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           const SizedBox(width: 14),
           Expanded(
             child: _statTile(
-              icon: Icons.manage_history_rounded,
+              icon: Icons.query_stats_rounded,
               iconColor: const Color(0xFF3B82F6),
               label: '查询次数',
               value: '${status.totalQueries}',
@@ -428,31 +536,51 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             style: TextStyle(
               fontSize: 15.0,
               fontWeight: FontWeight.w600,
-              color: cs.onSurface.withValues(alpha: .5),
+              color: cs.onSurface,
             ),
           ),
           const Spacer(),
           Align(
             alignment: Alignment.centerRight,
-            child: dotIdx >= 0
-                ? Text.rich(
-                    TextSpan(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: dotIdx >= 0
+                  ? Text.rich(
+                      TextSpan(
+                        style: valueStyle,
+                        children: [
+                          TextSpan(text: value.substring(0, dotIdx)),
+                          TextSpan(
+                            text: value.substring(dotIdx),
+                            style: const TextStyle(fontSize: 34),
+                          ),
+                        ],
+                      ),
+                    )
+                  // 超过 2 位数：首字保持原尺寸，其余数字缩小以适配卡片宽度
+                  : value.length > 2
+                  ? Text.rich(
+                      TextSpan(
+                        style: valueStyle,
+                        children: [
+                          TextSpan(text: value.substring(0, 1)),
+                          TextSpan(
+                            text: value.substring(1),
+                            style: TextStyle(
+                              fontSize: value.length >= 5 ? 32 : 42,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: valueStyle,
-                      children: [
-                        TextSpan(text: value.substring(0, dotIdx)),
-                        TextSpan(
-                          text: value.substring(dotIdx),
-                          style: const TextStyle(fontSize: 34),
-                        ),
-                      ],
                     ),
-                  )
-                : Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: valueStyle,
-                  ),
+            ),
           ),
         ],
       ),
@@ -530,4 +658,20 @@ class _ControlButton extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// 最新出分卡的一门课程数据
+class _LatestEntry {
+  final String name;
+  final String gpa;
+  final String daily;
+  final String finalScore;
+  final String weighted;
+  const _LatestEntry({
+    required this.name,
+    required this.gpa,
+    required this.daily,
+    required this.finalScore,
+    required this.weighted,
+  });
 }

@@ -125,6 +125,15 @@ class MonitorService:
                 username = settings.get("username", "")
                 password = settings.get("password", "")
 
+                # 是否为「这台机器安装以来累计的第一次查询」：
+                # 用持久化的累计查询计数判断（stats.json 的 total_queries），
+                # 而不是内存标志位 —— 否则每次开机自启动都会被当成第一次。
+                is_first_ever_query = False
+                try:
+                    is_first_ever_query = load_total_query_count() == 0
+                except Exception:
+                    is_first_ever_query = False
+
                 # 无凭据时跳过
                 if not username or not password:
                     logger.info("[自动监控] 无登录凭据，等待 30s 后重试")
@@ -161,6 +170,16 @@ class MonitorService:
                     increment_query_count()
 
                 self.last_query_at = datetime.now()
+
+                # 首次安装后的第一个查询必须「立刻执行」：本轮不进入随机/定时等待，
+                # 直接回到循环顶部继续下一次查询。判断依据是本轮开头读到的持久化
+                # 累计计数是否为 0（见 is_first_ever_query），本轮已完成
+                # increment_query_count()，计数变 1，下一轮就恢复原有的随机/定时逻辑。
+                # 注意：只有本轮真的查询过（queried）才跳过等待，避免两路监控都关闭时
+                # 计数永远为 0 导致空转。
+                if is_first_ever_query and queried:
+                    logger.info("[自动监控] 首次安装后的首轮查询完成，跳过本轮等待")
+                    continue
 
                 # 等待下一轮
                 # 安全模式（默认开启）：每轮结束后在设定间隔 ±100 秒内重新

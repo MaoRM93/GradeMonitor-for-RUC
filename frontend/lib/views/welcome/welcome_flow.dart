@@ -7,33 +7,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../../providers/settings_provider.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../widgets/toast_host.dart';
 
-const _termsText = '''免责声明
+const _termsText = '''
+# 免责声明
 
-1. 本程序为个人开发项目，与任何学校、教育机构或教务系统运营方无关，非官方软件。
-
+1. 本程序为个人开发项目，与任何学校、教育机构或教务系统运营方无关，**非官方软件**。
 2. 本程序仅用于辅助用户查询个人成绩信息，使用过程中产生的账号异常、数据泄露、校规违反等风险，由用户自行承担。
-
 3. 开发者不保证程序持续可用、无故障运行，不对因软件使用、系统环境变化或第三方服务异常造成的损失承担责任。
-
-4. 开发者承诺不收集、不上传、不存储用户账号密码及成绩数据，相关信息仅在用户设备本地处理。
-
+4. 开发者承诺**不收集、不上传、不存储**用户账号密码及成绩数据，相关信息仅在用户设备本地处理。
 5. 用户应妥善保管账号信息，积极参与教评，并确保使用行为符合学校管理规定及相关法律法规。
 
-用户使用协议
+# 用户使用协议
 
 1. 用户下载、安装或使用本程序，即视为同意本协议全部内容。
-
-2. 本程序仅限个人学习、研究及技术交流使用，禁止用于商业用途或未经授权的传播。
-
+2. 本程序仅限个人学习、研究及技术交流使用，**禁止用于商业用途或未经授权的传播**。
 3. 用户不得利用本程序进行任何形式的服务器攻击、漏洞利用、数据爬取、恶意访问或其他影响学校计算机系统正常运行的行为。
-
 4. 严禁通过降低查询间隔、批量账号运行、高频请求等方式增加教务系统服务器负担。
-
 5. 用户因违规使用本程序造成的一切后果，由用户自行承担；开发者有权停止提供相关支持。
-
-6. 如不同意上述条款，请立即停止使用并彻底删除本程序。''';
+6. 如不同意上述条款，请立即停止使用并彻底删除本程序。
+''';
 
 /// 沉稳的大红（同意/不同意并排时使用，不刺眼）
 const Color _disagreeRed = Color(0xFFB04A46);
@@ -676,27 +670,61 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   // ---- Page 1: 法律性声明 ----
 
   /// 协议正文按空行自动分段，每段独立排版，段间距 5 像素
+  /// 协议正文：按 Markdown 排版（标题分级、段落、列表、加粗、链接）
   Widget _buildTermsParagraphs(ColorScheme cs) {
-    final paragraphs = _termsText
-        .split('\n\n')
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (int i = 0; i < paragraphs.length; i++) ...[
-          if (i > 0) const SizedBox(height: 5),
-          Text(
-            paragraphs[i],
-            style: TextStyle(
-              fontSize: 13,
-              color: cs.onSurface.withValues(alpha: .7),
-              height: 1.45,
-            ),
-          ),
-        ],
-      ],
+    return MarkdownBody(
+      data: _termsText,
+      softLineBreak: true,
+      styleSheet: _termsMdStyle(cs),
+    );
+  }
+
+  MarkdownStyleSheet _termsMdStyle(ColorScheme cs) {
+    final on = cs.onSurface;
+    TextStyle base({
+      double size = 13,
+      FontWeight weight = FontWeight.w400,
+      double height = 1.62,
+      double alpha = .72,
+    }) => TextStyle(
+      fontSize: size,
+      height: height,
+      fontWeight: weight,
+      color: on.withValues(alpha: alpha),
+    );
+    return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      p: base(),
+      pPadding: const EdgeInsets.only(bottom: 8),
+      h1: base(size: 17, weight: FontWeight.w800, height: 1.4, alpha: .95)
+          .copyWith(letterSpacing: -.2),
+      h1Padding: const EdgeInsets.only(top: 4, bottom: 8),
+      h2: base(size: 14.5, weight: FontWeight.w700, height: 1.4, alpha: .92),
+      h2Padding: const EdgeInsets.only(top: 2, bottom: 6),
+      h3: base(size: 13.5, weight: FontWeight.w700, height: 1.4, alpha: .9),
+      strong: base(weight: FontWeight.w700, alpha: .92),
+      em: base().copyWith(fontStyle: FontStyle.italic),
+      a: TextStyle(
+        fontSize: 13,
+        color: cs.primary,
+        height: 1.62,
+        decoration: TextDecoration.underline,
+      ),
+      listBullet: base(),
+      listBulletPadding: const EdgeInsets.only(right: 6),
+      blockSpacing: 6,
+      blockquote: base(alpha: .6),
+      blockquotePadding: const EdgeInsets.only(left: 10, top: 2, bottom: 2),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(color: cs.primary.withValues(alpha: .5), width: 3),
+        ),
+      ),
+      code: base(size: 12).copyWith(fontFamily: 'monospace'),
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: on.withValues(alpha: .12), width: 1),
+        ),
+      ),
     );
   }
 
@@ -708,7 +736,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _pageHeader(cs, Icons.balance_outlined, '这是一份法律性声明', '上下滑动并仔细阅读', inkShift: 5.3),
+            _pageHeader(cs, Icons.balance_outlined, '这是一份法律性声明', null, inkShift: 5.3),
             const SizedBox(height: 16),
             // 声明正文：占满本页剩余高度
             Expanded(
@@ -716,9 +744,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  border: Border.all(
-                    color: cs.outlineVariant.withValues(alpha: .5),
-                  ),
                   borderRadius: BorderRadius.circular(10),
                   color: cs.surfaceContainerHighest.withValues(alpha: .3),
                 ),
@@ -772,7 +797,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               cs,
               Icons.login_rounded,
               '选择登录入口',
-              '不同入口的登录方式略有差别，之后可在设置中修改。',
+              null,
               inkShift: 8.2,
             ),
             const SizedBox(height: 20),
@@ -811,12 +836,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             color: selected
                 ? cs.primary.withValues(alpha: .07)
                 : cs.surfaceContainerHighest.withValues(alpha: .25),
-            border: Border.all(
-              color: selected
-                  ? cs.primary.withValues(alpha: .7)
-                  : cs.outlineVariant.withValues(alpha: .45),
-              width: selected ? 1.4 : 1,
-            ),
+
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -921,9 +941,13 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.person_outline, '账户',
-                '登录入口：${_currentModeName()}。我们不会收集您的信息。',
-                inkShift: 10.4),
+            _pageHeader(
+              cs,
+              Icons.person_outline,
+              '账户',
+              null,
+              inkShift: 10.4,
+            ),
             const SizedBox(height: 24),
             TextField(
               controller: _usernameCtrl,
@@ -1006,13 +1030,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     );
   }
 
-  /// 当前登录入口的显示名
-  String _currentModeName() {
-    final hit = _loginModes.where((m) => m.id == _loginMode);
-    if (hit.isNotEmpty) return hit.first.name;
-    return _loginMode == 'cas' ? 'CAS 统一身份验证' : '教务系统';
-  }
-
   /// 验证码图片（点击刷新）；加载中显示占位
   Widget _buildCaptchaImage(ColorScheme cs) {
     return InkWell(
@@ -1024,7 +1041,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: .5)),
           color: Colors.white,
         ),
         child: _captchaLoading
@@ -1065,13 +1081,11 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.settings_outlined, '监控设置', '之后可在设置中修改。', inkShift: 5.9),
+            _pageHeader(cs, Icons.settings_outlined, '监控设置', null, inkShift: 5.9),
             const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
-                border: Border.all(
-                  color: cs.outlineVariant.withValues(alpha: .4),
-                ),
+                color: cs.surfaceContainerHighest.withValues(alpha: .35),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -1135,7 +1149,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                       ],
                     ),
                   ),
-                  const Divider(height: 1),
                   // ② 轮询间隔
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
@@ -1175,7 +1188,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                       ],
                     ),
                   ),
-                  const Divider(height: 1),
                   // ③ 监控项目
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
@@ -1202,7 +1214,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                     onChanged: (v) => setState(() => _autoMonitor = v),
                     dense: true,
                   ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
                   SwitchListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                     title: const Text('排名自动监控', style: TextStyle(fontSize: 14)),
@@ -1234,7 +1245,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.notifications_outlined, '通知设置', '为成绩与排名变动选择通知样式。', inkShift: 10.4),
+            _pageHeader(cs, Icons.notifications_outlined, '通知设置', null, inkShift: 10.4),
             const SizedBox(height: 16),
             _notifyCard(
               cs,
@@ -1276,11 +1287,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? cs.primary : cs.outlineVariant.withValues(alpha: .5),
-              width: selected ? 2 : 1,
-            ),
-            color: selected ? cs.primary.withValues(alpha: .08) : Colors.transparent,
+            color: selected
+                ? cs.primary.withValues(alpha: .1)
+                : cs.surfaceContainerHighest.withValues(alpha: .3),
           ),
           child: Row(
             children: [
@@ -1347,15 +1356,13 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.task_alt_outlined, '所有配置已完成', '请确认以下设置，点击下方按钮完成配置。', inkShift: 5.3),
+            _pageHeader(cs, Icons.task_alt_outlined, '所有配置已完成', null, inkShift: 5.3),
             const SizedBox(height: 16),
             // 设置摘要卡片（不显示密码，新增轮询间隔）
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                border: Border.all(
-                  color: cs.outlineVariant.withValues(alpha: .4),
-                ),
+                color: cs.surfaceContainerHighest.withValues(alpha: .35),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(

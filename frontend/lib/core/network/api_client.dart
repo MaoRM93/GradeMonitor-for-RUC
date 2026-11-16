@@ -224,6 +224,7 @@ class ApiClient {
   Future<Response> getDeveloperStatus() => dio.get(ApiPath.developerStatus);
   Future<Response> unlockDeveloper(String password) => dio.post(ApiPath.developerUnlock, data: {'password': password});
   Future<Response> developerConsole(Map<String, dynamic> data) => dio.post(ApiPath.developerConsole, data: data);
+  Future<Response> disableDeveloper() => dio.post(ApiPath.developerDisable);
   Future<Response> openCurriculum() => dio.post(ApiPath.curriculumOpen);
 
   // ---- Dev Tools ----

@@ -55,6 +55,7 @@ DEFAULT_SETTINGS = {
     "random_interval_enabled": True,
     "welcome_completed": False,
     "show_welcome_always": False,
+    "developer_options_enabled": False,
 }
 
 # 绝不写入 settings.json 的敏感字段

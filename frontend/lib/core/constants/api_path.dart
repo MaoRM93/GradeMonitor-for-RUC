@@ -33,6 +33,7 @@ class ApiPath {
   static const String developerStatus = '/api/developer/status';
   static const String developerUnlock = '/api/developer/unlock';
   static const String developerConsole = '/api/developer/console';
+  static const String developerDisable = '/api/developer/disable';
   static const String curriculumOpen = '/api/curriculum/open';
 
   // Dev Tools

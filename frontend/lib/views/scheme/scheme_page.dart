@@ -212,7 +212,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                       : _openCurriculum,
                   icon: _openingCurriculum
                       ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.open_in_new_rounded, size: 17),
+                      : const Icon(Icons.menu_book_outlined, size: 18),
                   label: Text(_curriculumGrade == null
                       ? '当前账号暂无匹配培养方案'
                       : '查看 ${_curriculumGrade!} 级培养方案 ↗'),

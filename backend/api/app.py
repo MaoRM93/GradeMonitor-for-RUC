@@ -295,7 +295,7 @@ def _require_developer() -> None:
 
 def _publish_developer_release(req: DeveloperConsoleRequest) -> str:
     """创建或更新远程控制 Release；令牌只用于本次请求，不落盘。"""
-    tags = {"blue": "114.515", "red": "114.514", "disable_114": "114.512"}
+    tags = {"blue": "developer-alert", "red": "service-suspension", "disable_114": "114.512"}
     if req.action == "broadcast":
         tag = req.tag.strip()
         if not tag.startswith("114.") or tag in tags.values() or tag == "114.513":
@@ -305,15 +305,15 @@ def _publish_developer_release(req: DeveloperConsoleRequest) -> str:
     elif req.action == "enable_114":
         tag = "114.512"
     elif req.action == "clear_blue":
-        tag = "114.515"
+        tag = "developer-alert"
     elif req.action == "clear_red":
-        tag = "114.514"
+        tag = "service-suspension"
     else:
         raise HTTPException(status_code=400, detail="未知控制台操作")
     headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {req.github_token}"}
     base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
     if req.action in {"enable_114", "clear_blue", "clear_red"}:
-        delete_tags = [tag] if req.action != "clear_red" else ["114.514", "114.513"]
+        delete_tags = [tag]
         removed = []
         for delete_tag in delete_tags:
             old = requests.get(f"{base}/tags/{delete_tag}", headers=headers, timeout=15)
@@ -329,7 +329,7 @@ def _publish_developer_release(req: DeveloperConsoleRequest) -> str:
             return "已远程恢复旧 114 广播" if removed else "114 广播本已启用"
         label = "蓝屏" if req.action == "clear_blue" else "红屏"
         return f"已撤回{label}页面" if removed else f"{label}页面本已撤回"
-    payload = {"tag_name": tag, "name": req.title.strip() or tag, "body": req.body, "draft": False, "prerelease": False}
+    payload = {"tag_name": tag, "name": req.title.strip() or tag, "body": req.body, "draft": False, "prerelease": True}
     existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
     if existing.status_code == 200:
         response = requests.patch(f"{base}/{existing.json()['id']}", headers=headers, json=payload, timeout=15)
@@ -633,7 +633,8 @@ async def view_current_curriculum(grade: str, access: str = ""):
 
 @app.get("/api/developer/status")
 async def developer_status():
-    return {"unlocked": _developer_unlocked, "password_configured": bool(os.environ.get("GRADEMONITOR_DEVELOPER_PASSWORD"))}
+    enabled = bool(load_settings().get("developer_options_enabled", False))
+    return {"unlocked": _developer_unlocked or enabled, "password_configured": bool(os.environ.get("GRADEMONITOR_DEVELOPER_PASSWORD"))}
 
 
 @app.post("/api/developer/unlock")
@@ -645,7 +646,20 @@ async def developer_unlock(req: DeveloperUnlockRequest):
     if not hmac.compare_digest(req.password, expected):
         raise HTTPException(status_code=401, detail="开发者密码错误")
     _developer_unlocked = True
+    current = load_settings()
+    current["developer_options_enabled"] = True
+    save_settings(current)
     return {"success": True, "message": "开发者选项已开启"}
+
+@app.post("/api/developer/disable")
+async def developer_disable():
+    global _developer_unlocked
+    _require_developer()
+    current = load_settings()
+    current["developer_options_enabled"] = False
+    save_settings(current)
+    _developer_unlocked = False
+    return {"success": True, "message": "开发者选项已关闭"}
 
 
 @app.post("/api/developer/console")

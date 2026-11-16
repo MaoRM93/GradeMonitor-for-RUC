@@ -95,10 +95,10 @@ class UpdateCheckResult {
 
 /// 提示的类别
 enum NoticeKind {
-  /// 停用页（红色）：114.514 / 114.513 存在时触发，确认后退出程序
+  /// 停用页（红色）：正式远程控制 Release 存在时触发，确认后退出程序
   killSwitch,
 
-  /// 开发者重要提醒页（蓝色）：114.515 存在时触发，确认后仅关闭页面
+  /// 开发者重要提醒页（蓝色）：正式远程控制 Release 存在时触发，确认后仅关闭页面
   developerNotice,
 
   /// 通知广播：114 号段里 513/514/515 之外的 tag（如 114.100），
@@ -170,13 +170,13 @@ class UpdateService {
       'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
 
   /// 停用开关（主）：GitHub Release 存在该 tag 时全屏禁用应用
-  static const String killSwitchVersion = '114.514';
+  static const String killSwitchVersion = 'service-suspension';
 
   /// 停用开关（备）：514 不存在时的次级停用 tag
-  static const String killSwitchVersionFallback = '114.513';
+  static const String killSwitchVersionFallback = 'service-suspension-fallback';
 
   /// 开发者重要提醒页对应的 Release tag
-  static const String developerNoticeVersion = '114.515';
+  static const String developerNoticeVersion = 'developer-alert';
 
   /// 通知广播号段：tag 的**首段**是 114（如 `114.100`）。
   ///

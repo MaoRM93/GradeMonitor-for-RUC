@@ -13,12 +13,20 @@ void main() {
     expect(UpdateService.isNoticeSeriesTag(''), isFalse);
   });
 
-  test('号段内 513/514/515 是专用页面，其余才是广播', () {
+  test('114 广播与开发者控制通道彼此独立', () {
     expect(UpdateService.isBroadcastTag('114.100'), isTrue);
     expect(UpdateService.isBroadcastTag('114.999'), isTrue);
-    expect(UpdateService.isBroadcastTag('114.513'), isFalse);
-    expect(UpdateService.isBroadcastTag('114.514'), isFalse);
-    expect(UpdateService.isBroadcastTag('114.515'), isFalse);
+    expect(UpdateService.isBroadcastTag('114.513'), isTrue);
+    expect(UpdateService.isBroadcastTag('114.514'), isTrue);
+    expect(UpdateService.isBroadcastTag('114.515'), isTrue);
+    expect(
+      UpdateService.isBroadcastTag(UpdateService.killSwitchVersion),
+      isFalse,
+    );
+    expect(
+      UpdateService.isBroadcastTag(UpdateService.developerNoticeVersion),
+      isFalse,
+    );
     expect(UpdateService.isBroadcastTag('108.1.0.114'), isFalse);
   });
 }

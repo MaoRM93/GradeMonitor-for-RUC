@@ -17,11 +17,11 @@ import '../../core/service/session_service.dart';
 import '../../widgets/toast_host.dart';
 
 enum NavDestination {
-  dashboard(icon: Icons.dashboard_outlined, label: '仪表板'),
-  grades(icon: Icons.school_outlined, label: '成绩单'),
-  scheme(icon: Icons.calculate_outlined, label: '方案计算'),
-  forwarders(icon: Icons.send_to_mobile_outlined, label: '通知转发'),
-  settings(icon: Icons.settings_outlined, label: '设置');
+  dashboard(icon: Icons.dashboard, label: '仪表板'),
+  grades(icon: Icons.school, label: '成绩单'),
+  scheme(icon: Icons.calculate, label: '方案计算'),
+  forwarders(icon: Icons.send_to_mobile, label: '通知转发'),
+  settings(icon: Icons.settings, label: '设置');
 
   final IconData icon;
   final String label;

@@ -142,26 +142,32 @@ class _NotificationForwardersPageState
     }
   }
 
-  InputDecoration _field(String label, String? hint, Color tint) =>
-      InputDecoration(
-        labelText: label,
-        hintText: hint,
-        filled: true,
-        fillColor: tint.withValues(alpha: .10),
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-      );
+  InputDecoration _field(String label, String? hint) => InputDecoration(
+    labelText: label,
+    hintText: hint,
+    filled: true,
+    fillColor: const Color(0xFFD4E3F6),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(999),
+      borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(999),
+      borderSide: BorderSide.none,
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(999),
+      borderSide: BorderSide.none,
+    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  );
 
   Widget _link(String text, String url) => InkWell(
     onTap: () => _openLink(url),
     child: Text(
       '$text ↗',
       style: TextStyle(
+        fontSize: 12,
         color: Theme.of(context).colorScheme.primary,
         decoration: TextDecoration.underline,
         decorationColor: Theme.of(context).colorScheme.primary,
@@ -188,10 +194,17 @@ class _NotificationForwardersPageState
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: cs.primaryContainer.withValues(
-          alpha: Theme.of(context).brightness == Brightness.dark ? .24 : .38,
-        ),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? cs.surface
+            : Colors.white,
         borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .07),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -234,9 +247,20 @@ class _NotificationForwardersPageState
             children: [
               FilledButton.icon(
                 onPressed: isSaving ? null : () => _saveChannel(id),
+                style: _saveLabels[id] == '已保存'
+                    ? FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF16A34A),
+                      )
+                    : _saveLabels[id] == '保存失败'
+                    ? FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFDC2626),
+                      )
+                    : null,
                 icon: Icon(
-                  _saveLabels[id] == '保存失败'
-                      ? Icons.refresh_rounded
+                  _saveLabels[id] == '已保存'
+                      ? Icons.check_rounded
+                      : _saveLabels[id] == '保存失败'
+                      ? Icons.close_rounded
                       : Icons.save_rounded,
                   size: 17,
                 ),
@@ -286,11 +310,7 @@ class _NotificationForwardersPageState
                     controller: _barkUrl,
                     obscureText: true,
                     onChanged: (_) => _markDirty('bark'),
-                    decoration: _field(
-                      '地址和 Key',
-                      'https://api.day.app/你的设备密钥',
-                      cs.primary,
-                    ),
+                    decoration: _field('地址和 Key', 'https://api.day.app/你的设备密钥'),
                   ),
                 ],
                 description: const Text(
@@ -312,7 +332,7 @@ class _NotificationForwardersPageState
                     controller: _meowNickname,
                     obscureText: true,
                     onChanged: (_) => _markDirty('meow'),
-                    decoration: _field('昵称', null, cs.primary),
+                    decoration: _field('昵称', null),
                   ),
                 ],
                 description: const Text(
@@ -330,14 +350,14 @@ class _NotificationForwardersPageState
                   TextField(
                     controller: _ntfyServer,
                     onChanged: (_) => _markDirty('ntfy'),
-                    decoration: _field('服务器', null, cs.primary),
+                    decoration: _field('服务器', null),
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _ntfyTopic,
                     obscureText: true,
                     onChanged: (_) => _markDirty('ntfy'),
-                    decoration: _field('Topic', '例如 grade_随机长字符串', cs.primary),
+                    decoration: _field('Topic', '例如 grade_随机长字符串'),
                   ),
                 ],
                 description: Wrap(

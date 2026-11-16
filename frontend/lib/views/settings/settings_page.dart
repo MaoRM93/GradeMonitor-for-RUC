@@ -87,7 +87,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     Future.microtask(_loadSettings);
   }
 
-  void _onDeveloperEnabled() { if (mounted) setState(() => _developerEnabled = developerOptionsEnabled.value); }
+  void _onDeveloperEnabled() {
+    if (mounted)
+      setState(() => _developerEnabled = developerOptionsEnabled.value);
+  }
 
   Future<void> _loadSettings() async {
     await ref.read(settingsProvider.notifier).fetchSettings();
@@ -1091,14 +1094,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       color: colorScheme.primary,
                     ),
                     const SizedBox(width: 16),
-                    // 去掉「检查更新」重复标题，只留版本号
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            _versionDisplay,
+                            '当前版本：$_versionDisplay',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w500,

@@ -643,7 +643,6 @@ class _DevToolsDialogState extends State<_DevToolsDialog> {
                           horizontal: 10,
                           vertical: 9,
                         ),
-                        border: OutlineInputBorder(),
                       ),
                     ),
                   ),

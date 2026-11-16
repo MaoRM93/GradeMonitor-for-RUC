@@ -154,6 +154,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     }
     return _parseScore(_coreCtrl.text);
   }
+
   double? get _academicValue => _parseScore(_academicCtrl.text);
   double? get _comprehensiveValue => _parseScore(_comprehensiveCtrl.text);
 
@@ -211,11 +212,17 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                       ? null
                       : _openCurriculum,
                   icon: _openingCurriculum
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.menu_book_outlined, size: 18),
-                  label: Text(_curriculumGrade == null
-                      ? '当前账号暂无匹配培养方案'
-                      : '查看 ${_curriculumGrade!} 级培养方案 ↗'),
+                  label: Text(
+                    _curriculumGrade == null
+                        ? '当前账号暂无匹配培养方案'
+                        : '查看 ${_curriculumGrade!} 级培养方案 ↗',
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -441,7 +448,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
           horizontal: 12,
           vertical: 12,
         ),
-        border: const OutlineInputBorder(),
       ),
       onChanged: (_) => setState(() {
         _coreCustom = true;
@@ -460,9 +466,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
         children: [
           Expanded(child: _buildCoreCard(cs)),
           const SizedBox(width: 10),
-          Expanded(
-            child: _dimBlock(_inputCard(cs, kind: _InputKind.academic)),
-          ),
+          Expanded(child: _dimBlock(_inputCard(cs, kind: _InputKind.academic))),
           const SizedBox(width: 10),
           Expanded(
             child: _dimBlock(_inputCard(cs, kind: _InputKind.comprehensive)),
@@ -518,7 +522,6 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                   horizontal: 12,
                   vertical: 12,
                 ),
-                border: const OutlineInputBorder(),
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -545,8 +548,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     if (_scheme == null) {
       formula = '请先选择计算方案（811 / 82）';
     } else if (core != null && academic != null && _scheme == '82') {
-      formula =
-          '${_formatGpa(core)} × 80% + ${_formatGpa(academic)} × 20%';
+      formula = '${_formatGpa(core)} × 80% + ${_formatGpa(academic)} × 20%';
     } else if (core != null && academic != null && comprehensive != null) {
       formula =
           '${_formatGpa(core)} × 80% + ${_formatGpa(academic)} × 10% + '
@@ -586,7 +588,8 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                       child: Checkbox(
                         value: _precise5,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        onChanged: (v) => setState(() => _precise5 = v ?? false),
+                        onChanged: (v) =>
+                            setState(() => _precise5 = v ?? false),
                       ),
                     ),
                     const SizedBox(width: 4),

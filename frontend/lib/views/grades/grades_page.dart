@@ -162,21 +162,18 @@ class _GradesPageState extends ConsumerState<GradesPage> {
               child: Row(
                 children: [
                   Expanded(
-                    // 搜索框与右侧「学期 / 范围」下拉框同高同圆角（4 / 圆角 4），
-                    // 样式直接覆盖主题里的大圆角填充框，保持一行对齐。
+                    // 搜索框使用全局输入框规范，与应用其余输入项保持一致。
                     child: SizedBox(
-                      height: 34,
+                      height: 48,
                       child: TextField(
                         controller: _searchController,
                         style: const TextStyle(fontSize: 13),
                         textAlignVertical: TextAlignVertical.center,
                         decoration: InputDecoration(
                           isDense: true,
-                          filled: true,
-                          fillColor: colorScheme.surface,
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
+                            horizontal: 14,
+                            vertical: 10,
                           ),
                           hintText: '搜索课程名称...',
                           hintStyle: const TextStyle(fontSize: 12),
@@ -205,21 +202,6 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                           suffixIconConstraints: const BoxConstraints(
                             minWidth: 30,
                             minHeight: 30,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(4),
-                            borderSide: BorderSide(color: borderColor),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(4),
-                            borderSide: BorderSide(color: borderColor),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(4),
-                            borderSide: BorderSide(
-                              color: colorScheme.primary,
-                              width: 1.2,
-                            ),
                           ),
                         ),
                         onChanged: (v) => setState(() => _searchQuery = v),
@@ -582,8 +564,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
           const gap = 8.0;
           const minCardWidth = 150.0;
           final available = constraints.maxWidth;
-          var perRow =
-              ((available + gap) / (minCardWidth + gap)).floor().clamp(1, 8);
+          var perRow = ((available + gap) / (minCardWidth + gap)).floor().clamp(
+            1,
+            8,
+          );
           if (perRow > stats.length) perRow = stats.length;
           if (perRow < 1) perRow = 1;
           final cardWidth = (available - gap * (perRow - 1)) / perRow;

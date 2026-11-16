@@ -142,25 +142,8 @@ class _NotificationForwardersPageState
     }
   }
 
-  InputDecoration _field(String label, String? hint) => InputDecoration(
-    labelText: label,
-    hintText: hint,
-    filled: true,
-    fillColor: const Color(0xFFD4E3F6),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(999),
-      borderSide: BorderSide.none,
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(999),
-      borderSide: BorderSide.none,
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(999),
-      borderSide: BorderSide.none,
-    ),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-  );
+  InputDecoration _field(String label, String? hint) =>
+      InputDecoration(labelText: label, hintText: hint);
 
   Widget _link(String text, String url) => InkWell(
     onTap: () => _openLink(url),
@@ -200,9 +183,9 @@ class _NotificationForwardersPageState
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: .07),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: .035),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),

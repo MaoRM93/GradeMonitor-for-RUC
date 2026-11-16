@@ -304,17 +304,31 @@ def _publish_developer_release(req: DeveloperConsoleRequest) -> str:
         tag = tags[req.action]
     elif req.action == "enable_114":
         tag = "114.512"
+    elif req.action == "clear_blue":
+        tag = "114.515"
+    elif req.action == "clear_red":
+        tag = "114.514"
     else:
         raise HTTPException(status_code=400, detail="未知控制台操作")
     headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {req.github_token}"}
     base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
-    if req.action == "enable_114":
-        old = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
-        if old.status_code == 404: return "114 广播本已启用"
-        if not old.ok: raise HTTPException(status_code=502, detail=f"GitHub 查询失败：{old.status_code}")
-        deleted = requests.delete(f"{base}/{old.json()['id']}", headers=headers, timeout=15)
-        if not deleted.ok: raise HTTPException(status_code=502, detail=f"GitHub 删除失败：{deleted.status_code}")
-        return "已远程恢复旧 114 广播"
+    if req.action in {"enable_114", "clear_blue", "clear_red"}:
+        delete_tags = [tag] if req.action != "clear_red" else ["114.514", "114.513"]
+        removed = []
+        for delete_tag in delete_tags:
+            old = requests.get(f"{base}/tags/{delete_tag}", headers=headers, timeout=15)
+            if old.status_code == 404:
+                continue
+            if not old.ok:
+                raise HTTPException(status_code=502, detail=f"GitHub 查询失败：{old.status_code}")
+            deleted = requests.delete(f"{base}/{old.json()['id']}", headers=headers, timeout=15)
+            if not deleted.ok:
+                raise HTTPException(status_code=502, detail=f"GitHub 删除失败：{deleted.status_code}")
+            removed.append(delete_tag)
+        if req.action == "enable_114":
+            return "已远程恢复旧 114 广播" if removed else "114 广播本已启用"
+        label = "蓝屏" if req.action == "clear_blue" else "红屏"
+        return f"已撤回{label}页面" if removed else f"{label}页面本已撤回"
     payload = {"tag_name": tag, "name": req.title.strip() or tag, "body": req.body, "draft": False, "prerelease": False}
     existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
     if existing.status_code == 200:

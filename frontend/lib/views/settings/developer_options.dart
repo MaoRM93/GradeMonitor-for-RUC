@@ -30,7 +30,7 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
       TextField(controller: _body, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: '界面显示内容（支持 Markdown）', border: OutlineInputBorder())), const SizedBox(height: 12),
       Wrap(spacing: 8, runSpacing: 8, children: [
         SizedBox(width: 120, child: TextField(controller: _tag, decoration: const InputDecoration(labelText: '广播标签', border: OutlineInputBorder()))),
-        _button('发布用户通知', 'broadcast'), _button('发布蓝屏页面', 'blue'), _button('发布红屏页面', 'red', danger: true), _button('远程禁用 114 广播', 'disable_114', danger: true), _button('恢复 114 广播', 'enable_114'),
+        _button('发布用户通知', 'broadcast'), _button('发布蓝屏页面', 'blue'), _button('撤回蓝屏页面', 'clear_blue'), _button('发布红屏页面', 'red', danger: true), _button('撤回红屏页面', 'clear_red'), _button('远程禁用 114 广播', 'disable_114', danger: true), _button('恢复 114 广播', 'enable_114'),
       ]),
       const SizedBox(height: 12), const Text('说明：远程禁用 114 只停止普通广播标签的唤起；蓝屏（114.515）和红屏（114.514/513）继续照常检测与展示。', style: TextStyle(fontSize: 12)),
     ])),

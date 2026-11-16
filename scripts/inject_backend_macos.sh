@@ -77,6 +77,23 @@ rm -rf "$RES/runtime/python"
 rsync -a --exclude '.DS_Store' "$PY_SRC/" "$RES/runtime/python/"
 
 PY="$RES/runtime/python"
+# Homebrew Python 的二进制默认链接到开发机绝对 Framework 路径。将其改成
+# 包内相对路径，并以启动器固定 PYTHONHOME，避免发布包依赖开发机环境。
+PY_BIN="$PY/bin/python3.11"
+if [[ -x "$PY_BIN" ]]; then
+  OLD_PY_FRAMEWORK="$(otool -L "$PY_BIN" | awk '/Python\.framework\/Versions\/3\.11\/Python/{print $1; exit}')"
+  if [[ -n "$OLD_PY_FRAMEWORK" ]]; then
+    # python3.11 位于 Framework 的 Versions/3.11/bin 下（bin 是符号链接）。
+    # dyld 会按真实目录计算 @loader_path，因此这里应回到同级的 Python，
+    # 不能写成从 runtime/python/bin 开始的相对路径。
+    install_name_tool -change "$OLD_PY_FRAMEWORK" \
+      '@loader_path/../Python' "$PY_BIN" || true
+    # install_name_tool 会使原签名失效；macOS 会在运行前杀掉这种二进制，
+    # 所以冒烟测试之前先用 adhoc 签名恢复其可执行性。
+    codesign --force --sign - --timestamp=none "$PY_BIN" 2>/dev/null || true
+  fi
+  install -m 755 "$SCRIPT_DIR/runtime_python_launcher.sh" "$PY/bin/python3"
+fi
 # 裁剪：pip/setuptools 等打包期工具、测试与 GUI 相关模块在运行时一律用不到。
 # 保留 ensurepip 之外的一切标准库，避免误删 uvicorn 依赖。
 rm -rf \

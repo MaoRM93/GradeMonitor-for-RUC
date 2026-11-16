@@ -5,12 +5,13 @@ GradeMonitor Backend API - FastAPI 应用入口
 启动方式: uvicorn backend.api.app:app --host 127.0.0.1 --port 18923
 """
 import asyncio
+import base64
+import hashlib
 import shutil
 import subprocess
 import sys
 import time
 import os
-import hmac
 import requests
 from pathlib import Path
 
@@ -44,6 +45,17 @@ from backend.service.monitor_service import monitor
 from backend.service.notification_service import send_test_notification, send_notification_preview
 from backend.service.forwarder_service import public_config, save_config, test_forwarder
 from backend.service.curriculum_service import open_curriculum, view_curriculum
+from backend.service import developer_auth
+from backend.storage.flags import DEFAULT_FLAGS, load_flags, set_flag
+from backend.storage.feature_gates import (
+    DEFAULT_GATES,
+    gate_enabled,
+    load_gates,
+    registry_payload,
+    save_gates,
+    set_gate,
+)
+from backend.storage import remote_gates
 from backend.storage.settings import (
     load_settings,
     public_settings,
@@ -70,6 +82,10 @@ app = FastAPI(
 
 # 启动时确定本次运行的访问令牌（来自前端注入的环境变量，或本地 token 文件）
 _API_TOKEN = init_token()
+
+# 远程开关拉取循环的 task 句柄。asyncio 只保留 task 的弱引用，不挂在模块级
+# 会被 GC 提前回收；同时 shutdown 时需要它来 cancel。
+_gate_task: Optional[asyncio.Task] = None
 
 # CORS 收紧：只允许本机同源访问。原先的 allow_origins=["*"] 会让任意网页
 # 读取本机成绩/设置；现在仅放行 127.0.0.1 / localhost 的常见端口形态。
@@ -195,11 +211,13 @@ logger.info("=" * 50)
 
 @app.on_event("startup")
 async def _startup():
-    """应用启动：自动启动监控。
+    """应用启动：自动启动监控，并起一个远程开关拉取循环。
 
     必须在此处（而非模块导入时）启动，因为 asyncio.create_task 需要一个
     正在运行的 event loop；模块导入时 loop 尚未运行，会导致监控静默启动失败。
     """
+    global _gate_task
+
     _settings = load_settings()
     if _settings.get("auto_monitor_enabled") or _settings.get("rank_monitor_enabled"):
         try:
@@ -208,9 +226,33 @@ async def _startup():
         except Exception as e:
             logger.warning(f"自动启动监控失败: {e}")
 
+    _gate_task = asyncio.create_task(_gate_refresh_loop())
+    logger.info("远程功能开关拉取循环已启动（每小时一次）")
+
+
+async def _gate_refresh_loop() -> None:
+    """每小时拉一次远程功能开关（`control-v*` Release）。
+
+    节奏刻意与前端 `update_service.dart` 的 1 小时更新检查对齐：GitHub 匿名
+    API 限流是 60 次/小时/IP，多开一个更密的定时器只会把额度耗在同一个接口上。
+    任何异常都吞掉——定时器不该因为一次断网就退出。
+    """
+    while True:
+        try:
+            result = await asyncio.to_thread(remote_gates.refresh)
+            if result["applied"]:
+                logger.info(f"远程功能开关已应用：rev={result['rev']}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"远程功能开关拉取失败: {e}")
+        await asyncio.sleep(3600)
+
 
 @app.on_event("shutdown")
 async def _shutdown():
+    if _gate_task is not None:
+        _gate_task.cancel()
     await monitor.stop()
 
 
@@ -272,71 +314,116 @@ class ForwarderConfigUpdate(BaseModel):
     ntfy: Optional[dict] = None
 
 
-class DeveloperUnlockRequest(BaseModel):
-    password: str
+class DeveloperLoginRequest(BaseModel):
+    """开发者登录请求：对应 UI 上仅有的三个标签。
+
+    - `mng_id`  → `LoginMngID`（管理者编号，命中内置注册表）
+    - `account` → `Account`（GitHub 账号名）
+    - `token`   → `Password`（GitHub 令牌；GitHub 没有账号密码换令牌的 API）
+    """
+
+    mng_id: str = ""
+    account: str = ""
+    token: str = ""
 
 
-class DeveloperConsoleRequest(BaseModel):
-    action: str  # broadcast / blue / red / disable_114 / enable_114
-    github_token: str
+class FlagUpdateRequest(BaseModel):
+    name: str
+    value: bool
+
+
+class GateUpdateRequest(BaseModel):
+    # 功能组开关（Flag-1xxx）；单条与批量共用同一模型，批量走 gates 字段。
+    id: str = ""
+    value: bool = True
+    gates: Optional[dict[str, bool]] = None
+
+
+class GatePublishRequest(BaseModel):
+    """签发一条远程开关指令（写进 `control-v<rev>` Release）。"""
+
+    # 留空则自动取「已应用 rev + 1」
+    rev: int = 0
+    # 要下发的覆盖项；空字典表示"撤销全部远程覆盖"
+    gates: dict[str, bool] = {}
+    # 留空则自动生成当前时间
+    issued_at: str = ""
+    # 发布用的 PAT；留空复用登录时存入系统凭据的令牌
+    github_token: str = ""
+    # 是否真的推到 GitHub；false 只返回签名块供人工核对
+    push: bool = True
+
+
+class NoticePublishRequest(BaseModel):
+    channel: str
     title: str = ""
     body: str = ""
-    tag: str = ""
 
 
-_developer_unlocked = False
 _DEV_REPO = "MaoRM93/GradeMonitor-for-RUC"
 
 
+def _build_notice_block(kind: str, tag: str, body: str) -> str:
+    """用新版发布密钥签署通知正文。"""
+    from backend.storage.signing_keys import release_private_key
+    digest = hashlib.sha256(body.strip().encode("utf-8")).hexdigest()
+    payload = f"gm-notice-v1\nkind={kind}\ntag={tag}\nsha256={digest}\n"
+    sig = base64.b64encode(release_private_key().sign(payload.encode("utf-8"))).decode("ascii")
+    return f"```text\n{payload}sig={sig}\n```"
+
+# 这些编号承载入口、完整性或关键数据能力。按产品约定仅展示为灰色状态，
+# 不允许通过开发者面板、本地 API 或远程控制指令修改。
+_LOCKED_GATE_IDS = frozenset({
+    "Flag-1051", "Flag-1042", "Flag-1070", "Flag-1071", "Flag-1085",
+    "Flag-1084", "Flag-1063", "Flag-1066", "Flag-1060", "Flag-1074",
+    "Flag-1001",
+})
+
+
+def _reject_locked_gates(gates: list[str]) -> None:
+    locked = sorted(set(gates) & _LOCKED_GATE_IDS)
+    if locked:
+        raise HTTPException(status_code=400, detail=f"受保护 Flag 不允许修改：{', '.join(locked)}")
+
+
 def _require_developer() -> None:
-    if not _developer_unlocked:
-        raise HTTPException(status_code=403, detail="开发者选项尚未解锁")
+    """开发者操作鉴权：本机必须存有一个通过 GitHub 校验的开发者身份。
+
+    历史沿革（值得记下来，因为踩过两次坑）：
+
+      1. 最初只看进程内存里的 `_developer_unlocked`。但 `/api/developer/status`
+         返回的是「内存 or settings.json 的 developer_options_enabled」，
+         于是重启后设置页照旧显示面板、点任何按钮却全 403。
+      2. 于是改成「内存 or 持久化标记」都算通过。这修好了可见性，但把门禁
+         建立在 settings.json 的明文布尔值上——那是本地文件，谁都能改成 true，
+         等于没有门禁。同时 `GRADEMONITOR_DEVELOPER_PASSWORD` 从来没有注入点
+         （前端拉起后端时只注入 APP_PATH 与 API_TOKEN），发行版解锁恒 503。
+      3. 现在（本次改造）：唯一判据是 `developer_auth.is_authenticated()`，
+         即系统钥匙串 / DPAPI 里存着一个**用 GitHub API 验证过归属**的令牌，
+         且其 login 命中内置管理者注册表。settings.json 不再参与鉴权。
+
+    这样即使源码公开，别人改 `developer_options_enabled` 也进不来——他缺的是
+    那个只属于作者的 GitHub 令牌。
+    """
+    if developer_auth.is_authenticated():
+        return
+    raise HTTPException(status_code=403, detail="开发者选项尚未解锁")
 
 
-def _publish_developer_release(req: DeveloperConsoleRequest) -> str:
-    """创建或更新远程控制 Release；令牌只用于本次请求，不落盘。"""
-    tags = {"blue": "developer-alert", "red": "service-suspension", "disable_114": "114.512"}
-    if req.action == "broadcast":
-        tag = req.tag.strip()
-        if not tag.startswith("114.") or tag in tags.values() or tag == "114.513":
-            raise HTTPException(status_code=400, detail="广播标签必须为未保留的 114.x")
-    elif req.action in tags:
-        tag = tags[req.action]
-    elif req.action == "enable_114":
-        tag = "114.512"
-    elif req.action == "clear_blue":
-        tag = "developer-alert"
-    elif req.action == "clear_red":
-        tag = "service-suspension"
-    else:
-        raise HTTPException(status_code=400, detail="未知控制台操作")
-    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {req.github_token}"}
-    base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
-    if req.action in {"enable_114", "clear_blue", "clear_red"}:
-        delete_tags = [tag]
-        removed = []
-        for delete_tag in delete_tags:
-            old = requests.get(f"{base}/tags/{delete_tag}", headers=headers, timeout=15)
-            if old.status_code == 404:
-                continue
-            if not old.ok:
-                raise HTTPException(status_code=502, detail=f"GitHub 查询失败：{old.status_code}")
-            deleted = requests.delete(f"{base}/{old.json()['id']}", headers=headers, timeout=15)
-            if not deleted.ok:
-                raise HTTPException(status_code=502, detail=f"GitHub 删除失败：{deleted.status_code}")
-            removed.append(delete_tag)
-        if req.action == "enable_114":
-            return "已远程恢复旧 114 广播" if removed else "114 广播本已启用"
-        label = "蓝屏" if req.action == "clear_blue" else "红屏"
-        return f"已撤回{label}页面" if removed else f"{label}页面本已撤回"
-    payload = {"tag_name": tag, "name": req.title.strip() or tag, "body": req.body, "draft": False, "prerelease": True}
-    existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
-    if existing.status_code == 200:
-        response = requests.patch(f"{base}/{existing.json()['id']}", headers=headers, json=payload, timeout=15)
-    else:
-        response = requests.post(base, headers=headers, json=payload, timeout=15)
-    if not response.ok: raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{response.status_code}")
-    return f"已发布远程控制：{tag}"
+def _gate_closed(gid: str) -> bool:
+    """功能组开关是否被远程关闭（Flag-1xxx）。"""
+    return not gate_enabled(gid)
+
+
+def _require_gate(gid: str, feature: str) -> None:
+    """功能组闸门：该功能已被远程下线时拒绝服务。
+
+    静默语义：前端本就不该渲染入口，这里只是兜底——即便有人绕过 UI 直接
+    调接口，也不会拿到数据。文案刻意简短，不暴露"被远程禁用"这件事。
+    """
+    if _gate_closed(gid):
+        logger.info(f"功能组 {gid}（{feature}）已关闭，拒绝请求")
+        raise HTTPException(status_code=403, detail=f"{feature}当前不可用")
 
 
 # ---------- API 端点 ----------
@@ -387,6 +474,7 @@ async def login_captcha(req: CaptchaRequest):
     CAS 统一认证强制需要验证码；教务系统直连一般不需要（风控时才要）。
     返回 base64 内联图片，前端直接显示，无需再发一次请求。
     """
+    _require_gate("Flag-1085", "验证码")
     import base64 as b64
     import uuid
 
@@ -428,38 +516,54 @@ async def login_modes():
     """返回可用的登录入口（前端欢迎页据此渲染选项）
 
     顺序即推荐优先级：教务系统直连（默认）→ CAS → 传统 v.ruc。
+    被功能组关掉的入口不会出现在列表里（静默下线，前端无需改动）。
     """
-    return {
-        "default": DEFAULT_MODE,
-        "modes": [
-            {
-                "id": "jw",
-                "name": "教务系统",
-                "description": "无需验证码，登录最快，推荐使用",
-                "needs_captcha": False,
-                "recommended": True,
-            },
-            {
-                "id": "cas",
-                "name": "CAS 统一身份验证",
-                "description": "学校统一认证平台，需要输入验证码；登录后可 7 天免登录",
-                "needs_captcha": True,
-                "recommended": False,
-            },
-            {
-                "id": "vruc",
-                "name": "传统登录",
-                "description": "旧版登录方式，官方即将停止支持",
-                "needs_captcha": False,
-                "recommended": False,
-            },
-        ],
+    from backend.auth.login import MODE_CAS, MODE_JW, MODE_VRUC
+
+    mode_gates = {
+        MODE_JW: "Flag-1080",
+        MODE_CAS: "Flag-1081",
+        MODE_VRUC: "Flag-1082",
     }
+    disabled_modes = {m for m, gid in mode_gates.items() if _gate_closed(gid)}
+
+    all_modes = [
+        {
+            "id": "jw",
+            "name": "教务系统",
+            "description": "无需验证码，登录最快，推荐使用",
+            "needs_captcha": False,
+            "recommended": True,
+        },
+        {
+            "id": "cas",
+            "name": "CAS 统一身份验证",
+            "description": "学校统一认证平台，需要输入验证码；登录后可 7 天免登录",
+            "needs_captcha": True,
+            "recommended": False,
+        },
+        {
+            "id": "vruc",
+            "name": "传统登录",
+            "description": "旧版登录方式，官方即将停止支持",
+            "needs_captcha": False,
+            "recommended": False,
+        },
+    ]
+    modes = [m for m in all_modes if m["id"] not in disabled_modes]
+
+    # 默认入口也下线时，退到列表里的第一个；全都下线则保持原默认（前端会拿到空列表）
+    default_mode = DEFAULT_MODE
+    if default_mode in disabled_modes:
+        default_mode = modes[0]["id"] if modes else DEFAULT_MODE
+
+    return {"default": default_mode, "modes": modes}
 
 
 @app.get("/api/session/status")
 async def session_status():
     """检查本地保存的登录会话是否还能直接使用（免登录）"""
+    _require_gate("Flag-1083", "会话恢复")
     import requests as req_lib
 
     session = req_lib.Session()
@@ -478,6 +582,11 @@ async def session_status():
 @app.post("/api/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
     mode = normalize_mode(req.mode)
+    # 该登录入口被功能组下线时，直接按"方式不可用"拒绝（不暴露远程开关）
+    _require_gate(
+        {"jw": "Flag-1080", "cas": "Flag-1081", "vruc": "Flag-1082"}.get(mode, "Flag-1080"),
+        "该登录方式",
+    )
 
     # 需要验证码的入口：优先复用前端取码时的那个会话（验证码与会话绑定）
     session = None
@@ -527,6 +636,7 @@ async def login(req: LoginRequest):
 @app.get("/api/grades")
 async def get_grades():
     """获取成绩列表（从内存缓存，不从文件/API读取）"""
+    _require_gate("Flag-1070", "成绩数据")
     global _grades_cache
     if not _grades_cache:
         return {"data": [], "message": "暂无成绩数据"}
@@ -543,6 +653,7 @@ async def get_latest_change():
     数据由 notification_service._show 在真实通知时自动写入 recent_change.json，
     测试/预览/启动提示不记录。
     """
+    _require_gate("Flag-1072", "最新动态")
     import json
 
     try:
@@ -560,6 +671,7 @@ async def get_latest_change():
 @app.get("/api/rank")
 async def get_rank():
     """获取排名信息（从内存缓存）"""
+    _require_gate("Flag-1071", "排名数据")
     global _rank_cache
     if not _rank_cache:
         return {"data": None, "message": "暂无排名数据"}
@@ -581,6 +693,13 @@ async def get_settings():
 async def update_settings(update: SettingsUpdate):
     current = load_settings()
     changed = {k: v for k, v in update.dict(exclude_none=True).items() if v is not None}
+
+    # 轮询间隔绝不能让开发者工具或直接 API 请求写入 0/负数；否则在关闭
+    # 随机间隔时会触发 asyncio.sleep(负数) 的紧循环。
+    if "interval_seconds" in changed:
+        interval = int(changed["interval_seconds"])
+        if not 60 <= interval <= 86400:
+            raise HTTPException(status_code=400, detail="轮询间隔必须在 60 至 86400 秒之间")
 
     # 密码单独处理：只有前端显式传了非空 password 才更新；传空串表示清除。
     # 未传（None/exclude_none 后不存在）则保持安全存储中的既有密码不变。
@@ -609,68 +728,266 @@ async def update_settings(update: SettingsUpdate):
 
 @app.get("/api/notification/forwarders")
 async def get_forwarders():
+    _require_gate("Flag-1030", "通知转发")
     return public_config()
 
 
 @app.post("/api/notification/forwarders")
 async def update_forwarders(update: ForwarderConfigUpdate):
+    _require_gate("Flag-1030", "通知转发")
     return {"success": True, "forwarders": save_config(update.dict(exclude_none=True))}
 
 
 @app.post("/api/notification/forwarders/{channel}/test")
 async def test_forwarder_channel(channel: str):
+    _require_gate("Flag-1033", "通道测试")
     return test_forwarder(channel)
 
+class CurriculumOpenRequest(BaseModel):
+    # 可选：显式指定年级（开发者开关 1.1 解锁全部年级时前端会传）。
+    # 不传 → None → 沿用原来的账号匹配逻辑，老前端逐字节兼容。
+    grade: Optional[str] = None
+
+
 @app.post("/api/curriculum/open")
-async def open_current_curriculum():
-    grade = open_curriculum()
+async def open_current_curriculum(req: Optional[CurriculumOpenRequest] = None):
+    _require_gate("Flag-1075", "培养方案查看器")
+    grade = open_curriculum(req.grade if req else None)
     return {"success": True, "grade": grade, "message": f"已在浏览器中打开 {grade} 级培养方案"}
 
 @app.get("/api/curriculum/view/{grade}")
 async def view_current_curriculum(grade: str, access: str = ""):
+    _require_gate("Flag-1075", "培养方案查看器")
     return view_curriculum(grade, access)
 
 
 @app.get("/api/developer/status")
 async def developer_status():
-    enabled = bool(load_settings().get("developer_options_enabled", False))
-    return {"unlocked": _developer_unlocked or enabled, "password_configured": bool(os.environ.get("GRADEMONITOR_DEVELOPER_PASSWORD"))}
+    """开发者登录状态（不含令牌本身）。
+
+    `unlocked` 的唯一来源是凭据存储里那个通过 GitHub 校验过的身份。
+    不再有任何 settings.json 布尔值参与判定——那是本地明文文件，
+    谁都能改成 true，把它当门禁等于没有门禁。
+    """
+    return developer_auth.session_payload()
 
 
-@app.post("/api/developer/unlock")
-async def developer_unlock(req: DeveloperUnlockRequest):
-    global _developer_unlocked
-    expected = os.environ.get("GRADEMONITOR_DEVELOPER_PASSWORD", "")
-    if not expected:
-        raise HTTPException(status_code=503, detail="未配置 GRADEMONITOR_DEVELOPER_PASSWORD")
-    if not hmac.compare_digest(req.password, expected):
-        raise HTTPException(status_code=401, detail="开发者密码错误")
-    _developer_unlocked = True
-    current = load_settings()
-    current["developer_options_enabled"] = True
-    save_settings(current)
-    return {"success": True, "message": "开发者选项已开启"}
+@app.post("/api/developer/login")
+async def developer_login(req: DeveloperLoginRequest):
+    """用 GitHub 身份登录开发者模式。
 
-@app.post("/api/developer/disable")
-async def developer_disable():
-    global _developer_unlocked
+    三个字段对应 UI 上仅有的三个标签：LoginMngID / Account / Password。
+    校验失败统一 401 + 同一句文案，不做账号探测 oracle。
+    """
+    try:
+        result = developer_auth.verify_and_store(req.mng_id, req.account, req.token)
+    except developer_auth.DeveloperAuthError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    return result
+
+
+@app.post("/api/developer/logout")
+async def developer_logout():
+    """退出开发者模式：清除系统凭据存储里的令牌与身份。"""
     _require_developer()
-    current = load_settings()
-    current["developer_options_enabled"] = False
-    save_settings(current)
-    _developer_unlocked = False
-    return {"success": True, "message": "开发者选项已关闭"}
+    developer_auth.logout()
+    return {"success": True, "message": "已退出开发者模式"}
 
 
-@app.post("/api/developer/console")
-async def developer_console(req: DeveloperConsoleRequest):
+@app.get("/api/developer/flags")
+async def developer_get_flags():
+    """读取全部开发者开关。
+
+    刻意**不**调用 `_require_developer()`：方案计算页等业务页面要读开关来
+    决定渲染哪些入口，让它们先解锁开发者口令是没道理的。该端点仍在本地
+    API 令牌中间件保护范围内（未列入 security._PUBLIC_PATHS）。
+    """
+    return {"flags": load_flags()}
+
+
+@app.post("/api/developer/flags")
+async def developer_set_flag(req: FlagUpdateRequest):
+    """写入单个开发者开关；未知开关名一律 400，避免脏键污染文件。"""
     _require_developer()
-    if not req.github_token.strip(): raise HTTPException(status_code=400, detail="请输入 GitHub Fine-grained PAT")
-    return {"success": True, "message": _publish_developer_release(req)}
+    if req.name not in DEFAULT_FLAGS:
+        raise HTTPException(status_code=400, detail="未知的开关名")
+    return {"success": True, "flags": set_flag(req.name, req.value)}
+
+
+# ---------- 功能组开关（Flag-1xxx） ----------
+#
+# 与上面的 /api/developer/flags 是两套东西：
+#   - flags 是开发者面板上的调谐按钮（1.x / 2.x），语义偏调试；
+#   - gates 是产品功能组的下线闸门（Flag-1xxx），每一个都对应真实业务代码。
+# 读取接口同样不要求开发者解锁（业务页面要按开关决定渲染），写入要求解锁。
+
+
+@app.get("/api/features")
+async def list_features():
+    """功能组注册表 + 当前开关状态。
+
+    不调用 `_require_developer()`：业务页面（仪表板/成绩单/方案计算…）要在
+    渲染前读开关决定显示哪些块，让它们先解锁开发者口令是没道理的。
+    该端点仍在本地 API 令牌中间件保护范围内。
+    """
+    return {"features": registry_payload()}
+
+
+@app.post("/api/developer/features")
+async def developer_set_feature(req: GateUpdateRequest):
+    """写入功能组开关。
+
+    两种用法：
+      - 单条：`{"id": "Flag-1001", "value": false}`
+      - 批量：`{"gates": {"Flag-1001": false, "Flag-1010": true}}`
+    未知编号一律 400（与 flags 一致），避免脏键污染文件。
+    """
+    _require_developer()
+
+    if req.gates is not None:
+        unknown = [gid for gid in req.gates if gid not in DEFAULT_GATES]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"未知的功能组编号：{', '.join(sorted(unknown))}",
+            )
+        _reject_locked_gates(list(req.gates))
+        current = load_gates()
+        for gid, value in req.gates.items():
+            current[gid] = bool(value)
+        return {"success": True, "gates": save_gates(current)}
+
+    if req.id not in DEFAULT_GATES:
+        raise HTTPException(status_code=400, detail="未知的功能组编号")
+    _reject_locked_gates([req.id])
+    return {"success": True, "gates": set_gate(req.id, req.value)}
+
+
+@app.post("/api/developer/gates/publish")
+async def developer_publish_gates(req: GatePublishRequest):
+    """签发（并可选推送）一条远程功能开关指令。
+
+    指令写进独立的 `control-v<rev>` Release 频道，正文是 Ed25519 签名块。
+    客户端拉取后验签 + 校验 rev 单调，通过才应用。控制私钥仅在开发机
+    macOS 钥匙串中，所以即使仓库写权限外泄，也无法签出有效指令。
+
+    `push=false` 时只返回签名块供 UI 预览，不占用版本号、不改动本机状态。
+    """
+    _require_developer()
+
+    unknown = [gid for gid in req.gates if gid not in DEFAULT_GATES]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知的功能组编号：{', '.join(sorted(unknown))}",
+        )
+    _reject_locked_gates(list(req.gates))
+
+    current = remote_gates.load_remote()
+    rev = int(req.rev) if req.rev > 0 else current["rev"] + 1
+    if rev <= current["rev"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"rev 必须大于已应用的 {current['rev']}",
+        )
+
+    # UI 只提交本次改动；对外发布的签名包仍是完整快照，使从未拉取过
+    # 配置的客户端只要拿到最新版即可恢复全部远程覆盖。空字典是显式撤回。
+    published_gates = {} if not req.gates else dict(current["gates"])
+    published_gates.update(req.gates)
+
+    issued_at = req.issued_at.strip() or time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+    )
+    try:
+        block = remote_gates.build_block(rev, published_gates, issued_at)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"签发远程开关失败: {e}")
+        raise HTTPException(status_code=500, detail=f"签发失败：{e}")
+
+    if not req.push:
+        return {"success": True, "rev": rev, "block": block, "pushed": False}
+
+    token = (req.github_token or "").strip() or developer_auth.developer_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="请输入 GitHub Fine-grained PAT")
+
+    tag = f"{remote_gates.TAG_PREFIX}{rev}"
+    payload = {
+        "tag_name": tag,
+        "name": f"功能开关 rev {rev}",
+        "body": block,
+        "draft": False,
+        "prerelease": True,
+    }
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+    }
+    base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
+    existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
+    if existing.status_code == 200:
+        response = requests.patch(
+            f"{base}/{existing.json()['id']}", headers=headers, json=payload, timeout=15
+        )
+    else:
+        response = requests.post(base, headers=headers, json=payload, timeout=15)
+    if not response.ok:
+        raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{response.status_code}")
+
+    # 发布成功后才落地完整快照；发布失败时绝不改变本机功能状态。
+    remote_gates.save_remote(rev, published_gates)
+    return {
+        "success": True,
+        "rev": rev,
+        "tag": tag,
+        "block": block,
+        "pushed": True,
+        "message": f"已下发功能开关 rev {rev}",
+    }
+
+
+@app.post("/api/developer/notices/publish")
+async def developer_publish_notice(req: NoticePublishRequest):
+    """通过开发者 UI 签名并发布广播、蓝屏或红屏通知。"""
+    _require_developer()
+    channel, body, title = req.channel.strip(), req.body.strip(), req.title.strip()
+    mapping = {
+        "Default_Notice": ("broadcast", f"114.{int(time.time() * 1000)}"),
+        "Important (BL)": ("blue", "developer-alert"),
+        "Disable (RE)": ("red", "service-suspension"),
+    }
+    if channel not in mapping:
+        raise HTTPException(status_code=400, detail="未知通知渠道")
+    if not body:
+        raise HTTPException(status_code=400, detail="正文不能为空")
+    if channel != "Default_Notice":
+        title = ""
+    elif not title:
+        raise HTTPException(status_code=400, detail="默认广播需要填写标题")
+    kind, tag = mapping[channel]
+    full_body = f"{body}\n\n{_build_notice_block(kind, tag, body)}"
+    token = developer_auth.developer_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="开发者令牌不可用，请重新登录")
+    base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
+    payload = {"tag_name": tag, "name": title or tag, "body": full_body, "draft": False, "prerelease": True}
+    try:
+        existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
+        response = requests.patch(f"{base}/{existing.json()['id']}", headers=headers, json=payload, timeout=15) if existing.status_code == 200 else requests.post(base, headers=headers, json=payload, timeout=15)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{e}")
+    if not response.ok:
+        raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{response.status_code}")
+    return {"success": True, "tag": tag, "message": "通知已发送"}
 
 
 @app.get("/api/monitor/status")
 async def get_monitor_status():
+    _require_gate("Flag-1001", "监控")
     settings = load_settings()
     last_q = monitor.last_query_at
     return {
@@ -687,6 +1004,7 @@ async def get_monitor_status():
 
 @app.post("/api/monitor/start")
 async def start_monitor():
+    _require_gate("Flag-1001", "监控")
     try:
         await monitor.start()
         return {"success": True, "message": "监控已启动"}
@@ -697,6 +1015,7 @@ async def start_monitor():
 
 @app.post("/api/monitor/stop")
 async def stop_monitor():
+    _require_gate("Flag-1001", "监控")
     try:
         await monitor.stop()
         return {"success": True, "message": "监控已停止"}
@@ -707,6 +1026,7 @@ async def stop_monitor():
 
 @app.post("/api/monitor/restart")
 async def restart_monitor():
+    _require_gate("Flag-1001", "监控")
     try:
         await monitor.restart()
         return {"success": True, "message": "监控已重启"}
@@ -754,6 +1074,7 @@ async def logout():
 
 @app.post("/api/notification/test")
 async def test_notification():
+    _require_gate("Flag-1053", "通知")
     try:
         send_test_notification()
         logger.info("测试通知已发送")
@@ -765,6 +1086,7 @@ async def test_notification():
 
 @app.get("/api/notification/preview")
 async def preview_notification(mode: str = "详细"):
+    _require_gate("Flag-1053", "通知")
     is_simple = mode == "简洁"
     preview = send_notification_preview(is_simple)
     return {"preview": preview}
@@ -797,6 +1119,7 @@ async def complete_welcome():
 @app.post("/api/dev/query-once")
 async def query_once():
     """立即查询一次成绩和排名，与本地JSON对比，有变化则弹通知"""
+    _require_gate("Flag-1002", "立即查询")
     from backend.service.notification_service import (
         send_grades_notification,
         send_rank_notification,

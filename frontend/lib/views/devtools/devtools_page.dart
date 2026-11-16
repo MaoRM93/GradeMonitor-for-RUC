@@ -103,7 +103,9 @@ class _DevToolsPageState extends ConsumerState<DevToolsPage> {
                           onTap: _loading
                               ? null
                               : () => _run(
-                                  '测试通知', () => api.sendTestNotification()),
+                                  '测试通知',
+                                  () => api.sendTestNotification(),
+                                ),
                         ),
                         _DevButton(
                           icon: Icons.folder_open_rounded,
@@ -112,18 +114,17 @@ class _DevToolsPageState extends ConsumerState<DevToolsPage> {
                           color: AppTheme.primarySky,
                           onTap: _loading
                               ? null
-                              : () => _run(
-                                  '打开目录', () => api.openLogDir()),
+                              : () => _run('打开目录', () => api.openLogDir()),
                         ),
                         _DevButton(
                           icon: Icons.cleaning_services_rounded,
                           label: '清理数据缓存',
-                          description: '清理 local_grades.json 与 local_ranks.json',
+                          description:
+                              '清理 local_grades.json 与 local_ranks.json',
                           color: Colors.orange,
                           onTap: _loading
                               ? null
-                              : () => _run(
-                                  '清理缓存', () => api.clearCache()),
+                              : () => _run('清理缓存', () => api.clearCache()),
                         ),
                         _DevButton(
                           icon: Icons.dangerous_rounded,
@@ -141,15 +142,16 @@ class _DevToolsPageState extends ConsumerState<DevToolsPage> {
                                     ),
                                     actions: [
                                       TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(ctx),
+                                        onPressed: () => Navigator.pop(ctx),
                                         child: const Text('取消'),
                                       ),
                                       FilledButton(
                                         onPressed: () {
                                           Navigator.pop(ctx);
-                                          _run('重置数据',
-                                              () => api.clearAllData());
+                                          _run(
+                                            '重置数据',
+                                            () => api.clearAllData(),
+                                          );
                                         },
                                         style: FilledButton.styleFrom(
                                           backgroundColor: AppTheme.error,
@@ -217,9 +219,11 @@ class _DevToolsPageState extends ConsumerState<DevToolsPage> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline_rounded,
-                        size: 16,
-                        color: colorScheme.primary.withValues(alpha: .7)),
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 16,
+                      color: colorScheme.primary.withValues(alpha: .7),
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(

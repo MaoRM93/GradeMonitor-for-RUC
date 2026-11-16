@@ -129,11 +129,6 @@ class CoreGpaUtil {
       sumXf += double.parse(c.xf);
     }
     final gpa = sumXf > 0 ? sumJd / sumXf : null;
-    return CoreGpaResult(
-      courses: valid,
-      gpa: gpa,
-      sumJd: sumJd,
-      sumXf: sumXf,
-    );
+    return CoreGpaResult(courses: valid, gpa: gpa, sumJd: sumJd, sumXf: sumXf);
   }
 }

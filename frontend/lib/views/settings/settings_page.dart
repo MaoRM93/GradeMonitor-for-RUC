@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/service/tray_service.dart';
 import '../../core/service/session_service.dart';
+import '../../core/service/feature_gate_service.dart';
+import '../../widgets/feature_gate.dart';
 import '../../core/logger/app_logger.dart';
 import '../../core/service/update_installer.dart';
 import '../../core/service/update_service.dart';
@@ -18,6 +20,7 @@ import '../../widgets/glass_card.dart';
 import '../../widgets/note_banner.dart';
 import '../../widgets/toast_host.dart';
 import '../../core/service/nav_signal.dart';
+import '../../core/service/ui_prefs_service.dart';
 import 'developer_options.dart';
 
 /// 系统设置页面（所有开关即时生效）
@@ -94,12 +97,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _loadSettings() async {
     await ref.read(settingsProvider.notifier).fetchSettings();
-    // 后端在本次进程中已验证过口令时，返回设置页仍保持开发者分区可见。
+    // 开发者分区一旦打开就常驻：只有点「关闭开发者选项」才会收起。
+    // 后端凭据可能读不到（钥匙串被清、后端刚重启），所以本地另存一份标记，
+    // 避免面板在用户没操作的情况下自己消失。
+    await UiPrefsService.ensureLoaded();
+    var pinned = UiPrefsService.readBoolPref(UiPrefsService.prefDevPanelPinned);
     try {
       final status = await ref.read(apiClientProvider).getDeveloperStatus();
-      _developerEnabled = status.data['unlocked'] == true;
+      final data = status.data;
+      final unlocked = data is Map && data['unlocked'] == true;
+      if (unlocked && !pinned) {
+        await UiPrefsService.writeBoolPref(
+          UiPrefsService.prefDevPanelPinned,
+          true,
+        );
+        pinned = true;
+      }
+      _developerEnabled = unlocked || pinned;
       developerOptionsEnabled.value = _developerEnabled;
-    } catch (_) {}
+    } catch (_) {
+      // 后端不可达时以本地标记为准，不要悄悄收起面板
+      _developerEnabled = pinned;
+      developerOptionsEnabled.value = pinned;
+    }
     final s = ref.read(settingsProvider);
     _usernameCtrl.text = s.username;
     // 后端不再回传密码（安全存储），输入框留空；
@@ -233,25 +253,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
         ),
         const SizedBox(width: 12),
-        OutlinedButton.icon(
-          onPressed: _isLoggingOut ? null : _logout,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: colorScheme.error,
-            side: BorderSide(color: colorScheme.error.withValues(alpha: .45)),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        // Flag-1084：退出登录入口可被远程静默下线
+        if (featureEnabled(FeatureGateService.flag1084Logout))
+          OutlinedButton.icon(
+            onPressed: _isLoggingOut ? null : _logout,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colorScheme.error,
+              side: BorderSide(color: colorScheme.error.withValues(alpha: .45)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+            icon: _isLoggingOut
+                ? SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colorScheme.error,
+                    ),
+                  )
+                : const Icon(Icons.logout_rounded, size: 18),
+            label: Text(_isLoggingOut ? '退出中...' : '退出登录'),
           ),
-          icon: _isLoggingOut
-              ? SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: colorScheme.error,
-                  ),
-                )
-              : const Icon(Icons.logout_rounded, size: 18),
-          label: Text(_isLoggingOut ? '退出中...' : '退出登录'),
-        ),
       ],
     );
   }
@@ -1033,18 +1055,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '开机自启动',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                    // Flag-1055：开机自启动开关可被远程静默下线
+                    if (featureEnabled(FeatureGateService.flag1055AutoStart))
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                          '开机自启动',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
+                        value: _autoStart,
+                        onChanged: _onAutoStartChanged,
                       ),
-                      value: _autoStart,
-                      onChanged: _onAutoStartChanged,
-                    ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text(
@@ -1396,6 +1420,11 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
 
   Future<void> _startDownload() async {
     if (_asset == null || _phase == _DownloadPhase.downloading) return;
+    // Flag-1061：应用内下载可被远程静默下线，下线后降级为浏览器下载
+    if (!featureEnabled(FeatureGateService.flag1061Download)) {
+      UpdateService().openInBrowser('${UpdateService.repoUrl}/releases/latest');
+      return;
+    }
     setState(() {
       _phase = _DownloadPhase.downloading;
       _errorText = '';
@@ -1432,6 +1461,14 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
   /// 因为它改不动写死在客户端里的 Ed25519 公钥。
   Future<void> _startInstall() async {
     if (_savedPath == null || _busy) return;
+    // Flag-1062：自动安装替换可被远程静默下线，下线后只提示手动安装
+    if (!featureEnabled(FeatureGateService.flag1062AutoInstall)) {
+      setState(() {
+        _phase = _DownloadPhase.manual;
+        _installHint = '自动安装当前不可用，请手动安装已下载的安装包。';
+      });
+      return;
+    }
     setState(() {
       _phase = _DownloadPhase.preparing;
       _installHint = '';
@@ -1448,6 +1485,8 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       return;
     }
 
+    // 签名校验是信任根，不是可远程关闭的产品功能。Flag-1063 仅保留为
+    // 兼容编号/不可编辑的展示项，任何情况下都必须验证成功才可安装。
     final check = await UpdateVerifier.verifyDownloadedFile(
       _savedPath!,
       manifest,

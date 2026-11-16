@@ -17,6 +17,7 @@ class AppSettings {
   final String password;
   final bool hasPassword;
   final bool rememberMe;
+
   /// 登录入口：jw（教务系统直连，默认）/ cas（统一身份认证）/ vruc（传统）
   final String loginMode;
   final String notifyMode;
@@ -336,7 +337,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         // 后端把失败分成多类（凭据错误 / 维护中 / 网络不通 / 需要验证码），
         // 这里按 kind 原样使用后端给的中文文案，不再一律报「密码错误」。
         final (kind, message) = LoginErrorText.fromResponse(e.response?.data);
-        final needCaptcha = LoginErrorText.captchaRequiredFrom(e.response?.data);
+        final needCaptcha = LoginErrorText.captchaRequiredFrom(
+          e.response?.data,
+        );
         _log.warning('登录失败 [$kind]: $message (需要验证码=$needCaptcha)');
         return LoginResult(
           success: false,

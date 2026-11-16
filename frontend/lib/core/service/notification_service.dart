@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../logger/app_logger.dart';
+import 'feature_gate_service.dart';
 
 /// macOS 原生通知服务
 ///
@@ -68,6 +69,15 @@ class NotificationService {
 
   /// 显示 macOS 原生通知；原生不可用时回退 osascript。
   Future<void> show(String title, String message) async {
+    // Flag-1053：原生系统通知可被远程静默下线。
+    // 放在最前面：下线后既不走原生通道，也不回退 osascript，
+    // 彻底不弹窗（后端侧另有同编号闸门，此处是前端兜底）。
+    if (!FeatureGateService.instance.isEnabled(
+      FeatureGateService.flag1053Notification,
+    )) {
+      _log.info('系统通知已被远程下线，跳过投递: $title');
+      return;
+    }
     if (!Platform.isMacOS) {
       _log.warning('非 macOS 平台，跳过前端通知: $title');
       return;

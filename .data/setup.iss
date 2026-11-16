@@ -8,18 +8,18 @@
 [Setup]
 AppId={{7B8A9C0D-1E2F-3A4B-5C6D-7E8F9A0B1C2D}
 AppName=GradeMonitor
-AppVersion=108.1.0.105
+AppVersion=109.0.0.100
 AppPublisher=GradeMonitor
-AppVerName=GradeMonitor Ver.108.1.0.105
-VersionInfoVersion=108.1.0.105
-VersionInfoProductVersion=108.1.0.105
+AppVerName=GradeMonitor Ver.109.0.0.100
+VersionInfoVersion=109.0.0.100
+VersionInfoProductVersion=109.0.0.100
 VersionInfoProductName=GradeMonitor
 VersionInfoCompany=GradeMonitor
 DefaultDirName={localappdata}\Programs\GradeMonitor
 DefaultGroupName=GradeMonitor
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=GradeMonitor_Ver.108.1.0.105_setup
+OutputBaseFilename=GradeMonitor_Ver.109.0.0.100_setup
 SetupIconFile=..\frontend\assets\app_icon.ico
 UninstallDisplayIcon={app}\grademonitor.exe
 Compression=lzma2

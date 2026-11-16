@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 
+from backend.storage.feature_gates import gate_enabled
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -85,6 +86,9 @@ def send_startup_notification(auto_monitor_enabled: bool,
                                start_time: str = "08:00",
                                end_time: str = "22:00",
                                interval: int = 300) -> None:
+    # Flag-1095：启动通知可远程关闭
+    if not gate_enabled("Flag-1095"):
+        return
     if auto_monitor_enabled:
         message = f"程序将在后台自动按设置监测成绩和排名（监测时段：{start_time}-{end_time}，间隔：{interval}秒）"
     else:
@@ -312,7 +316,7 @@ def _show(title: str, message: str, record: bool = True,
     注意：写文件与后续通知投递使用的是同一份 _data 语义 —— WebSocket 分支
     与 osascript/win11toast 回退分支都只消费 title/message，互不影响。
     """
-    if record:
+    if record and gate_enabled("Flag-1072"):
         try:
             from datetime import datetime
 
@@ -340,6 +344,13 @@ def _show(title: str, message: str, record: bool = True,
             forward_notification(title, message)
         except Exception as e:
             logger.debug(f"初始化移动端通知转发失败: {e}")
+
+    # Flag-1053：系统通知的"弹出"环节可远程静默关闭。
+    # 只挡投递，不挡上面的 recent_change 记录与移动端转发——否则关掉桌面
+    # 通知会连带把仪表板「最新动态」和 Bark/ntfy 一起废掉，属于误伤。
+    if not gate_enabled("Flag-1053"):
+        logger.debug(f"Flag-1053 已关闭，跳过系统通知投递: {title}")
+        return
 
     # macOS：优先交给 App 原生通知（正确图标 + 可点击回 App）
     if sys.platform == "darwin":

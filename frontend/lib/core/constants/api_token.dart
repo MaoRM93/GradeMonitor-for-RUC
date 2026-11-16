@@ -22,9 +22,7 @@ class ApiToken {
   static String generate() {
     final rnd = Random.secure();
     final bytes = List<int>.generate(32, (_) => rnd.nextInt(256));
-    final token = bytes
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final token = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     _value = token;
     return token;
   }

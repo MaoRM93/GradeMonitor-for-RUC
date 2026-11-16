@@ -78,9 +78,7 @@ class WebSocketService {
             );
       _channel = IOWebSocketChannel.connect(
         uri,
-        headers: token.isEmpty
-            ? null
-            : {ApiToken.headerName: token},
+        headers: token.isEmpty ? null : {ApiToken.headerName: token},
         pingInterval: const Duration(seconds: 25),
         connectTimeout: const Duration(seconds: 10),
       );

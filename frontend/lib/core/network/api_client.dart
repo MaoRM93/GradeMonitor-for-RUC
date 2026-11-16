@@ -25,7 +25,9 @@ class ApiClient {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        validateStatus: (status) => status != null && status < 500,
+        // 4xx 是明确失败，必须走 onError/catch。把它当作成功响应会让开发者
+        // 面板在 403/400 时保留乐观状态，甚至错误提示“已下发”。
+        validateStatus: (status) => status != null && status < 400,
       ),
     );
 
@@ -78,7 +80,13 @@ class ApiClient {
   }
 
   /// 需要脱敏的字段名（登录密码不应以任何形式落盘到日志）
-  static const Set<String> _secretKeys = {'password', 'token', 'url', 'topic', 'nickname'};
+  static const Set<String> _secretKeys = {
+    'password',
+    'token',
+    'url',
+    'topic',
+    'nickname',
+  };
 
   /// 递归替换敏感字段的值为 `***`
   ///
@@ -217,15 +225,83 @@ class ApiClient {
     );
   }
 
-  Future<Response> getNotificationForwarders() => dio.get(ApiPath.notificationForwarders);
-  Future<Response> updateNotificationForwarders(Map<String, dynamic> data) => dio.post(ApiPath.notificationForwarders, data: data);
-  Future<Response> testNotificationForwarder(String channel) => dio.post('${ApiPath.notificationForwarders}/$channel/test');
+  Future<Response> getNotificationForwarders() =>
+      dio.get(ApiPath.notificationForwarders);
+  Future<Response> updateNotificationForwarders(Map<String, dynamic> data) =>
+      dio.post(ApiPath.notificationForwarders, data: data);
+  Future<Response> testNotificationForwarder(String channel) =>
+      dio.post('${ApiPath.notificationForwarders}/$channel/test');
 
   Future<Response> getDeveloperStatus() => dio.get(ApiPath.developerStatus);
-  Future<Response> unlockDeveloper(String password) => dio.post(ApiPath.developerUnlock, data: {'password': password});
-  Future<Response> developerConsole(Map<String, dynamic> data) => dio.post(ApiPath.developerConsole, data: data);
-  Future<Response> disableDeveloper() => dio.post(ApiPath.developerDisable);
-  Future<Response> openCurriculum() => dio.post(ApiPath.curriculumOpen);
+
+  /// 用 GitHub 身份登录开发者模式。
+  ///
+  /// 三个字段严格对应 UI 上仅有的三个标签（[mngId] = LoginMngID、
+  /// [account] = Account、[token] = Password）。GitHub 没有"账号 + 密码
+  /// 换令牌"的 API，所以 Password 语义上是 GitHub 令牌。
+  Future<Response> loginDeveloper({
+    required String mngId,
+    required String account,
+    required String token,
+  }) => dio.post(
+    ApiPath.developerLogin,
+    data: {'mng_id': mngId, 'account': account, 'token': token},
+  );
+
+  Future<Response> logoutDeveloper() => dio.post(ApiPath.developerLogout);
+  Future<Response> getDeveloperFlags() => dio.get(ApiPath.developerFlags);
+  Future<Response> setDeveloperFlag(String name, bool value) =>
+      dio.post(ApiPath.developerFlags, data: {'name': name, 'value': value});
+
+  /// 功能组开关（Flag-1xxx）注册表 + 当前状态。
+  ///
+  /// 与 [getDeveloperFlags] 是两套：那边是开发者面板的调谐按钮，
+  /// 这边是产品功能的下线闸门。该端点不需要开发者解锁。
+  Future<Response> getFeatures() => dio.get(ApiPath.features);
+
+  /// 写入功能组开关；[gates] 非空时走批量覆盖，否则按单条写。
+  Future<Response> setFeatureGate(String id, bool value) =>
+      dio.post(ApiPath.developerFeatures, data: {'id': id, 'value': value});
+
+  Future<Response> setFeatureGates(Map<String, bool> gates) =>
+      dio.post(ApiPath.developerFeatures, data: {'gates': gates});
+
+  /// 签发一条远程功能开关指令（`control-v<rev>` 独立频道）。
+  ///
+  /// [push] 为 false 时只在本地生成签名块、不推 GitHub —— 用于先人工核对
+  /// 内容再决定是否真的下发。令牌留空则后端复用登录时存入系统凭据的那枚。
+  Future<Response> publishGates({
+    required Map<String, bool> gates,
+    int rev = 0,
+    bool push = true,
+    String githubToken = '',
+  }) => dio.post(
+    ApiPath.developerGatesPublish,
+    data: {
+      'gates': gates,
+      'rev': rev,
+      'push': push,
+      'github_token': githubToken,
+    },
+  );
+
+  Future<Response> publishDeveloperNotice({
+    required String channel,
+    required String title,
+    required String body,
+  }) => dio.post(
+    ApiPath.developerNoticePublish,
+    data: {'channel': channel, 'title': title, 'body': body},
+  );
+
+  /// 打开培养方案。
+  ///
+  /// [grade] 为 null 时不发送请求体 —— 后端据此沿用账号匹配逻辑，
+  /// 与老版本调用完全一致；显式传年级时才发 `{"grade": "..."}`。
+  Future<Response> openCurriculum({String? grade}) => dio.post(
+    ApiPath.curriculumOpen,
+    data: grade == null ? null : {'grade': grade},
+  );
 
   // ---- Dev Tools ----
 

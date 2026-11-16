@@ -88,12 +88,14 @@ def main():
         else:
             shutil.copy2(s, d)
 
-    # 3. 复制 backend（排除 __pycache__）
+    # 3. 复制 backend（排除 __pycache__ 与开发用测试文件）
+    # test_*.py 只在本机跑，不进安装包：它依赖仓库路径与 assets/ 密文，
+    # 打进包里既没用又会被杀软当成可疑脚本。
     print("[2/4] 复制 backend ...")
     shutil.copytree(
         BACKEND,
         os.path.join(STAGING, "backend"),
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "test_*.py", "*_test.py"),
     )
     if os.path.isdir(ASSETS):
         shutil.copytree(ASSETS, os.path.join(STAGING, "assets"))

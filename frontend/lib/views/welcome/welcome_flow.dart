@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/service/feature_gate_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
+import '../../widgets/feature_gate.dart';
 import '../../providers/settings_provider.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../widgets/toast_host.dart';
@@ -59,6 +61,14 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   static const int _pNotify = 5;
   static const int _pConfirm = 6;
 
+  /// 引导页「卡片级」容器统一圆角：与主按钮、全局输入框的 12 对齐。
+  /// 4px 只用于「推荐 / 需验证码」小标签，不参与此常量。
+  static const double _blockRadius = 12;
+
+  /// 主题输入框（contentPadding 16/14 + 浮动标签）实测渲染高度 55；
+  /// 验证码图片块取同值，保证同一行内视觉高度一致。
+  static const double _captchaTileHeight = 55;
+
   int _page = _pIntro;
 
   // ---- 法律声明页 ----
@@ -91,8 +101,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   String _captchaImage = '';
   bool _captchaLoading = false;
 
-  bool get _showCaptcha =>
-      _modeNeedsCaptcha || _captchaRequiredByServer;
+  bool get _showCaptcha => _modeNeedsCaptcha || _captchaRequiredByServer;
 
   // ---- 监控设置页 ----
   bool _autoMonitor = false;
@@ -114,6 +123,72 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     _usernameCtrl.addListener(_refreshState);
     _passwordCtrl.addListener(_refreshState);
     _captchaCtrl.addListener(_refreshState);
+
+    // Flag-1040~1045 决定引导流程里哪些步骤仍然存在。
+    // 开关拉取是异步的：先按"全开"渲染，回来后若当前步骤已被下线再跳到下一步。
+    FeatureGateService.instance.ensureLoaded().then((_) {
+      if (!mounted || _stepEnabled(_page)) return;
+      final next = _nextEnabled(_page);
+      if (next != null) _goto(next);
+    });
+  }
+
+  // ---- 功能组开关（Flag-1040 ~ Flag-1045）----
+
+  /// 该引导步骤是否被放行。未配置开关时视为开启，保证流程完整。
+  bool _stepEnabled(int page) {
+    switch (page) {
+      case _pAgreement:
+        return featureEnabled(FeatureGateService.flag1040Agreement);
+      case _pLoginMode:
+        return featureEnabled(FeatureGateService.flag1041LoginMode);
+      case _pAccount:
+        return featureEnabled(FeatureGateService.flag1042Account);
+      case _pMonitor:
+        return featureEnabled(FeatureGateService.flag1043MonitorStep);
+      case _pNotify:
+        return featureEnabled(FeatureGateService.flag1044NotifyStep);
+      case _pConfirm:
+        return featureEnabled(FeatureGateService.flag1045Confirm);
+      default:
+        return true;
+    }
+  }
+
+  /// 从 [from] 之后第一个启用的步骤；已到末尾返回 null（表示可以直接收尾）。
+  int? _nextEnabled(int from) {
+    for (var p = from + 1; p <= _pConfirm; p++) {
+      if (_stepEnabled(p)) return p;
+    }
+    return null;
+  }
+
+  /// 前进到下一个启用步骤；没有下一步说明流程已到尾，直接收尾保存。
+  void _advance() {
+    final next = _nextEnabled(_page);
+    if (next == null) {
+      _finish();
+      return;
+    }
+    _goto(next);
+  }
+
+  /// 从 [from] 之前第一个启用的步骤。
+  int? _prevEnabled(int from) {
+    for (var p = from - 1; p >= _pIntro; p--) {
+      if (_stepEnabled(p)) return p;
+    }
+    return null;
+  }
+
+  /// 切到目标步骤，并补上该步骤的"进入副作用"（登录入口列表、验证码）。
+  void _goto(int page) {
+    if (!mounted) return;
+    setState(() => _page = page);
+    if (page == _pLoginMode) _loadLoginModes();
+    if (page == _pAccount && _showCaptcha && _captchaImage.isEmpty) {
+      _refreshCaptcha();
+    }
   }
 
   void _refreshState() {
@@ -132,12 +207,13 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   /// 从总欢迎页进入顺序设置：此刻才开始协议阅读倒计时
   void _startFromIntro() {
-    setState(() => _page = _pAgreement);
+    _goto(_nextEnabled(_pIntro) ?? _pAgreement);
     _startCountdown();
   }
 
   void _back() {
-    if (_page > 0) setState(() => _page--);
+    final prev = _prevEnabled(_page);
+    if (prev != null) _goto(prev);
   }
 
   @override
@@ -154,12 +230,18 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   }
 
   Future<void> _pickStartTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _startTime);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _startTime,
+    );
     if (picked != null) setState(() => _startTime = picked);
   }
 
   Future<void> _pickEndTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _endTime);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _endTime,
+    );
     if (picked != null) setState(() => _endTime = picked);
   }
 
@@ -193,7 +275,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
       case _pLoginMode:
         return !_modesLoading && _loginMode.isNotEmpty;
       case _pAccount:
-        final base = _usernameCtrl.text.trim().isNotEmpty &&
+        final base =
+            _usernameCtrl.text.trim().isNotEmpty &&
             _passwordCtrl.text.isNotEmpty &&
             !_verifying;
         // 需要验证码时，必须填满 4 位才能提交
@@ -218,7 +301,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     // 默认选中推荐入口（教务系统直连）
     var selected = _loginMode;
     if (modes.isNotEmpty && !modes.any((m) => m.id == selected)) {
-      selected = modes.firstWhere((m) => m.recommended, orElse: () => modes.first).id;
+      selected = modes
+          .firstWhere((m) => m.recommended, orElse: () => modes.first)
+          .id;
     }
     setState(() {
       _loginModes = modes;
@@ -256,8 +341,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   Future<void> _refreshCaptcha() async {
     if (_captchaLoading) return;
     setState(() => _captchaLoading = true);
-    final result =
-        await ref.read(settingsProvider.notifier).fetchLoginCaptcha(_loginMode);
+    final result = await ref
+        .read(settingsProvider.notifier)
+        .fetchLoginCaptcha(_loginMode);
     if (!mounted) return;
     setState(() {
       _captchaLoading = false;
@@ -282,19 +368,15 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         _startFromIntro();
         break;
       case _pAgreement:
-        setState(() => _page = _pLoginMode);
-        _loadLoginModes();
-        break;
       case _pLoginMode:
-        setState(() => _page = _pAccount);
-        // 进入账号页时按入口决定是否立刻取一张验证码
-        if (_showCaptcha && _captchaImage.isEmpty) {
-          _refreshCaptcha();
-        }
+        // 下一步：跳过被功能组下线的步骤，并补齐目标页的进入副作用
+        _advance();
         break;
       case _pAccount:
         setState(() => _verifying = true);
-        final result = await ref.read(settingsProvider.notifier).login(
+        final result = await ref
+            .read(settingsProvider.notifier)
+            .login(
               _usernameCtrl.text.trim(),
               _passwordCtrl.text,
               mode: _loginMode,
@@ -317,13 +399,11 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           }
           return;
         }
-        setState(() => _page = _pMonitor);
+        _advance();
         break;
       case _pMonitor:
-        setState(() => _page = _pNotify);
-        break;
       case _pNotify:
-        setState(() => _page = _pConfirm);
+        _advance();
         break;
       default:
         await _finish();
@@ -339,7 +419,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     final current = ref.read(settingsProvider);
     final updated = current.copyWith(
       username: _usernameCtrl.text.trim(),
-      hasPassword: true,
+      // Flag-1042 被关闭时账号页会被跳过，不能伪造“已有密码”状态。
+      hasPassword: _usernameCtrl.text.trim().isNotEmpty,
       // 密码始终记住（曾有的"记住密码"开关已移除）
       rememberMe: true,
       loginMode: _loginMode,
@@ -563,6 +644,40 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     }
   }
 
+  /// 引导页成块容器统一阴影，取值与 GlassCard 完全同源：
+  /// light = 1E293B alpha .04 / blur 20 / offset (0,4) + alpha .02 / blur 4 / offset (0,1)；
+  /// dark  = black alpha .3 / blur 20 / offset (0,4) + alpha .15 / blur 4 / offset (0,1)。
+  /// 只此两层，不加发光、不加彩色阴影；selected 仅让选中态主阴影轻微加深。
+  List<BoxShadow> _blockShadow({bool selected = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (isDark) {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: selected ? .35 : .3),
+          blurRadius: 20,
+          offset: const Offset(0, 4),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: .15),
+          blurRadius: 4,
+          offset: const Offset(0, 1),
+        ),
+      ];
+    }
+    return [
+      BoxShadow(
+        color: const Color(0xFF1E293B).withValues(alpha: selected ? .06 : .04),
+        blurRadius: 20,
+        offset: const Offset(0, 4),
+      ),
+      BoxShadow(
+        color: const Color(0xFF1E293B).withValues(alpha: .02),
+        blurRadius: 4,
+        offset: const Offset(0, 1),
+      ),
+    ];
+  }
+
   /// 内容组容器：整体水平居中，组内左对齐
   Widget _contentGroup(double maxWidth, Widget child) {
     return Center(
@@ -695,8 +810,12 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
       p: base(),
       pPadding: const EdgeInsets.only(bottom: 8),
-      h1: base(size: 17, weight: FontWeight.w800, height: 1.4, alpha: .95)
-          .copyWith(letterSpacing: -.2),
+      h1: base(
+        size: 17,
+        weight: FontWeight.w800,
+        height: 1.4,
+        alpha: .95,
+      ).copyWith(letterSpacing: -.2),
       h1Padding: const EdgeInsets.only(top: 4, bottom: 8),
       h2: base(size: 14.5, weight: FontWeight.w700, height: 1.4, alpha: .92),
       h2Padding: const EdgeInsets.only(top: 2, bottom: 6),
@@ -736,16 +855,26 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _pageHeader(cs, Icons.balance_outlined, '这是一份法律性声明', null, inkShift: 5.3),
+            _pageHeader(
+              cs,
+              Icons.balance_outlined,
+              '这是一份法律性声明',
+              null,
+              inkShift: 5.3,
+            ),
             const SizedBox(height: 16),
             // 声明正文：占满本页剩余高度
             Expanded(
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(_blockRadius),
                   color: cs.surfaceContainerHighest.withValues(alpha: .3),
+                  boxShadow: _blockShadow(),
                 ),
                 child: Scrollbar(
                   child: SingleChildScrollView(
@@ -793,13 +922,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(
-              cs,
-              Icons.login_rounded,
-              '选择登录入口',
-              null,
-              inkShift: 8.2,
-            ),
+            _pageHeader(cs, Icons.login_rounded, '选择登录入口', null, inkShift: 8.2),
             const SizedBox(height: 20),
             if (_modesLoading)
               const Padding(
@@ -826,17 +949,17 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(_blockRadius),
         onTap: () => _selectLoginMode(m.id),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(_blockRadius),
             color: selected
                 ? cs.primary.withValues(alpha: .07)
                 : cs.surfaceContainerHighest.withValues(alpha: .25),
-
+            boxShadow: _blockShadow(selected: selected),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -941,20 +1064,13 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(
-              cs,
-              Icons.person_outline,
-              '账户',
-              null,
-              inkShift: 10.4,
-            ),
+            _pageHeader(cs, Icons.person_outline, '账户', null, inkShift: 10.4),
             const SizedBox(height: 24),
             TextField(
               controller: _usernameCtrl,
               decoration: const InputDecoration(
                 labelText: '学号',
                 hintText: 'ShuZhi / V RUC 账户',
-                isDense: true,
                 prefixIcon: Icon(Icons.badge_outlined, size: 18),
               ),
             ),
@@ -971,7 +1087,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               decoration: InputDecoration(
                 labelText: '密码',
                 hintText: 'ShuZhi / V RUC 密码',
-                isDense: true,
                 prefixIcon: const Icon(Icons.key_outlined, size: 18),
                 suffixIcon: IconButton(
                   icon: Icon(
@@ -980,7 +1095,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                         : Icons.visibility_rounded,
                     size: 18,
                   ),
-                  onPressed: () => setState(() => _hidePassword = !_hidePassword),
+                  onPressed: () =>
+                      setState(() => _hidePassword = !_hidePassword),
                 ),
               ),
             ),
@@ -999,13 +1115,10 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                       maxLength: 4,
                       enableSuggestions: false,
                       autocorrect: false,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         labelText: '验证码',
                         hintText: '4 位数字',
-                        isDense: true,
                         counterText: '',
                         prefixIcon: Icon(Icons.verified_outlined, size: 18),
                       ),
@@ -1033,15 +1146,16 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   /// 验证码图片（点击刷新）；加载中显示占位
   Widget _buildCaptchaImage(ColorScheme cs) {
     return InkWell(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(_blockRadius),
       onTap: _captchaLoading ? null : _refreshCaptcha,
       child: Container(
         width: 120,
-        height: 44,
+        height: _captchaTileHeight,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(_blockRadius),
           color: Colors.white,
+          boxShadow: _blockShadow(),
         ),
         child: _captchaLoading
             ? const SizedBox(
@@ -1050,22 +1164,24 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : _captchaImage.isEmpty
-                ? Text(
-                    '点击获取',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: cs.onSurface.withValues(alpha: .55),
-                    ),
-                  )
-                : Image.memory(
-                    base64Decode(_captchaImage.contains(',')
-                        ? _captchaImage.split(',').last
-                        : _captchaImage),
-                    width: 112,
-                    height: 40,
-                    fit: BoxFit.contain,
-                    gaplessPlayback: true,
-                  ),
+            ? Text(
+                '点击获取',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: .55),
+                ),
+              )
+            : Image.memory(
+                base64Decode(
+                  _captchaImage.contains(',')
+                      ? _captchaImage.split(',').last
+                      : _captchaImage,
+                ),
+                width: 112,
+                height: 40,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+              ),
       ),
     );
   }
@@ -1081,12 +1197,19 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.settings_outlined, '监控设置', null, inkShift: 5.9),
+            _pageHeader(
+              cs,
+              Icons.settings_outlined,
+              '监控设置',
+              null,
+              inkShift: 5.9,
+            ),
             const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
                 color: cs.surfaceContainerHighest.withValues(alpha: .35),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(_blockRadius),
+                boxShadow: _blockShadow(),
               ),
               child: Column(
                 children: [
@@ -1245,7 +1368,13 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.notifications_outlined, '通知设置', null, inkShift: 10.4),
+            _pageHeader(
+              cs,
+              Icons.notifications_outlined,
+              '通知设置',
+              null,
+              inkShift: 10.4,
+            ),
             const SizedBox(height: 16),
             _notifyCard(
               cs,
@@ -1279,17 +1408,18 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     final selected = _notifyMode == value;
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(_blockRadius),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(_blockRadius),
         onTap: () => setState(() => _notifyMode = value),
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(_blockRadius),
             color: selected
                 ? cs.primary.withValues(alpha: .1)
                 : cs.surfaceContainerHighest.withValues(alpha: .3),
+            boxShadow: _blockShadow(selected: selected),
           ),
           child: Row(
             children: [
@@ -1298,8 +1428,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                     ? Icons.check_circle_outline
                     : Icons.radio_button_unchecked_rounded,
                 size: 22,
-                color:
-                    selected ? cs.primary : cs.onSurface.withValues(alpha: .3),
+                color: selected
+                    ? cs.primary
+                    : cs.onSurface.withValues(alpha: .3),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1356,14 +1487,21 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _pageHeader(cs, Icons.task_alt_outlined, '所有配置已完成', null, inkShift: 5.3),
+            _pageHeader(
+              cs,
+              Icons.task_alt_outlined,
+              '所有配置已完成',
+              null,
+              inkShift: 5.3,
+            ),
             const SizedBox(height: 16),
             // 设置摘要卡片（不显示密码，新增轮询间隔）
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerHighest.withValues(alpha: .35),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(_blockRadius),
+                boxShadow: _blockShadow(),
               ),
               child: Column(
                 children: [
@@ -1384,8 +1522,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: cs.primary.withValues(alpha: .08),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(_blockRadius),
                 border: Border.all(color: cs.primary.withValues(alpha: .2)),
+                boxShadow: _blockShadow(),
               ),
               child: Row(
                 children: [

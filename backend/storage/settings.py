@@ -55,11 +55,13 @@ DEFAULT_SETTINGS = {
     "random_interval_enabled": True,
     "welcome_completed": False,
     "show_welcome_always": False,
-    "developer_options_enabled": False,
 }
 
 # 绝不写入 settings.json 的敏感字段
 _SECRET_KEYS = ("password",)
+
+# 已废弃字段：旧版本用它当开发者门禁，现在只读旧值时丢弃，不再写回。
+_LEGACY_DEVELOPER_KEY = "developer_options_enabled"
 
 
 def _read_raw() -> dict:
@@ -112,6 +114,11 @@ def load_settings() -> dict:
     data = dict(DEFAULT_SETTINGS)
     for key, val in raw.items():
         if key in _SECRET_KEYS:
+            continue
+        # 旧版本曾把「开发者面板是否展开」当成门禁存在这里；现在门禁只认
+        # 系统凭据存储里的 GitHub 身份。读到旧字段直接丢弃，避免它被当成
+        # 状态继续写回文件，误导后来的人以为这是个有效开关。
+        if key == _LEGACY_DEVELOPER_KEY:
             continue
         data[key] = val
 

@@ -28,10 +28,7 @@ class ToastHost {
     _removeEntry();
 
     final entry = OverlayEntry(
-      builder: (_) => _ToastCard(
-        message: message,
-        onFinished: _removeEntry,
-      ),
+      builder: (_) => _ToastCard(message: message, onFinished: _removeEntry),
     );
     _entry = entry;
     overlay.insert(entry);
@@ -92,7 +89,8 @@ class _ToastCardState extends State<_ToastCard>
 
     // 圆角：单行短文本保持胶囊造型；一旦换行（或多行）就改用固定 22，
     // 否则 999 的超大半径在高度变大时会被压成畸形椭圆，圆角看起来是坏的。
-    final isPill = !widget.message.contains('\n') && widget.message.length <= 18;
+    final isPill =
+        !widget.message.contains('\n') && widget.message.length <= 18;
     final radius = BorderRadius.circular(isPill ? 999 : 22);
 
     return IgnorePointer(

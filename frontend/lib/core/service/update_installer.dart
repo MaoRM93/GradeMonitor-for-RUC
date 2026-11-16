@@ -94,17 +94,15 @@ class UpdateInstaller {
       // 新实例启动时会自愈清理残留进程，这里失败不打断升级
     }
     if (plan.isMac) {
-      await Process.start(
-        '/bin/bash',
-        [plan.scriptPath, ...plan.scriptArgs],
-        mode: ProcessStartMode.detached,
-      );
+      await Process.start('/bin/bash', [
+        plan.scriptPath,
+        ...plan.scriptArgs,
+      ], mode: ProcessStartMode.detached);
     } else {
-      await Process.start(
-        'cmd',
-        ['/c', plan.scriptPath],
-        mode: ProcessStartMode.detached,
-      );
+      await Process.start('cmd', [
+        '/c',
+        plan.scriptPath,
+      ], mode: ProcessStartMode.detached);
     }
     // 给 detached 双 fork 留点时序余量
     await Future.delayed(const Duration(milliseconds: 400));
@@ -189,9 +187,7 @@ class UpdateInstaller {
   String? _macAppBundlePath() {
     var cur = Directory(File(Platform.resolvedExecutable).parent.path);
     for (int i = 0; i < 5; i++) {
-      if (File(
-        '${cur.path}${Platform.pathSeparator}Info.plist',
-      ).existsSync()) {
+      if (File('${cur.path}${Platform.pathSeparator}Info.plist').existsSync()) {
         return cur.parent.path;
       }
       final parent = cur.parent;
@@ -244,7 +240,8 @@ rm -rf "$STAGE"
     final installDir = File(exe).parent.path;
     final stamp = DateTime.now().millisecondsSinceEpoch;
 
-    final stageRoot = '$installDir${Platform.pathSeparator}'
+    final stageRoot =
+        '$installDir${Platform.pathSeparator}'
         '$_stagePrefix$stamp';
     Directory(stageRoot).createSync();
     try {
@@ -341,9 +338,7 @@ rm -rf "$STAGE"
       '$base${Platform.pathSeparator}$name';
 
   String _parent(String path) {
-    final p = path.endsWith('/')
-        ? path.substring(0, path.length - 1)
-        : path;
+    final p = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
     final idx = p.lastIndexOf(Platform.pathSeparator);
     return idx > 0 ? p.substring(0, idx) : p;
   }

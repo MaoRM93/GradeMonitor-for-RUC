@@ -6,6 +6,8 @@ import '../../core/network/websocket_service.dart';
 import '../../providers/monitor_provider.dart';
 import '../../providers/grades_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../core/service/feature_gate_service.dart';
+import '../../widgets/feature_gate.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/toast_host.dart';
 
@@ -20,6 +22,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   String? _lastUsername;
   bool _isQuerying = false;
   bool _isTogglingMonitor = false;
+
   /// 最近一次成绩/排名变动的通知内容（后端 recent_change.json）
   Map<String, dynamic>? _latestChange;
 
@@ -176,11 +179,30 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ),
               ),
               const SizedBox(height: 20),
-              _buildMonitorCard(monitorState),
-              const SizedBox(height: 18),
-              _buildLatestCard(gradesAsync),
-              const SizedBox(height: 18),
-              _buildStatTiles(monitorState, rankAsync),
+              FeatureGate(
+                flag: FeatureGateService.flag1001Monitor,
+                child: _buildMonitorCard(monitorState),
+              ),
+              FeatureGate(
+                flag: FeatureGateService.flag1003LatestCard,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 18),
+                    _buildLatestCard(gradesAsync),
+                  ],
+                ),
+              ),
+              FeatureGate(
+                flag: FeatureGateService.flag1004StatTiles,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 18),
+                    _buildStatTiles(monitorState, rankAsync),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -201,36 +223,40 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       alignment: Alignment.centerLeft,
       child: Row(
         children: [
-            PulsingStatusDot(active: status.isRunning),
-            const SizedBox(width: 12),
-            Text(
-              status.isRunning ? '监控运行中' : '监控已停止',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: status.isRunning
-                    ? AppTheme.success
-                    : colorScheme.onSurface.withValues(alpha: .5),
-              ),
+          PulsingStatusDot(active: status.isRunning),
+          const SizedBox(width: 12),
+          Text(
+            status.isRunning ? '监控运行中' : '监控已停止',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: status.isRunning
+                  ? AppTheme.success
+                  : colorScheme.onSurface.withValues(alpha: .5),
             ),
-            const Spacer(),
-            _ControlButton(
+          ),
+          const Spacer(),
+          // Flag-1002：立即查询按钮可被远程静默下线
+          FeatureGate(
+            flag: FeatureGateService.flag1002QueryOnce,
+            child: _ControlButton(
               icon: _isQuerying ? null : Icons.search_rounded,
               label: _isQuerying ? '查询中，请稍候' : '立即查询',
               color: colorScheme.primary,
               loading: _isQuerying,
               onTap: _isQuerying ? null : _queryOnce,
             ),
-            const SizedBox(width: 10),
-            _ControlButton(
-              icon: status.isRunning
-                  ? Icons.stop_rounded
-                  : Icons.play_arrow_rounded,
-              label: status.isRunning ? '停止监控' : '启动监控',
-              color: status.isRunning ? AppTheme.error : AppTheme.success,
-              loading: _isTogglingMonitor,
-              onTap: _isTogglingMonitor ? null : _toggleMonitor,
-            ),
+          ),
+          const SizedBox(width: 10),
+          _ControlButton(
+            icon: status.isRunning
+                ? Icons.stop_rounded
+                : Icons.play_arrow_rounded,
+            label: status.isRunning ? '停止监控' : '启动监控',
+            color: status.isRunning ? AppTheme.error : AppTheme.success,
+            loading: _isTogglingMonitor,
+            onTap: _isTogglingMonitor ? null : _toggleMonitor,
+          ),
         ],
       ),
     );
@@ -265,7 +291,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         body = _entryLine(entries.first, withName: false);
       } else if (n == 2) {
         subtitle = '${entries.first.name} 等 2 门';
-        body = '${_entryLine(entries[0], withName: true)}\n'
+        body =
+            '${_entryLine(entries[0], withName: true)}\n'
             '${_entryLine(entries[1], withName: true)}';
       } else {
         subtitle = '$n 门课程有更新';
@@ -275,7 +302,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       // 排名等其他变动，或后端尚未提供结构化字段时的兼容展示
       final raw = (change['title'] ?? '').toString();
       final idx = raw.indexOf('：');
-      subtitle = idx >= 0 ? raw.substring(idx + 1) : (raw.isEmpty ? '成绩与排名更新' : raw);
+      subtitle = idx >= 0
+          ? raw.substring(idx + 1)
+          : (raw.isEmpty ? '成绩与排名更新' : raw);
       final msg = (change['message'] ?? '').toString();
       body = msg.isEmpty ? '详情见「成绩单」' : msg.replaceAll('\n', '　·　');
     } else {
@@ -315,7 +344,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 onPressed: () => requestNav(AppNavTarget.grades),
                 style: TextButton.styleFrom(
                   foregroundColor: cs.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 2,
+                  ),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
@@ -349,9 +381,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             style: TextStyle(
               fontSize: 14,
               height: 1.6,
-              color: empty
-                  ? cs.onSurface.withValues(alpha: .45)
-                  : cs.onSurface,
+              color: empty ? cs.onSurface.withValues(alpha: .45) : cs.onSurface,
             ),
           ),
           if (at.isNotEmpty) ...[
@@ -449,7 +479,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   /// 底部统计卡（Lenovo Vantage 风格：左上图标+灰字说明，右下大数字）
   /// 顺序：GPA → 班级排名 → 专业排名 → 修读课程 → 查询次数
-  Widget _buildStatTiles(MonitorStatus status, AsyncValue<RankData?> rankAsync) {
+  Widget _buildStatTiles(
+    MonitorStatus status,
+    AsyncValue<RankData?> rankAsync,
+  ) {
     final rd = rankAsync.asData?.value;
     return SizedBox(
       height: 200,
@@ -491,15 +524,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               value: rd?.countnum ?? 'N/A',
             ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: _statTile(
-              icon: Icons.query_stats_rounded,
-              iconColor: const Color(0xFF3B82F6),
-              label: '查询次数',
-              value: '${status.totalQueries}',
+          // Flag-1073：查询次数统计卡可被远程静默下线
+          if (featureEnabled(FeatureGateService.flag1073QueryCount)) ...[
+            const SizedBox(width: 14),
+            Expanded(
+              child: _statTile(
+                icon: Icons.query_stats_rounded,
+                iconColor: const Color(0xFF3B82F6),
+                label: '查询次数',
+                value: '${status.totalQueries}',
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

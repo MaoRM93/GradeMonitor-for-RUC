@@ -21,6 +21,7 @@
 """
 import base64
 import os
+from pathlib import Path
 import subprocess
 import sys
 from typing import Optional
@@ -331,3 +332,263 @@ def clear_password() -> None:
 def has_password() -> bool:
     """是否已保存密码（供 /api/settings 告知前端，不回传明文）。"""
     return bool(load_password())
+
+
+# ------------------------------------------------- 命名密钥（多条目扩展）
+#
+# 上面那套 API 只服务"教务密码"这一项，钥匙串 account 固定为 jw-password。
+# 开发者 GitHub 令牌需要第二条独立记录，因此在这里补一组按名字索引的通用
+# 接口。**刻意不改动上面任何函数**：老路径的缓存语义（None 未读 / "" 已确认
+# 为空）与文件布局保持不变，避免影响已发布版本的迁移。
+#
+# 名字会进文件名（Windows DPAPI 兜底）与钥匙串 account，故限制字符集。
+
+_SECRET_NAME_OK = set("abcdefghijklmnopqrstuvwxyz0123456789-_")
+
+# 每条密钥的进程内缓存：名字 → 值（None 表示尚未读取，"" 表示确认无值）
+_secret_cache: dict[str, Optional[str]] = {}
+
+
+def _check_secret_name(name: str) -> str:
+    key = (name or "").strip()
+    if not key or not set(key) <= _SECRET_NAME_OK:
+        raise ValueError(f"非法的密钥名: {name!r}")
+    return key
+
+
+def _secret_file(name: str) -> str:
+    return _data_file(f"credentials_{name}.bin")
+
+
+def _mac_find_named(account: str) -> Optional[str]:
+    try:
+        helper = Path(__file__).resolve().parents[1] / "bin" / "keychain_secret"
+        if helper.is_file():
+            r = subprocess.run(
+                [str(helper), "read", KEYCHAIN_SERVICE, account],
+                capture_output=True,
+                timeout=10,
+            )
+            if r.returncode == 0:
+                return r.stdout.decode("utf-8")
+            return None
+        r = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if r.returncode == 0:
+            return r.stdout.rstrip("\n")
+        return None
+    except Exception as e:
+        logger.warning(f"读取钥匙串失败（{account}）: {e}")
+        return None
+
+
+def _mac_save_named(account: str, value: str) -> bool:
+    try:
+        helper = Path(__file__).resolve().parents[1] / "bin" / "keychain_secret"
+        if helper.is_file():
+            # 通过 stdin 传递凭据，不出现在 shell 历史、日志或进程 argv。
+            r = subprocess.run(
+                [str(helper), "write", KEYCHAIN_SERVICE, account],
+                input=value.encode("utf-8"),
+                capture_output=True,
+                timeout=10,
+            )
+            return r.returncode == 0
+        # 仅兼容尚未安装 helper 的旧开发环境；发行包包含 helper。
+        r = subprocess.run(
+            [
+                "security",
+                "add-generic-password",
+                "-U",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+                value,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return r.returncode == 0
+    except Exception as e:
+        logger.warning(f"写入钥匙串失败（{account}）: {e}")
+        return False
+
+
+def _mac_clear_named(account: str) -> None:
+    try:
+        helper = Path(__file__).resolve().parents[1] / "bin" / "keychain_secret"
+        if helper.is_file():
+            subprocess.run(
+                [str(helper), "delete", KEYCHAIN_SERVICE, account],
+                capture_output=True,
+                timeout=10,
+            )
+            return
+        subprocess.run(
+            [
+                "security",
+                "delete-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                account,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as e:
+        logger.debug(f"清理钥匙串条目失败（{account}，可忽略）: {e}")
+
+
+def _fallback_read_named(name: str) -> Optional[str]:
+    path = _secret_file(name)
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as f:
+            raw = f.read().strip()
+        if not raw:
+            return None
+        return base64.b64decode(raw).decode("utf-8")
+    except Exception as e:
+        logger.warning(f"读取兜底凭据文件失败（{name}）: {e}")
+        return None
+
+
+def _fallback_write_named(name: str, value: str) -> bool:
+    path = _secret_file(name)
+    try:
+        data = base64.b64encode(value.encode("utf-8"))
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return True
+    except Exception as e:
+        logger.warning(f"写入兜底凭据文件失败（{name}）: {e}")
+        return False
+
+
+def _fallback_clear_named(name: str) -> None:
+    path = _secret_file(name)
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        logger.debug(f"清理兜底凭据文件失败（{name}，可忽略）: {e}")
+
+
+def load_secret(name: str, use_cache: bool = True) -> str:
+    """读取命名密钥；不存在时返回空字符串。绝不抛异常。"""
+    try:
+        key = _check_secret_name(name)
+    except ValueError as e:
+        logger.warning(str(e))
+        return ""
+
+    if use_cache and _secret_cache.get(key) is not None:
+        return _secret_cache[key] or ""
+
+    value: Optional[str] = None
+    if sys.platform == "darwin":
+        value = _mac_find_named(key)
+    elif sys.platform == "win32":
+        path = _secret_file(key)
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    blob = f.read()
+                if blob:
+                    plain = _win_unprotect(blob)
+                    if plain is not None:
+                        value = plain.decode("utf-8")
+            except Exception as e:
+                logger.warning(f"读取 DPAPI 凭据失败（{key}）: {e}")
+    else:
+        value = _fallback_read_named(key)
+
+    _secret_cache[key] = value or ""
+    return _secret_cache[key] or ""
+
+
+def save_secret(name: str, value: str) -> bool:
+    """保存命名密钥；空值等价于清除。返回是否成功。"""
+    try:
+        key = _check_secret_name(name)
+    except ValueError as e:
+        logger.warning(str(e))
+        return False
+
+    if not value:
+        clear_secret(key)
+        return True
+
+    ok = False
+    if sys.platform == "darwin":
+        ok = _mac_save_named(key, value)
+    elif sys.platform == "win32":
+        blob = _win_protect(value.encode("utf-8"))
+        if blob is not None:
+            try:
+                path = _secret_file(key)
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "wb") as f:
+                    f.write(blob)
+                ok = True
+            except Exception as e:
+                logger.warning(f"写入 DPAPI 凭据失败（{key}）: {e}")
+    else:
+        ok = _fallback_write_named(key, value)
+
+    if not ok and sys.platform == "darwin":
+        # macOS 钥匙串不可用时不能把 PAT 降级为 Base64 文件；那不是加密。
+        # 失败由调用方显式提示用户检查钥匙串权限。
+        logger.error(f"凭据安全存储不可用（{key}），已拒绝写入不安全兜底文件")
+        return False
+    if not ok:
+        logger.warning(f"凭据安全存储不可用（{key}），降级写入受限兜底文件")
+        ok = _fallback_write_named(key, value)
+
+    if ok:
+        _secret_cache[key] = value
+    return ok
+
+
+def clear_secret(name: str) -> None:
+    """清除命名密钥。"""
+    try:
+        key = _check_secret_name(name)
+    except ValueError as e:
+        logger.warning(str(e))
+        return
+
+    if sys.platform == "darwin":
+        _mac_clear_named(key)
+    elif sys.platform == "win32":
+        path = _secret_file(key)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            logger.debug(f"清理 DPAPI 凭据失败（{key}，可忽略）: {e}")
+    _fallback_clear_named(key)
+    _secret_cache[key] = ""
+
+
+def has_secret(name: str) -> bool:
+    return bool(load_secret(name))

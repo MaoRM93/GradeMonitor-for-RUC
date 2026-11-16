@@ -55,6 +55,49 @@ class SignedManifest {
   final String payload;
 }
 
+/// 远程通知签名块（Ed25519）
+///
+/// 蓝屏 / 红屏 / 普通广播 / 114 号段关停这四条通道原先只靠
+/// 「tag 是否存在」判断，任何人只要拿到仓库写权限（或误操作）
+/// 就能让全量客户端弹屏。加上签名后，只有持有本机私钥的人
+/// 才能签发一条被客户端接受的通知：
+///
+/// ```text
+/// gm-notice-v1
+/// kind=blue
+/// tag=developer-alert
+/// sha256=<通知正文的 SHA-256，小写 hex>
+/// sig=BASE64（64 字节分离签名）
+/// ```
+///
+/// 被签名的原文 = 该块内除 `sig=` 行以外的全部行，按原顺序以 `\n`
+/// 连接后再补一个 `\n`。`sha256` 绑定的是「去掉签名块之后剩下的正文」，
+/// 所以正文里写什么链接、什么措辞，也被一并锁进签名里。
+class SignedNotice {
+  const SignedNotice({
+    required this.kind,
+    required this.tag,
+    required this.sha256,
+    required this.signature,
+    required this.payload,
+  });
+
+  /// blue / red / broadcast / disable114
+  final String kind;
+
+  /// 该通知对应的 Release tag
+  final String tag;
+
+  /// 通知正文（去掉签名块后）的 SHA-256，小写 hex
+  final String sha256;
+
+  /// Ed25519 分离签名的 base64
+  final String signature;
+
+  /// 被签名的原文（不含签名行）
+  final String payload;
+}
+
 /// 校验结果；[ok] 为 false 时 [reason] 说明原因，可直接展示给用户。
 class ManifestVerifyResult {
   const ManifestVerifyResult({required this.ok, this.reason = ''});
@@ -67,8 +110,7 @@ class ManifestVerifyResult {
 
 /// 发布包签名校验器
 ///
-/// 公钥以常量形式编译进客户端：私钥只存在于开发者本机
-/// （`~/Library/Application Support/GradeMonitor-signing/release_private.pem`），
+/// 公钥以常量形式编译进客户端：对应私钥仅保存在开发机 macOS 钥匙串，
 /// 不随包分发、不进仓库。轮换密钥需重新发版。
 class UpdateVerifier {
   UpdateVerifier._();
@@ -77,10 +119,13 @@ class UpdateVerifier {
 
   /// Ed25519 公钥（raw 32 字节，base64）
   static const String publicKeyBase64 =
-      'TRsfcPq3kVHZyBdG84yI5toXdhjDZxbn3MYpiZzBjI8=';
+      'OCd+5QCWpbuQ0QywgE32rQaPzOUaK3mow+CERXKCq88=';
 
   /// 清单块的起始标记行
   static const String manifestHeader = 'gm-release-v1';
+
+  /// 远程通知签名块的起始标记行
+  static const String noticeHeader = 'gm-notice-v1';
 
   /// 该平台对应的标记值
   static String platformTag() => Platform.isMacOS ? 'macos' : 'windows';
@@ -150,10 +195,85 @@ class UpdateVerifier {
     return all.isEmpty ? null : all.first;
   }
 
+  /// 从 Release 正文中解析远程通知的签名块；没有则返回 null。
+  ///
+  /// 一个 Release 正文最多认一个通知块。若正文里写了多个（例如复制粘贴
+  /// 出错），取第一个能解析出完整字段的块——其余视为噪声。
+  static SignedNotice? parseNotice(String releaseBody) {
+    for (final block in _splitBlocks(
+      releaseBody,
+      header: noticeHeader,
+      requiredField: 'kind',
+    )) {
+      final kind = (block.fields['kind'] ?? '').trim();
+      final tag = (block.fields['tag'] ?? '').trim();
+      final sha = (block.fields['sha256'] ?? '').trim().toLowerCase();
+      final sig = (block.fields['sig'] ?? '').trim();
+      if (kind.isEmpty || tag.isEmpty || sha.isEmpty || sig.isEmpty) {
+        _log.warning('通知签名块字段不完整（kind=$kind），忽略该块');
+        continue;
+      }
+      return SignedNotice(
+        kind: kind,
+        tag: tag,
+        sha256: sha,
+        signature: sig,
+        payload: block.payload,
+      );
+    }
+    return null;
+  }
+
+  /// 从 Release 正文中移除通知签名块，用于展示给用户看。
+  static String stripNoticeBlocks(String releaseBody) =>
+      _stripBlocks(releaseBody, noticeHeader);
+
+  /// 校验一条远程通知：签名 → 正文摘要。
+  ///
+  /// [releaseBody] 必须是完整的原始正文（含签名块），因为摘要算的是
+  /// 「去掉签名块之后的正文」。任何一步不通过都返回失败。
+  static Future<ManifestVerifyResult> verifyNotice(
+    SignedNotice notice,
+    String releaseBody,
+  ) async {
+    try {
+      final sigBytes = base64Decode(notice.signature);
+      if (sigBytes.length != 64) {
+        return const ManifestVerifyResult.failure('签名长度异常（应为 64 字节）');
+      }
+      final pubBytes = base64Decode(publicKeyBase64);
+      if (pubBytes.length != 32) {
+        return const ManifestVerifyResult.failure('内置公钥异常（应为 32 字节）');
+      }
+      final algo = Ed25519();
+      final ok = await algo.verify(
+        utf8.encode(notice.payload),
+        signature: Signature(
+          sigBytes,
+          publicKey: SimplePublicKey(pubBytes, type: KeyPairType.ed25519),
+        ),
+      );
+      if (!ok) return const ManifestVerifyResult.failure('通知签名不匹配');
+      final body = stripNoticeBlocks(releaseBody);
+      final actual = crypto.sha256.convert(utf8.encode(body)).toString();
+      if (actual != notice.sha256) {
+        return const ManifestVerifyResult.failure('通知正文与签名摘要不一致');
+      }
+      return const ManifestVerifyResult.success();
+    } catch (e) {
+      _log.warning('通知签名校验异常: $e');
+      return ManifestVerifyResult.failure('通知签名校验异常：$e');
+    }
+  }
+
   /// 从 Release 正文中移除所有签名清单块，用于展示更新日志。
   ///
   /// 清单是给机器看的，不该出现在用户读的更新日志里。
-  static String stripManifestBlocks(String releaseBody) {
+  static String stripManifestBlocks(String releaseBody) =>
+      _stripBlocks(releaseBody, manifestHeader);
+
+  /// 移除首行为 [header] 的所有围栏块，其余内容原样保留。
+  static String _stripBlocks(String releaseBody, String header) {
     final lines = const LineSplitter().convert(releaseBody);
     final kept = <String>[];
     int i = 0;
@@ -174,16 +294,14 @@ class UpdateVerifier {
         break;
       }
       final inner = lines.sublist(start, j);
-      final isManifest = inner.isNotEmpty && inner.first.trim() == manifestHeader;
-      if (!isManifest) kept.addAll(lines.sublist(i, j + 1));
+      final isTarget = inner.isNotEmpty && inner.first.trim() == header;
+      if (!isTarget) kept.addAll(lines.sublist(i, j + 1));
       i = j + 1;
     }
     // 折叠因移除产生的多余空行
     final out = <String>[];
     for (final line in kept) {
-      if (line.trim().isEmpty &&
-          out.isNotEmpty &&
-          out.last.trim().isEmpty) {
+      if (line.trim().isEmpty && out.isNotEmpty && out.last.trim().isEmpty) {
         continue;
       }
       out.add(line);
@@ -197,8 +315,15 @@ class UpdateVerifier {
     return out.join('\n');
   }
 
-  /// 按行扫描围栏块。围栏用 ``` 包住的代码块，首行为 [manifestHeader]。
-  static List<_ManifestBlock> _splitBlocks(String body) {
+  /// 按行扫描围栏块。围栏用 ``` 包住的代码块，首行为 [header]。
+  ///
+  /// [requiredField] 不为空时，缺少该字段的块会被丢弃——清单要求
+  /// `platform`，通知要求 `kind`，这样两类块即便混在同一正文里也不会串。
+  static List<_ManifestBlock> _splitBlocks(
+    String body, {
+    String header = manifestHeader,
+    String? requiredField,
+  }) {
     final out = <_ManifestBlock>[];
     final lines = const LineSplitter().convert(body);
     int i = 0;
@@ -216,15 +341,15 @@ class UpdateVerifier {
       if (j >= lines.length) break;
       final inner = lines.sublist(start, j);
       i = j + 1;
-      if (inner.isEmpty || inner.first.trim() != manifestHeader) continue;
+      if (inner.isEmpty || inner.first.trim() != header) continue;
 
       // 第一行是 header，其余为 key=value；剔除 sig 行即为被签名原文
       final fields = <String, String>{};
       final payloadLines = <String>[];
       for (final raw in inner) {
         final line = raw.trim();
-        if (line == manifestHeader) {
-          payloadLines.add(manifestHeader);
+        if (line == header) {
+          payloadLines.add(header);
           continue;
         }
         if (line.isEmpty) continue;
@@ -239,10 +364,13 @@ class UpdateVerifier {
         fields[k] = v;
         payloadLines.add('$k=$v');
       }
-      if (!fields.containsKey('platform')) continue;
+      final need = requiredField ?? 'platform';
+      if (!fields.containsKey(need)) continue;
       out.add(
         _ManifestBlock(
-          header: 'platform=${fields['platform']}',
+          header: fields.containsKey('platform')
+              ? 'platform=${fields['platform']}'
+              : header,
           fields: fields,
           payload: '${payloadLines.join('\n')}\n',
         ),

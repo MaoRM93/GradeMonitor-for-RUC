@@ -6,15 +6,31 @@ import 'dart:io';
 /// 存储：`~/Library/Application Support/GradeMonitor/ui_prefs.json`
 /// （Windows: `%APPDATA%\GradeMonitor\ui_prefs.json`）
 ///
-/// 当前用途：提示横条「不再显示」的永久记录。
-/// 「叉」是单次隐藏（仅内存，重开 App 恢复），「不再显示」写入本文件。
+/// 两类用途：
+///   - 提示横条「不再显示」的永久记录（`dismissed_banners`）。「叉」是单次
+///     隐藏（仅内存，重开 App 恢复），「不再显示」写入本文件。
+///   - 通用布尔/字符串偏好（`prefs`）。用于跨重启保持的界面状态，例如
+///     开发者选项是否常驻、轮询秒数输入框的上次值。
 class UiPrefsService {
   UiPrefsService._();
+
+  /// 开发者选项是否常驻：一旦解锁成功就置真，只有手动「关闭开发者选项」才置假。
+  ///
+  /// 存在的理由：后端凭据读取失败（钥匙串拒绝、用户清空）时
+  /// `/api/developer/status` 会回 `unlocked:false`，若只信后端就会把面板
+  /// 悄悄收起来，与"除非手动关闭否则不隐藏"的预期相反。
+  static const String prefDevPanelPinned = 'dev_panel_pinned';
+
+  /// 开发者选项里「轮询秒数」输入框的上次值（跨重启、跨选项卡保持）。
+  static const String prefDevIntervalSeconds = 'dev_interval_seconds';
 
   static const String _fileName = 'ui_prefs.json';
 
   /// 永久隐藏的提示条 key 集合
   static final Set<String> _permanentDismissed = <String>{};
+
+  /// 通用偏好（字符串化存储，读取时按需转型）
+  static final Map<String, String> _prefs = <String, String>{};
 
   /// 单次隐藏的提示条 key 集合（仅本次运行会话有效）
   static final Set<String> sessionDismissed = <String>{};
@@ -52,9 +68,54 @@ class UiPrefsService {
         if (list is List) {
           _permanentDismissed.addAll(list.map((e) => e.toString()));
         }
+        final prefs = raw['prefs'];
+        if (prefs is Map) {
+          for (final entry in prefs.entries) {
+            _prefs[entry.key.toString()] = entry.value.toString();
+          }
+        }
       }
     } catch (_) {
       // 载入失败按"无记录"处理，不影响功能
+    }
+  }
+
+  /// 读一个通用偏好；不存在时返回 [fallback]。
+  static String? readPref(String key, {String? fallback}) =>
+      _prefs[key] ?? fallback;
+
+  /// 读布尔偏好；无法解析时返回 [fallback]。
+  static bool readBoolPref(String key, {bool fallback = false}) {
+    final raw = _prefs[key];
+    if (raw == null) return fallback;
+    return raw == 'true';
+  }
+
+  /// 写一个通用偏好（落盘）。写入失败仅影响"记住"，不阻塞交互。
+  static Future<void> writePref(String key, String value) async {
+    _prefs[key] = value;
+    await _flush();
+  }
+
+  static Future<void> writeBoolPref(String key, bool value) =>
+      writePref(key, value ? 'true' : 'false');
+
+  /// 把当前全部偏好写回磁盘（同时保留提示条的永久隐藏记录）。
+  static Future<void> _flush() async {
+    try {
+      final path = _resolvePath();
+      if (path == null) return;
+      final file = File(path);
+      final parent = file.parent;
+      if (!parent.existsSync()) parent.createSync(recursive: true);
+      await file.writeAsString(
+        jsonEncode({
+          'dismissed_banners': _permanentDismissed.toList(),
+          'prefs': _prefs,
+        }),
+      );
+    } catch (_) {
+      // 写盘失败仅影响"记住"，不阻塞交互
     }
   }
 
@@ -67,17 +128,6 @@ class UiPrefsService {
   /// 永久隐藏（落盘）
   static Future<void> dismissPermanently(String key) async {
     _permanentDismissed.add(key);
-    try {
-      final path = _resolvePath();
-      if (path == null) return;
-      final file = File(path);
-      final parent = file.parent;
-      if (!parent.existsSync()) parent.createSync(recursive: true);
-      await file.writeAsString(
-        jsonEncode({'dismissed_banners': _permanentDismissed.toList()}),
-      );
-    } catch (_) {
-      // 写盘失败仅影响"记住"，不阻塞交互
-    }
+    await _flush();
   }
 }

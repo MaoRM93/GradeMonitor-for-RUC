@@ -145,15 +145,15 @@ class _NoteBannerState extends State<NoteBanner> {
                     minimumSize: const Size(0, 30),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  child: const Text(
-                    '不再显示',
-                    style: TextStyle(fontSize: 11.5),
-                  ),
+                  child: const Text('不再显示', style: TextStyle(fontSize: 11.5)),
                 ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                  constraints: const BoxConstraints(
+                    minWidth: 26,
+                    minHeight: 26,
+                  ),
                   icon: Icon(
                     Icons.close_rounded,
                     size: 15,

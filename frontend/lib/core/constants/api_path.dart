@@ -31,10 +31,14 @@ class ApiPath {
   static const String notificationPreview = '/api/notification/preview';
   static const String notificationForwarders = '/api/notification/forwarders';
   static const String developerStatus = '/api/developer/status';
-  static const String developerUnlock = '/api/developer/unlock';
-  static const String developerConsole = '/api/developer/console';
-  static const String developerDisable = '/api/developer/disable';
+  static const String developerLogin = '/api/developer/login';
+  static const String developerLogout = '/api/developer/logout';
+  static const String developerFlags = '/api/developer/flags';
   static const String curriculumOpen = '/api/curriculum/open';
+  static const String features = '/api/features';
+  static const String developerFeatures = '/api/developer/features';
+  static const String developerGatesPublish = '/api/developer/gates/publish';
+  static const String developerNoticePublish = '/api/developer/notices/publish';
 
   // Dev Tools
   static const String devQueryOnce = '/api/dev/query-once';

@@ -8,6 +8,7 @@ import 'core/theme/app_theme.dart';
 import 'core/logger/app_logger.dart';
 import 'core/constants/api_token.dart';
 import 'core/service/backend_service.dart';
+import 'core/service/feature_gate_service.dart';
 import 'core/service/tray_service.dart';
 import 'core/service/notification_service.dart';
 import 'core/network/websocket_service.dart';
@@ -48,6 +49,11 @@ void main() async {
 
   await BackendService().start();
 
+  // 功能组开关：必须在托盘/WebSocket/通知之前加载，
+  // 否则首帧会按"全开"初始化，被下线的能力仍会短暂生效。
+  await FeatureGateService.instance.ensureLoaded();
+  final gates = FeatureGateService.instance;
+
   // 初始化通知服务（失败不影响 App 运行）
   await NotificationService().init();
 
@@ -56,6 +62,8 @@ void main() async {
   // window_manager 的 show() 在 macOS 上内部会 makeKeyAndOrderFront +
   // NSApp.activate(ignoringOtherApps: true)，已足以把 App 提到前台。
   NotificationService.onNotificationTap = () async {
+    // Flag-1054：通知点击唤起主窗口可被远程静默下线
+    if (!gates.isEnabled(FeatureGateService.flag1054NotificationTap)) return;
     try {
       if (!await windowManager.isVisible()) {
         await windowManager.show();
@@ -68,14 +76,17 @@ void main() async {
   };
 
   // 全局 WebSocket 通知监听（独立于任何页面生命周期）
-  _globalWs.connect();
-  _globalWs.eventStream.listen((event) {
-    if (event.type == WsEventType.showNotification) {
-      final title = event.data['title'] as String? ?? '';
-      final message = event.data['message'] as String? ?? '';
-      NotificationService().show(title, message);
-    }
-  });
+  // Flag-1074：实时推送通道可被远程静默下线
+  if (gates.isEnabled(FeatureGateService.flag1074WebSocket)) {
+    _globalWs.connect();
+    _globalWs.eventStream.listen((event) {
+      if (event.type == WsEventType.showNotification) {
+        final title = event.data['title'] as String? ?? '';
+        final message = event.data['message'] as String? ?? '';
+        NotificationService().show(title, message);
+      }
+    });
+  }
 
   await windowManager.ensureInitialized();
 
@@ -99,7 +110,9 @@ void main() async {
   );
 
   // 根据设置决定是否初始化托盘图标
-  if (await _shouldShowTray(log)) {
+  // Flag-1052：系统托盘可被远程静默下线
+  if (gates.isEnabled(FeatureGateService.flag1052Tray) &&
+      await _shouldShowTray(log)) {
     await TrayService().init();
   }
 

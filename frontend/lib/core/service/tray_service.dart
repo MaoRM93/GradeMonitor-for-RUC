@@ -24,8 +24,9 @@ class TrayService {
       // setIcon 内部会自动拼接 <exeDir>/data/flutter_assets/ 前缀，
       // 因此必须传相对 assets 的路径，不能传绝对路径（否则托盘图标失效、
       // 右键菜单也不可用）。Windows 托盘对 PNG 支持不稳，优先用 ICO。
-      final String iconPath =
-          Platform.isWindows ? 'assets/app_icon.ico' : 'assets/tray_icon.png';
+      final String iconPath = Platform.isWindows
+          ? 'assets/app_icon.ico'
+          : 'assets/tray_icon.png';
 
       // macOS：黑白剪影 + isTemplate 模板图，随系统深浅色自动黑/白切换
       // （与微信托盘一致）；Windows 保持彩色 ICO。

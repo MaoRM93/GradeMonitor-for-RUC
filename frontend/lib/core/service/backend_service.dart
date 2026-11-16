@@ -326,9 +326,7 @@ class BackendService {
           Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
       if (home != null && home.isNotEmpty) {
         if (Platform.isMacOS) {
-          candidates.add(
-            '$home/Library/Application Support/GradeMonitor',
-          );
+          candidates.add('$home/Library/Application Support/GradeMonitor');
         } else if (Platform.isWindows) {
           final appData = Platform.environment['APPDATA'];
           if (appData != null && appData.isNotEmpty) {
@@ -339,9 +337,7 @@ class BackendService {
       }
 
       for (final dir in candidates) {
-        final f = File(
-          '$dir${Platform.pathSeparator}api_token',
-        );
+        final f = File('$dir${Platform.pathSeparator}api_token');
         if (!f.existsSync()) continue;
         final token = f.readAsStringSync().trim();
         if (token.isNotEmpty && token != ApiToken.value) {

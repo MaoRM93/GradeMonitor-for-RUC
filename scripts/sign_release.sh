@@ -17,14 +17,16 @@
 #
 # 依赖: openssl（macOS 自带 LibreSSL 即可）、shasum
 #
-# 私钥位置（不进仓库、不随包分发）:
-#   ~/Library/Application Support/GradeMonitor-signing/release_private.pem
+# 私钥位置：开发机 macOS 钥匙串（不进仓库、不随包分发、不写入临时文件）。
 #
 # 输出为一段可直接粘进 Release 正文的 ```text 围栏块。
 # 客户端 UpdateVerifier 会从中解析本平台清单并用内置公钥验签；
 # 验签或摘要不匹配时，自动安装会被拒绝（fail-closed）。
 
 set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT_DIR"
 
 if [[ $# -ne 3 ]]; then
   echo "用法: $0 <安装包路径> <macos|windows> <版本号>" >&2
@@ -44,14 +46,6 @@ if [[ "$PLATFORM" != "macos" && "$PLATFORM" != "windows" ]]; then
   exit 1
 fi
 
-KEY_DIR="$HOME/Library/Application Support/GradeMonitor-signing"
-PRIVATE_KEY="$KEY_DIR/release_private.pem"
-if [[ ! -f "$PRIVATE_KEY" ]]; then
-  echo "错误: 找不到私钥 $PRIVATE_KEY" >&2
-  echo "（私钥只应存在于开发机，绝不入库、绝不随包分发）" >&2
-  exit 1
-fi
-
 BASENAME="$(basename "$FILE")"
 SHA256="$(shasum -a 256 "$FILE" | cut -d' ' -f1)"
 
@@ -59,7 +53,6 @@ TMPDIR_SIGN="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_SIGN"' EXIT
 
 PAYLOAD="$TMPDIR_SIGN/payload.txt"
-SIG="$TMPDIR_SIGN/sig.bin"
 
 # 被签名的原文：header + 各字段，行尾统一 \n（最后一行也带 \n）
 {
@@ -70,15 +63,17 @@ SIG="$TMPDIR_SIGN/sig.bin"
   echo "sha256=$SHA256"
 } > "$PAYLOAD"
 
-openssl pkeyutl -sign -inkey "$PRIVATE_KEY" -rawin -in "$PAYLOAD" -out "$SIG"
-
-SIG_LEN="$(wc -c < "$SIG" | tr -d ' ')"
-if [[ "$SIG_LEN" != "64" ]]; then
-  echo "错误: 签名为 $SIG_LEN 字节，应为 64 字节" >&2
-  exit 1
-fi
-
-SIG_B64="$(base64 < "$SIG" | tr -d '\n')"
+SIG_B64="$(python3 - "$PAYLOAD" <<'PY'
+import base64, sys
+from backend.storage.signing_keys import release_private_key
+payload = open(sys.argv[1], 'rb').read()
+sig = release_private_key().sign(payload)
+if len(sig) != 64:
+    raise SystemExit(f'签名长度异常：{len(sig)}')
+print(base64.b64encode(sig).decode('ascii'))
+PY
+)"
+SIG_LEN="64"
 
 echo "────────────────────────────────────────────────"
 echo "文件     : $BASENAME"

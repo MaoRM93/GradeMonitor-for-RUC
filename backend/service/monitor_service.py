@@ -26,6 +26,7 @@ from backend.storage.cache import (
     increment_query_count,
     reset_query_count,
 )
+from backend.storage.feature_gates import gate_enabled
 from backend.storage.settings import load_settings
 from backend.utils.logger import get_logger
 
@@ -140,10 +141,10 @@ class MonitorService:
                     await asyncio.sleep(30)
                     continue
 
-                # 时间窗口检查
+                # 时间窗口检查（功能组 Flag-1092 可远程关闭时间窗，改为全天查询）
                 start = settings.get("start_time", "08:00")
                 end = settings.get("end_time", "22:00")
-                if not self._in_time_window(start, end):
+                if gate_enabled("Flag-1092") and not self._in_time_window(start, end):
                     now_str = datetime.now().strftime("%H:%M")
                     logger.info(f"[自动监控] 当前时间 {now_str} 不在监控时段 {start}-{end} 内，等待 60s")
                     await asyncio.sleep(60)
@@ -157,12 +158,13 @@ class MonitorService:
                     f"rank_monitor={settings.get('rank_monitor_enabled')}, "
                     f"interval={settings.get('interval_seconds', 300)}s"
                 )
-                if settings.get("auto_monitor_enabled"):
+                # 功能组闸门：Flag-1090 / Flag-1091 可远程静默停掉对应那一路监控
+                if settings.get("auto_monitor_enabled") and gate_enabled("Flag-1090"):
                     await self._check_grades(username, password, is_simple)
                     queried = True
 
                 # 排名监控
-                if settings.get("rank_monitor_enabled"):
+                if settings.get("rank_monitor_enabled") and gate_enabled("Flag-1091"):
                     await self._check_rank(username, password, is_simple)
                     queried = True
 
@@ -177,17 +179,23 @@ class MonitorService:
                 # increment_query_count()，计数变 1，下一轮就恢复原有的随机/定时逻辑。
                 # 注意：只有本轮真的查询过（queried）才跳过等待，避免两路监控都关闭时
                 # 计数永远为 0 导致空转。
-                if is_first_ever_query and queried:
+                if is_first_ever_query and queried and gate_enabled("Flag-1094"):
                     logger.info("[自动监控] 首次安装后的首轮查询完成，跳过本轮等待")
                     continue
 
                 # 等待下一轮
                 # 安全模式（默认开启）：每轮结束后在设定间隔 ±100 秒内重新
                 # 随机取等待时间，降低固定间隔轮询被风控识别的风险
-                interval = settings.get("interval_seconds", 300)
-                if settings.get("random_interval_enabled", True):
+                # 设置文件可能来自旧版本或被手工编辑；运行时再次收紧边界，
+                # 避免负数/零间隔造成对教务系统的紧循环请求。
+                try:
+                    interval = int(settings.get("interval_seconds", 300))
+                except (TypeError, ValueError):
+                    interval = 300
+                interval = min(86400, max(60, interval))
+                if settings.get("random_interval_enabled", True) and gate_enabled("Flag-1093"):
                     wait_seconds = max(
-                        10, random.randint(interval - 100, interval + 100)
+                        60, random.randint(interval - 100, interval + 100)
                     )
                     logger.info(
                         f"[自动监控] 安全模式生效，本次实际等待 {wait_seconds}s"

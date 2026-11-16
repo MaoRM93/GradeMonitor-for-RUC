@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 enum AppNavTarget { dashboard, grades, scheme, settings }
 
 /// 当前待处理的导航请求；AppNavigation 消费后会置回 null。
-final ValueNotifier<AppNavTarget?> navRequest = ValueNotifier<AppNavTarget?>(null);
+final ValueNotifier<AppNavTarget?> navRequest = ValueNotifier<AppNavTarget?>(
+  null,
+);
 
 /// 已在本次后端会话解锁开发者选项；设置页据此显示开发者分区。
 final ValueNotifier<bool> developerOptionsEnabled = ValueNotifier<bool>(false);

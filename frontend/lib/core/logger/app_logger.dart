@@ -57,7 +57,8 @@ String _getLogDir() {
 
 /// 拼接用户主目录下的相对路径
 String _homePath(String relative) {
-  final home = Platform.environment['HOME'] ??
+  final home =
+      Platform.environment['HOME'] ??
       Platform.environment['USERPROFILE'] ??
       Directory.systemTemp.path;
   return '$home/$relative';
@@ -400,9 +401,7 @@ class AppLogger {
             deleted = true;
           } else {
             final len = await file.length();
-            shrunk = _position > 0 &&
-                len < _position ~/ 2 &&
-                len < 1024 * 1024;
+            shrunk = _position > 0 && len < _position ~/ 2 && len < 1024 * 1024;
           }
         } catch (e) {
           debugPrint('[AppLogger] 轮转探测失败: $e');

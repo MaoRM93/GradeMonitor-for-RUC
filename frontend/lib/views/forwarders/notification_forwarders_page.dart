@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/network/api_client.dart';
+import '../../core/service/feature_gate_service.dart';
+import '../../widgets/feature_gate.dart';
 import '../../widgets/toast_host.dart';
 
 /// 收件凭据只保留在本机后端；本页在当前应用会话内保留已保存草稿。
@@ -250,11 +252,13 @@ class _NotificationForwardersPageState
                 label: Text(label),
               ),
               const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: canTest ? () => _test(id) : null,
-                icon: const Icon(Icons.send_outlined, size: 16),
-                label: const Text('测试通道'),
-              ),
+              // Flag-1033：通道测试按钮可被远程静默下线
+              if (featureEnabled(FeatureGateService.flag1033ForwarderTest))
+                OutlinedButton.icon(
+                  onPressed: canTest ? () => _test(id) : null,
+                  icon: const Icon(Icons.send_outlined, size: 16),
+                  label: const Text('测试通道'),
+                ),
             ],
           ),
         ],
@@ -278,79 +282,95 @@ class _NotificationForwardersPageState
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 20),
-              _channel(
-                title: 'Bark',
-                icon: SvgPicture.asset(
-                  'assets/Apple_Logo_Blue.svg',
-                  colorFilter: ColorFilter.mode(cs.primary, BlendMode.srcIn),
-                ),
-                enabled: _bark,
-                configured: _barkConfigured,
-                id: 'bark',
-                onChanged: (v) => setState(() => _bark = v),
-                fields: [
-                  TextField(
-                    controller: _barkUrl,
-                    obscureText: true,
-                    onChanged: (_) => _markDirty('bark'),
-                    decoration: _field('地址和 Key', 'https://api.day.app/你的设备密钥'),
+              FeatureGate(
+                flag: FeatureGateService.flag1030Bark,
+                child: _channel(
+                  title: 'Bark',
+                  icon: SvgPicture.asset(
+                    'assets/Apple_Logo_Blue.svg',
+                    colorFilter: ColorFilter.mode(cs.primary, BlendMode.srcIn),
                   ),
-                ],
-                description: const Text(
-                  '适用于 iPhone 和 iPad 端，请您在 App Store 中下载 Bark 软件，授予其适当权限，并点击服务器页面复制按钮右侧的向下箭头，复制地址和Key，将得到的内容粘贴到本程序上面的文本框。',
-                ),
-              ),
-              _channel(
-                title: 'Meow',
-                icon: SvgPicture.asset(
-                  'assets/nearlink.svg',
-                  colorFilter: ColorFilter.mode(cs.primary, BlendMode.srcIn),
-                ),
-                enabled: _meow,
-                configured: _meowConfigured,
-                id: 'meow',
-                onChanged: (v) => setState(() => _meow = v),
-                fields: [
-                  TextField(
-                    controller: _meowNickname,
-                    obscureText: true,
-                    onChanged: (_) => _markDirty('meow'),
-                    decoration: _field('昵称', null),
-                  ),
-                ],
-                description: const Text(
-                  '适用于 HarmonyOS 端，请您在 App Gallery / 应用市场 中下载 Meow 应用，授予其适当的权限，并将其昵称复制到本程序上面的文本框。',
-                ),
-              ),
-              _channel(
-                title: 'ntfy',
-                icon: Icon(Icons.android_rounded, color: cs.primary, size: 26),
-                enabled: _ntfy,
-                configured: _ntfyConfigured,
-                id: 'ntfy',
-                onChanged: (v) => setState(() => _ntfy = v),
-                fields: [
-                  TextField(
-                    controller: _ntfyServer,
-                    onChanged: (_) => _markDirty('ntfy'),
-                    decoration: _field('服务器', null),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _ntfyTopic,
-                    obscureText: true,
-                    onChanged: (_) => _markDirty('ntfy'),
-                    decoration: _field('Topic', '例如 grade_随机长字符串'),
-                  ),
-                ],
-                description: Wrap(
-                  children: [
-                    const Text(
-                      '适用于 Android 客户端，请您在应用商店下载 ntfy 软件，授予其适当的权限，点按右下角+添加订阅主题，名称自拟且必须具有较强的个性，否则您的成绩可能被配置同名的其他用户接收。自拟之后，勾选低功耗模式下实时推送复选框，然后点击右上角的“订阅”保存，随后将自拟的名称填写到本程序上面的 Topic 文本框。默认配置下无需配置服务器。请注意，国产 Android 手机厂商可能会杀掉 ntfy 的后台，为保证其适用性，请参阅 ',
+                  enabled: _bark,
+                  configured: _barkConfigured,
+                  id: 'bark',
+                  onChanged: (v) => setState(() => _bark = v),
+                  fields: [
+                    TextField(
+                      controller: _barkUrl,
+                      obscureText: true,
+                      onChanged: (_) => _markDirty('bark'),
+                      decoration: _field(
+                        '地址和 Key',
+                        'https://api.day.app/你的设备密钥',
+                      ),
                     ),
-                    _link('dontkillmyapp.com', 'https://dontkillmyapp.com/'),
-                    const Text(' 配置您的手机管家等软件。'),
                   ],
+                  description: const Text(
+                    '适用于 iPhone 和 iPad 端，请您在 App Store 中下载 Bark 软件，授予其适当权限，并点击服务器页面复制按钮右侧的向下箭头，复制地址和Key，将得到的内容粘贴到本程序上面的文本框。',
+                  ),
+                ),
+              ),
+              FeatureGate(
+                flag: FeatureGateService.flag1031Meow,
+                child: _channel(
+                  title: 'Meow',
+                  icon: SvgPicture.asset(
+                    'assets/nearlink.svg',
+                    colorFilter: ColorFilter.mode(cs.primary, BlendMode.srcIn),
+                  ),
+                  enabled: _meow,
+                  configured: _meowConfigured,
+                  id: 'meow',
+                  onChanged: (v) => setState(() => _meow = v),
+                  fields: [
+                    TextField(
+                      controller: _meowNickname,
+                      obscureText: true,
+                      onChanged: (_) => _markDirty('meow'),
+                      decoration: _field('昵称', null),
+                    ),
+                  ],
+                  description: const Text(
+                    '适用于 HarmonyOS 端，请您在 App Gallery / 应用市场 中下载 Meow 应用，授予其适当的权限，并将其昵称复制到本程序上面的文本框。',
+                  ),
+                ),
+              ),
+              FeatureGate(
+                flag: FeatureGateService.flag1032Ntfy,
+                child: _channel(
+                  title: 'ntfy',
+                  icon: Icon(
+                    Icons.android_rounded,
+                    color: cs.primary,
+                    size: 26,
+                  ),
+                  enabled: _ntfy,
+                  configured: _ntfyConfigured,
+                  id: 'ntfy',
+                  onChanged: (v) => setState(() => _ntfy = v),
+                  fields: [
+                    TextField(
+                      controller: _ntfyServer,
+                      onChanged: (_) => _markDirty('ntfy'),
+                      decoration: _field('服务器', null),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _ntfyTopic,
+                      obscureText: true,
+                      onChanged: (_) => _markDirty('ntfy'),
+                      decoration: _field('Topic', '例如 grade_随机长字符串'),
+                    ),
+                  ],
+                  description: Wrap(
+                    children: [
+                      const Text(
+                        '适用于 Android 客户端，请您在应用商店下载 ntfy 软件，授予其适当的权限，点按右下角+添加订阅主题，名称自拟且必须具有较强的个性，否则您的成绩可能被配置同名的其他用户接收。自拟之后，勾选低功耗模式下实时推送复选框，然后点击右上角的“订阅”保存，随后将自拟的名称填写到本程序上面的 Topic 文本框。默认配置下无需配置服务器。请注意，国产 Android 手机厂商可能会杀掉 ntfy 的后台，为保证其适用性，请参阅 ',
+                      ),
+                      _link('dontkillmyapp.com', 'https://dontkillmyapp.com/'),
+                      const Text(' 配置您的手机管家等软件。'),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 4),

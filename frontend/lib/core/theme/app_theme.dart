@@ -129,8 +129,8 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
 
-      // 全局输入框：白/透明内底、24px 圆角描边，浮动标签由 OutlineInputBorder
-      // 自动挖槽承托，不会被边线穿过。
+      // 全局输入框：白/透明内底、12px 圆角矩形描边（24 在单行输入框上会变成
+      // 胶囊形），浮动标签由 OutlineInputBorder 自动挖槽承托，不会被边线穿过。
       inputDecorationTheme: InputDecorationTheme(
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
@@ -138,19 +138,19 @@ class AppTheme {
         ),
         floatingLabelStyle: TextStyle(color: colorScheme.primary),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFAAB4C1)),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFAAB4C1)),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: colorScheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: error),
         ),
       ),
@@ -296,19 +296,19 @@ class AppTheme {
         ),
         floatingLabelStyle: TextStyle(color: colorScheme.primary),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFAAB4C1)),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFAAB4C1)),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: colorScheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: error),
         ),
       ),

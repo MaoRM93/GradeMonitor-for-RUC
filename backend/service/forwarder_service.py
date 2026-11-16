@@ -5,6 +5,7 @@ from urllib.parse import quote
 import requests
 
 from backend.storage.cache import atomic_write_json, get_data_file_path
+from backend.storage.feature_gates import gate_enabled
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -88,11 +89,28 @@ def _send(cfg: dict, title: str, message: str) -> dict:
     return results
 
 
+# 功能组编号 → 通道名；任一通道被远程关闭即静默跳过（不报错、不提示）
+_CHANNEL_GATES = {
+    "bark": "Flag-1030",
+    "meow": "Flag-1031",
+    "ntfy": "Flag-1032",
+}
+
+
+def _enabled_config() -> dict:
+    """读取转发配置并剔除被功能组下线的通道。"""
+    cfg = _config()
+    for channel, gid in _CHANNEL_GATES.items():
+        if channel in cfg and not gate_enabled(gid):
+            cfg[channel] = dict(cfg[channel], enabled=False)
+    return cfg
+
+
 def forward_notification(title: str, message: str) -> None:
     """不阻塞监控循环；移动端服务不可用绝不影响本机通知。"""
     def run():
         try:
-            results = _send(_config(), title, message)
+            results = _send(_enabled_config(), title, message)
             if results:
                 logger.info(f"移动端通知转发结果: {results}")
         except Exception as e:
@@ -101,6 +119,9 @@ def forward_notification(title: str, message: str) -> None:
 
 
 def test_forwarder(channel: str) -> dict:
+    gid = _CHANNEL_GATES.get(channel)
+    if gid and not gate_enabled(gid):
+        return {"success": False, "message": "该通道当前不可用"}
     cfg = _config()
     if channel not in cfg:
         return {"success": False, "message": "未知通道"}

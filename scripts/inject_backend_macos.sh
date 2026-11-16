@@ -64,6 +64,8 @@ rsync -a \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude '.DS_Store' \
+  --exclude 'test_*.py' \
+  --exclude '*_test.py' \
   "$PROJECT_ROOT/backend/" "$RES/backend/"
 
 # 培养方案仅以 AES-GCM 密文随包分发；解密由本机后端按登录账号完成。
@@ -138,6 +140,12 @@ if ! ( cd "$RES" && GRADEMONITOR_DATA_DIR="$SMOKE_DIR" \
 fi
 rm -rf "$SMOKE_DIR"
 echo "    backend + 依赖导入正常"
+
+# 上面的 import 会在包内 $RES/backend 下现场生成 __pycache__（rsync 阶段是
+# 干净的，脏在这一步）。它会把 .pyc 一起打进 DMG，也会让 bundle 里出现
+# 源码缓存，所以在签名前清掉。
+find "$RES/backend" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+find "$RES/backend" -name '*.pyc' -type f -delete 2>/dev/null || true
 
 # ---------- 4. 重新签名 ----------
 # 往已签名 bundle 里塞文件会让原签名失效（Sealed Resources 不匹配），

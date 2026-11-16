@@ -38,14 +38,17 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VOL_NAME="GradeMonitor"
 # Finder 窗口的内容区尺寸必须与背景图一致（make_dmg_background.py 的输出尺寸）。
 # 注意 Finder 的 window bounds 把标题栏也算在内，直接给 WIN_H 会裁掉背景底部一条。
-WIN_W=600
-WIN_H=400
+# 700x500 与设计稿 1484x1060（比例 1.4）同比例，否则 Finder 会把背景拉伸变形。
+WIN_W=700
+WIN_H=500
 TITLEBAR_H=28
 ICON_SIZE=128
-APP_X=150   # app 图标中心 x
-APP_Y=200   # app 图标中心 y
-DIR_X=450   # Applications 图标中心 x
-DIR_Y=200
+# 图标位置对齐设计稿里的箭头：箭头中心实测在 (0.501W, 0.525H)，
+# 即内容区 (351, 262)；两个图标分别落在箭头左右两侧，与箭头留出间距。
+APP_X=160   # app 图标中心 x
+APP_Y=262   # app 图标中心 y
+DIR_X=540   # Applications 图标中心 x
+DIR_Y=262
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "错误：找不到 App：$APP_PATH" >&2

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/service/feature_gate_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/grades_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/feature_gate.dart';
 import '../../widgets/note_banner.dart';
 import '../scheme/scheme_core.dart';
 
@@ -94,7 +96,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
   Widget build(BuildContext context) {
     final gradesAsync = ref.watch(gradesProvider);
     final settings = ref.watch(settingsProvider);
-    final hideUnknown = settings.hideUnknownCourses;
+    // Flag-1016：隐藏未知课程可被远程静默下线（开关状态叠加设置页开关）
+    final hideUnknown =
+        settings.hideUnknownCourses &&
+        featureEnabled(FeatureGateService.flag1016HideUnknown);
     final colorScheme = Theme.of(context).colorScheme;
     // 与搜索框 OutlineInputBorder 同源的边框色（跟随主题亮暗）
     final borderColor = Theme.of(context).brightness == Brightness.dark
@@ -163,185 +168,211 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                 children: [
                   Expanded(
                     // 搜索框使用全局输入框规范，与应用其余输入项保持一致。
-                    child: SizedBox(
-                      height: 48,
-                      child: TextField(
-                        controller: _searchController,
-                        style: const TextStyle(fontSize: 13),
-                        textAlignVertical: TextAlignVertical.center,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
+                    // Flag-1010：课程搜索可被远程静默下线。
+                    child: FeatureGate(
+                      flag: FeatureGateService.flag1010Search,
+                      fallback: const SizedBox.shrink(),
+                      child: SizedBox(
+                        height: 48,
+                        child: TextField(
+                          controller: _searchController,
+                          style: const TextStyle(fontSize: 13),
+                          textAlignVertical: TextAlignVertical.center,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            hintText: '搜索课程名称...',
+                            hintStyle: const TextStyle(fontSize: 12),
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              size: 16,
+                            ),
+                            prefixIconConstraints: const BoxConstraints(
+                              minWidth: 30,
+                              minHeight: 30,
+                            ),
+                            suffixIcon: _searchQuery.isNotEmpty
+                                ? IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    icon: const Icon(
+                                      Icons.clear_rounded,
+                                      size: 16,
+                                    ),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() => _searchQuery = '');
+                                    },
+                                  )
+                                : null,
+                            suffixIconConstraints: const BoxConstraints(
+                              minWidth: 30,
+                              minHeight: 30,
+                            ),
                           ),
-                          hintText: '搜索课程名称...',
-                          hintStyle: const TextStyle(fontSize: 12),
-                          prefixIcon: const Icon(
-                            Icons.search_rounded,
-                            size: 16,
-                          ),
-                          prefixIconConstraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: 30,
-                          ),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: EdgeInsets.zero,
-                                  icon: const Icon(
-                                    Icons.clear_rounded,
-                                    size: 16,
-                                  ),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() => _searchQuery = '');
-                                  },
-                                )
-                              : null,
-                          suffixIconConstraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: 30,
-                          ),
+                          onChanged: (v) => setState(() => _searchQuery = v),
                         ),
-                        onChanged: (v) => setState(() => _searchQuery = v),
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '学期：',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colorScheme.onSurface.withValues(alpha: .6),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: borderColor),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: DropdownButton<String>(
-                          value: semesterValue,
-                          items: semesterItems
-                              .map(
-                                (s) => DropdownMenuItem(
-                                  value: s,
-                                  child: Text(
-                                    s,
-                                    style: const TextStyle(fontSize: 13),
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) =>
-                              setState(() => _semester = v ?? '全部'),
-                          underline: const SizedBox(),
-                          isDense: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 12),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '范围：',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colorScheme.onSurface.withValues(alpha: .6),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: borderColor),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: DropdownButton<String>(
-                          value: _scopeCore ? 'core' : 'all',
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'all',
-                              child: Text(
-                                '全部课程',
-                                style: TextStyle(fontSize: 13),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'core',
-                              child: Text(
-                                '核心绩课程',
-                                style: TextStyle(fontSize: 13),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) =>
-                              setState(() => _scopeCore = v == 'core'),
-                          underline: const SizedBox(),
-                          isDense: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 12),
-                  Tooltip(
-                    message:
-                        '核心绩＝核心绩课程白名单（按 kclbname 全字匹配）的'
-                        '学分加权平均绩点（Σ绩点÷Σ学分）。'
-                        '统计课程集合与「核心绩课程」筛选所见完全一致。',
+                  FeatureGate(
+                    flag: FeatureGateService.flag1011SemesterFilter,
+                    fallback: const SizedBox.shrink(),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.verified_rounded,
-                          size: 15,
-                          color: colorScheme.primary,
-                        ),
-                        const SizedBox(width: 4),
                         Text(
-                          '核心绩',
+                          '学期：',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 13,
                             color: colorScheme.onSurface.withValues(alpha: .6),
                           ),
                         ),
-                        const SizedBox(width: 5),
-                        Text(
-                          coreText,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: colorScheme.primary,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 2,
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$coreCount/${gradesList.length} 门',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: colorScheme.onSurface.withValues(alpha: .55),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: borderColor),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: DropdownButton<String>(
+                            value: semesterValue,
+                            items: semesterItems
+                                .map(
+                                  (s) => DropdownMenuItem(
+                                    value: s,
+                                    child: Text(
+                                      s,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) =>
+                                setState(() => _semester = v ?? '全部'),
+                            underline: const SizedBox(),
+                            isDense: true,
                           ),
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  FeatureGate(
+                    flag: FeatureGateService.flag1012CoreRange,
+                    fallback: const SizedBox.shrink(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '范围：',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colorScheme.onSurface.withValues(alpha: .6),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: borderColor),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: DropdownButton<String>(
+                            value: _scopeCore ? 'core' : 'all',
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'all',
+                                child: Text(
+                                  '全部课程',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'core',
+                                child: Text(
+                                  '核心绩课程',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                              ),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => _scopeCore = v == 'core'),
+                            underline: const SizedBox(),
+                            isDense: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Flag-1013：核心绩徽标可被远程静默下线
+                  FeatureGate(
+                    flag: FeatureGateService.flag1013CoreBadge,
+                    fallback: const SizedBox.shrink(),
+                    child: Tooltip(
+                      message:
+                          '核心绩＝核心绩课程白名单（按 kclbname 全字匹配）的'
+                          '学分加权平均绩点（Σ绩点÷Σ学分）。'
+                          '统计课程集合与「核心绩课程」筛选所见完全一致。',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.verified_rounded,
+                            size: 15,
+                            color: colorScheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '核心绩',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colorScheme.onSurface.withValues(
+                                alpha: .6,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            coreText,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$coreCount/${gradesList.length} 门',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: colorScheme.onSurface.withValues(
+                                alpha: .55,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
+            // Flag-1014：学期统计卡可被远程静默下线
             if (semesterStats.isNotEmpty)
-              _buildSemesterStats(colorScheme, semesterStats),
+              FeatureGate(
+                flag: FeatureGateService.flag1014SemesterStats,
+                child: _buildSemesterStats(colorScheme, semesterStats),
+              ),
             Expanded(
               child: gradesAsync.when(
                 data: (grades) {
@@ -697,7 +728,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
       numeric: numeric,
       headingRowAlignment: MainAxisAlignment.center,
       columnWidth: width,
-      onSort: _handleSort,
+      // Flag-1015：表头排序可被远程静默下线（null 即整列不可排序）
+      onSort: featureEnabled(FeatureGateService.flag1015Sort)
+          ? _handleSort
+          : null,
     );
   }
 

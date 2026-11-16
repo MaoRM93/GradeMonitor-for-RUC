@@ -201,7 +201,12 @@ class _ReleaseNoticeScaffoldState extends State<ReleaseNoticeScaffold> {
                             padding: const EdgeInsets.fromLTRB(18, 4, 8, 4),
                             child: Scrollbar(
                               child: SingleChildScrollView(
-                                padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
+                                padding: const EdgeInsets.fromLTRB(
+                                  0,
+                                  10,
+                                  10,
+                                  10,
+                                ),
                                 child: MarkdownBody(
                                   data: body.isEmpty
                                       ? kReleaseBodyFallback

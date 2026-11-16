@@ -9,12 +9,13 @@ import '../grades/grades_page.dart';
 import '../scheme/scheme_page.dart';
 import '../settings/settings_page.dart';
 import '../forwarders/notification_forwarders_page.dart';
-import 'developer_unlock_dialog.dart';
+import 'developer_login_dialog.dart';
 import '../welcome/welcome_flow.dart';
+import '../../core/service/feature_gate_service.dart';
+import '../../widgets/feature_gate.dart';
 import '../../core/service/update_service.dart';
 import '../../core/service/nav_signal.dart';
 import '../../core/service/session_service.dart';
-import '../../widgets/toast_host.dart';
 
 enum NavDestination {
   dashboard(icon: Icons.dashboard, label: '仪表板'),
@@ -39,7 +40,6 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   bool _isMaximized = false;
   int _versionTapCount = 0;
   DateTime _lastVersionTap = DateTime.now();
-  bool _devShowWelcomeAlways = false;
   bool _welcomeChecked = false;
 
   /// 欢迎流程阶段：checking=检查中（用同色底遮挡主界面防闪烁），
@@ -188,7 +188,9 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   Widget _buildTitleBar(ColorScheme colorScheme) {
     // 自定义标题栏（最小化/最大化/关闭）仅供 Windows：
     // macOS 由系统提供原生红绿灯与拖拽，不渲染 Windows 风格按钮
-    if (!Platform.isWindows) {
+    // Flag-1050：自绘标题栏可被远程静默下线（下线后由系统原生标题栏接管）
+    if (!Platform.isWindows ||
+        !featureEnabled(FeatureGateService.flag1050TitleBar)) {
       return const SizedBox.shrink();
     }
     const barHeight = 36.0;
@@ -288,7 +290,7 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     final api = ApiClient();
     showDialog(
       context: context,
-      builder: (ctx) => DeveloperUnlockDialog(api: api),
+      builder: (ctx) => DeveloperLoginDialog(api: api),
     );
   }
 
@@ -323,468 +325,87 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                   )
                 : Row(
                     children: [
-                      Material(
-                        elevation: 0,
-                        // 侧栏用固定色块与右侧内容区拉开色差（浅色偏冷的灰蓝，
-                        // 深色更深一档），不再靠分割线区分
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? const Color(0xFF131C29)
-                            : const Color(0xFFE9EFF7),
-                        child: SizedBox(
-                          width: 132,
-                          child: Column(
-                            children: [
-                              const SizedBox(height: 40),
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  top: 2,
-                                  bottom: 12,
+                      // Flag-1051：左侧导航栏可被远程静默下线。
+                      // 下线后内容区占满整窗，当前页面保持不变。
+                      if (featureEnabled(FeatureGateService.flag1051SideNav))
+                        Material(
+                          elevation: 0,
+                          // 侧栏用固定色块与右侧内容区拉开色差（浅色偏冷的灰蓝，
+                          // 深色更深一档），不再靠分割线区分
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? const Color(0xFF131C29)
+                              : const Color(0xFFE9EFF7),
+                          child: SizedBox(
+                            width: 132,
+                            child: Column(
+                              children: [
+                                const SizedBox(height: 40),
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: 2,
+                                    bottom: 12,
+                                  ),
+                                  child: Icon(
+                                    Icons.search_rounded,
+                                    size: 28,
+                                    color: colorScheme.primary,
+                                  ),
                                 ),
-                                child: Icon(
-                                  Icons.search_rounded,
-                                  size: 28,
-                                  color: colorScheme.primary,
+                                Text(
+                                  'Grade\nMonitor',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: colorScheme.onSurface,
+                                    height: 1.3,
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                'Grade\nMonitor',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: colorScheme.onSurface,
-                                  height: 1.3,
-                                ),
-                              ),
-                              const SizedBox(height: 28),
-                              // 导航组上下留白按 1:2 分配：上方窄、下方宽，
-                              // 整组相对几何中心上移约一个条目的高度（≈60），
-                              // 视觉重心才落在侧栏正中
-                              const Spacer(flex: 1),
-                              ...NavDestination.values.map((dest) {
-                                final selected = _currentDest == dest;
-                                return _NavItem(
-                                  icon: dest.icon,
-                                  label: dest.label,
-                                  selected: selected,
-                                  onTap: () =>
-                                      setState(() => _currentDest = dest),
-                                );
-                              }),
-                              const Spacer(flex: 2),
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  bottom: 16,
-                                  top: 8,
-                                ),
-                                child: GestureDetector(
-                                  onTap: _onVersionTap,
-                                  child: Text(
-                                    UpdateService.VerStatus.isEmpty
-                                        ? '…'
-                                        : UpdateService.VerStatus,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: colorScheme.onSurface.withValues(
-                                        alpha: .3,
+                                const SizedBox(height: 28),
+                                // 导航组上下留白按 1:2 分配：上方窄、下方宽，
+                                // 整组相对几何中心上移约一个条目的高度（≈60），
+                                // 视觉重心才落在侧栏正中
+                                const Spacer(flex: 1),
+                                ...NavDestination.values.map((dest) {
+                                  final selected = _currentDest == dest;
+                                  return _NavItem(
+                                    icon: dest.icon,
+                                    label: dest.label,
+                                    selected: selected,
+                                    onTap: () =>
+                                        setState(() => _currentDest = dest),
+                                  );
+                                }),
+                                const Spacer(flex: 2),
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: 16,
+                                    top: 8,
+                                  ),
+                                  child: GestureDetector(
+                                    onTap: _onVersionTap,
+                                    child: Text(
+                                      UpdateService.VerStatus.isEmpty
+                                          ? '…'
+                                          : UpdateService.VerStatus,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: colorScheme.onSurface.withValues(
+                                          alpha: .3,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
                       Expanded(child: _buildPage(_currentDest)),
                     ],
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ---- 独立的 DevTools 弹窗（避免 StatefulBuilder 闭包变量重置） ----
-
-class _DevToolsDialog extends StatefulWidget {
-  final ApiClient api;
-  final TextEditingController intervalCtrl;
-  final bool devShowWelcomeAlways;
-  final ValueChanged<bool> onWelcomeAlwaysChanged;
-
-  const _DevToolsDialog({
-    required this.api,
-    required this.intervalCtrl,
-    required this.devShowWelcomeAlways,
-    required this.onWelcomeAlwaysChanged,
-  });
-
-  @override
-  State<_DevToolsDialog> createState() => _DevToolsDialogState();
-}
-
-class _DevToolsDialogState extends State<_DevToolsDialog> {
-  bool _loading = false;
-  String? _msg;
-  bool _showWelcomeAlways = false;
-  bool _welcomeLoaded = false;
-
-  // 隐秘触发：1 秒内连续点击 3 次标题"开发者工具" → 显示禁用页
-  int _titleTaps = 0;
-  DateTime _lastTitleTap = DateTime.now();
-
-  @override
-  void initState() {
-    super.initState();
-    _showWelcomeAlways = widget.devShowWelcomeAlways;
-    _loadWelcomeStatus();
-  }
-
-  /// 标题红字三连击：走与远程停用（killSwitch 114.514）相同的链路进入禁用页
-  void _onTitleTap() {
-    final now = DateTime.now();
-    if (now.difference(_lastTitleTap).inMilliseconds > 1000) {
-      _titleTaps = 0;
-    }
-    _lastTitleTap = now;
-    _titleTaps++;
-    if (_titleTaps < 3) return;
-    _titleTaps = 0;
-    Navigator.of(context).pop(); // 先关闭对话框，避免残留在禁用页之上
-    UpdateService.disabled.value = true; // main.dart 监听后自动切换到禁用页
-  }
-
-  Future<void> _loadWelcomeStatus() async {
-    try {
-      final r = await widget.api.getWelcomeStatus();
-      final d = r.data as Map<String, dynamic>;
-      setState(() {
-        _showWelcomeAlways = d['show_welcome_always'] as bool? ?? false;
-        _welcomeLoaded = true;
-      });
-      widget.onWelcomeAlwaysChanged(_showWelcomeAlways);
-    } catch (_) {
-      setState(() => _welcomeLoaded = true);
-    }
-  }
-
-  Future<void> _devAction(
-    String label,
-    Future<dynamic> Function() action,
-  ) async {
-    setState(() {
-      _loading = true;
-      _msg = null;
-    });
-    try {
-      final resp = await action();
-      final data = resp.data as Map<String, dynamic>;
-      setState(() {
-        _msg = '[$label] ${data['message'] ?? '操作成功'}';
-      });
-    } catch (e) {
-      setState(() {
-        _msg = '[$label] 失败: $e';
-      });
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _showNotificationPreview() async {
-    try {
-      final resp = await widget.api.getNotificationPreview('详细');
-      final preview = resp.data['preview'] as String? ?? '加载失败';
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (dctx) => AlertDialog(
-            title: const Text('通知预览'),
-            content: Text(
-              preview,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dctx),
-                child: const Text('关闭'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ToastHost().show('加载通知预览失败: $e');
-      }
-    }
-  }
-
-  Future<void> _applyCustomInterval() async {
-    final val = int.tryParse(widget.intervalCtrl.text);
-    if (val == null || val < 10 || val > 3600) {
-      ToastHost().show('轮询间隔仅允许设置 10-3600 秒');
-      return;
-    }
-    try {
-      await widget.api.updateSettings({'interval_seconds': val});
-      if (mounted) {
-        ToastHost().show('轮询间隔已设为 $val 秒');
-      }
-    } catch (e) {
-      if (mounted) {
-        ToastHost().show('设置失败: $e');
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.intervalCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 隐秘触发区：1 秒内三连击标题进入禁用页，无任何视觉反馈
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _onTitleTap,
-            child: const Text('开发者工具'),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 440,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  _devBtn('立即查询', Icons.rocket_launch_rounded, () {
-                    _devAction('立即查询', () => widget.api.queryOnce());
-                  }),
-                  _devBtn('测试通知', Icons.notifications_active_rounded, () {
-                    _devAction('测试通知', () => widget.api.sendTestNotification());
-                  }),
-                  _devBtn(
-                    '通知预览',
-                    Icons.preview_rounded,
-                    _showNotificationPreview,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  _devBtn('打开数据目录', Icons.folder_open_rounded, () {
-                    _devAction('打开目录', () => widget.api.openLogDir());
-                  }),
-                  _devBtn('清理缓存', Icons.cleaning_services_rounded, () {
-                    _devAction('清理缓存', () => widget.api.clearCache());
-                  }),
-                  _devBtnDanger('重置全部数据', Icons.dangerous_rounded, () {
-                    showDialog(
-                      context: context,
-                      builder: (dctx) => AlertDialog(
-                        title: const Text('确认重置'),
-                        content: const Text('此操作将清除所有缓存与设置数据，不可恢复。'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(dctx),
-                            child: const Text('取消'),
-                          ),
-                          FilledButton(
-                            onPressed: () {
-                              Navigator.pop(dctx);
-                              _devAction(
-                                '重置数据',
-                                () => widget.api.clearAllData(),
-                              );
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppTheme.error,
-                            ),
-                            child: const Text('确认重置'),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  SizedBox(
-                    width: 90,
-                    child: TextField(
-                      controller: widget.intervalCtrl,
-                      keyboardType: TextInputType.number,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: const InputDecoration(
-                        hintText: '10-300',
-                        hintStyle: TextStyle(fontSize: 12),
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 9,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '秒',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: .55),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  FilledButton.tonalIcon(
-                    onPressed: _applyCustomInterval,
-                    icon: const Icon(Icons.check, size: 16),
-                    label: const Text('应用', style: TextStyle(fontSize: 12)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Text('始终在启动时弹出欢迎页：', style: TextStyle(fontSize: 12)),
-                  const Spacer(),
-                  SizedBox(
-                    height: 32,
-                    child: Checkbox(
-                      value: _showWelcomeAlways,
-                      onChanged: _welcomeLoaded
-                          ? (v) =>
-                                setState(() => _showWelcomeAlways = v ?? false)
-                          : null,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonal(
-                    onPressed: () async {
-                      try {
-                        await widget.api.updateSettings({
-                          'show_welcome_always': _showWelcomeAlways,
-                        });
-                        widget.onWelcomeAlwaysChanged(_showWelcomeAlways);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                _showWelcomeAlways ? '已开启：每次启动弹欢迎页' : '已关闭',
-                              ),
-                              backgroundColor: AppTheme.success,
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('设置失败: $e'),
-                              backgroundColor: AppTheme.error,
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    child: const Text('保存', style: TextStyle(fontSize: 11)),
-                  ),
-                ],
-              ),
-              // ── 状态信息 ──
-              if (_loading || _msg != null) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    if (_loading)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 8),
-                        child: SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else
-                      Icon(
-                        _msg!.contains('失败')
-                            ? Icons.error_outline
-                            : Icons.check_circle_outline,
-                        size: 16,
-                        color: _msg!.contains('失败')
-                            ? AppTheme.error
-                            : AppTheme.success,
-                      ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        _loading ? '处理中...' : _msg!,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
-        ),
-      ],
-    );
-  }
-
-  Widget _devBtn(String label, IconData icon, VoidCallback onTap) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: OutlinedButton.styleFrom(
-        side: BorderSide(
-          color: Theme.of(context).colorScheme.outline.withValues(alpha: .7),
-        ),
-        elevation: 0,
-      ),
-    );
-  }
-
-  Widget _devBtnDanger(String label, IconData icon, VoidCallback onTap) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 16, color: AppTheme.error),
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 12, color: AppTheme.error),
-      ),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppTheme.error,
-        side: BorderSide(color: AppTheme.error.withValues(alpha: .4)),
-        elevation: 0,
       ),
     );
   }

@@ -6,9 +6,17 @@ import '../../core/network/api_client.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/toast_host.dart';
 import '../../providers/grades_provider.dart';
+import '../../core/service/feature_gate_service.dart';
+import '../../widgets/feature_gate.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/note_banner.dart';
 import 'scheme_core.dart';
+
+/// 培养方案入口可选的年级列表（前端写死，便于后续增补）。
+///
+/// 与后端 `assets/curricula/*.pdf.enc` 实际部署的年级对应；开发者开关
+/// `Enable_PYFA_EvyGrde` 开启时，这里每个年级都会渲染成一个独立入口。
+const List<String> kCurriculumGrades = <String>['2024', '2025', '2026'];
 
 /// 「方案计算」页：根据推免方案计算 811 / 82 结果。
 ///
@@ -51,6 +59,10 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   bool _precise5 = false;
   bool _openingCurriculum = false;
 
+  /// 开发者开关 `Enable_PYFA_EvyGrde`（1.1）：开启后不再限制账号年级，
+  /// 每个已部署年级都给一个独立入口。关闭时下方渲染与历史版本完全一致。
+  bool _anyGradeEnabled = false;
+
   String? get _curriculumGrade {
     final username = ref.read(settingsProvider).username.trim();
     final grade = username.length >= 4 ? username.substring(0, 4) : '';
@@ -75,11 +87,40 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     }
   }
 
+  /// 指定年级打开培养方案（仅开关 1.1 开启时可用）。
+  Future<void> _openCurriculumForGrade(String grade) async {
+    setState(() => _openingCurriculum = true);
+    try {
+      await ApiClient().openCurriculum(grade: grade);
+      if (mounted) {
+        ToastHost().show('已在浏览器中打开 $grade 级培养方案；如无法打开，请检查网络条件后重试。');
+      }
+    } catch (e) {
+      if (mounted) ToastHost().show('打开失败：请检查网络条件后重试。');
+    } finally {
+      if (mounted) setState(() => _openingCurriculum = false);
+    }
+  }
+
+  /// 读取开发者开关（失败按"关闭"处理，保持历史行为）。
+  Future<void> _loadFlags() async {
+    try {
+      final r = await ApiClient().getDeveloperFlags();
+      final raw = r.data is Map ? r.data['flags'] : null;
+      if (!mounted || raw is! Map) return;
+      final on = raw['Enable_PYFA_EvyGrde'] == true;
+      if (on != _anyGradeEnabled) setState(() => _anyGradeEnabled = on);
+    } catch (_) {
+      // 静默：读不到开关时退回原有单按钮逻辑
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     // 首次加载：从已缓存的成绩数据同步核心绩自动值
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncCore());
+    _loadFlags();
   }
 
   @override
@@ -205,36 +246,72 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                 ),
               ),
               const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: _openingCurriculum || _curriculumGrade == null
-                      ? null
-                      : _openCurriculum,
-                  icon: _openingCurriculum
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.menu_book_outlined, size: 18),
-                  label: Text(
-                    _curriculumGrade == null
-                        ? '当前账号暂无匹配培养方案'
-                        : '查看 ${_curriculumGrade!} 级培养方案 ↗',
+              // 开关 1.1 关闭：保持历史单按钮与禁用逻辑（账号年级不匹配即禁用）；
+              // 开关开启：每个已部署年级一个入口，全部可点。
+              // Flag-1024：整个培养方案入口可被远程静默下线。
+              if (!featureEnabled(FeatureGateService.flag1024Curriculum))
+                const SizedBox.shrink()
+              else if (_anyGradeEnabled)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final grade in kCurriculumGrades)
+                      OutlinedButton.icon(
+                        onPressed: _openingCurriculum
+                            ? null
+                            : () => _openCurriculumForGrade(grade),
+                        icon: _openingCurriculum
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.menu_book_outlined, size: 18),
+                        label: Text('查看 $grade 级培养方案 ↗'),
+                      ),
+                  ],
+                )
+              else
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _openingCurriculum || _curriculumGrade == null
+                        ? null
+                        : _openCurriculum,
+                    icon: _openingCurriculum
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.menu_book_outlined, size: 18),
+                    label: Text(
+                      _curriculumGrade == null
+                          ? '当前账号暂无匹配培养方案'
+                          : '查看 ${_curriculumGrade!} 级培养方案 ↗',
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(height: 20),
               _buildWarningBanner(),
               const SizedBox(height: 12),
               _buildInfoBanner(),
               const SizedBox(height: 16),
-              _buildSchemeChooser(colorScheme),
+              FeatureGate(
+                flag: FeatureGateService.flag1020SchemeChooser,
+                child: _buildSchemeChooser(colorScheme),
+              ),
               const SizedBox(height: 16),
               _buildInputsRow(colorScheme),
               const SizedBox(height: 16),
-              _dimBlock(_buildResultCard(colorScheme)),
+              // Flag-1023：计算结果卡可被远程静默下线
+              FeatureGate(
+                flag: FeatureGateService.flag1023Result,
+                child: _dimBlock(_buildResultCard(colorScheme)),
+              ),
             ],
           ),
         ),
@@ -458,19 +535,32 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   // ---------- 核心绩 / 学术 / 素质拓展（三卡一行，等高） ----------
 
   Widget _buildInputsRow(ColorScheme cs) {
-    // 先用 IntrinsicHeight 把行高定为最高子卡的高度，再 stretch 三卡等高
+    // Flag-1021 / Flag-1022 可分别下线"核心绩卡"与"学术+综合素质两卡"。
+    // 三卡原本等宽等高，被下线后剩下的卡自动均分宽度，不留空位。
+    final showCore = featureEnabled(FeatureGateService.flag1021CoreCard);
+    final showManual = featureEnabled(FeatureGateService.flag1022Inputs);
+
+    final cards = <Widget>[
+      if (showCore) Expanded(child: _buildCoreCard(cs)),
+      if (showManual)
+        Expanded(child: _dimBlock(_inputCard(cs, kind: _InputKind.academic))),
+      if (showManual)
+        Expanded(
+          child: _dimBlock(_inputCard(cs, kind: _InputKind.comprehensive)),
+        ),
+    ];
+    if (cards.isEmpty) return const SizedBox.shrink();
+
+    // 先用 IntrinsicHeight 把行高定为最高子卡的高度，再 stretch 各卡等高
     //（滚动上下文里直接 stretch 会给子项无界高度，必须先定高）
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: _buildCoreCard(cs)),
-          const SizedBox(width: 10),
-          Expanded(child: _dimBlock(_inputCard(cs, kind: _InputKind.academic))),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _dimBlock(_inputCard(cs, kind: _InputKind.comprehensive)),
-          ),
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(width: 10),
+            cards[i],
+          ],
         ],
       ),
     );

@@ -9,6 +9,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/constants/api_path.dart';
 import '../../core/constants/api_token.dart';
 import '../logger/app_logger.dart';
+import 'feature_gate_service.dart';
 import 'update_verifier.dart';
 
 /// GitHub Release 的安装包资源
@@ -161,14 +162,6 @@ class UpdateService {
   static const String repoName = 'GradeMonitor-for-RUC';
   static const String repoUrl = 'https://github.com/$repoOwner/$repoName';
 
-  /// 检查更新 API 地址（最新正式 release，不含 draft / pre-release）
-  ///
-  /// 注意：必须是 api.github.com 的 API 地址。
-  /// 不能用 repoUrl/releases/latest 网页地址——那返回的是 HTML 页面，
-  /// 会一直报“GitHub 返回了非 JSON 内容”。
-  static const String _latestReleaseApi =
-      'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
-
   /// 停用开关（主）：GitHub Release 存在该 tag 时全屏禁用应用
   static const String killSwitchVersion = 'service-suspension';
 
@@ -188,6 +181,14 @@ class UpdateService {
   static const bool enableLegacy114BroadcastNotices = true;
   static const String legacyBroadcastDisableVersion = '114.512';
 
+  /// 远程功能开关（Flag-1xxx）指令频道：`control-v<rev>`。
+  ///
+  /// 这类 tag 的正文里是 Ed25519 签名的开关块，由后端 `remote_gates.py` 拉取
+  /// 并验签应用，前端完全不参与解析。这里只需要把它**排除出版本比较**——
+  /// 否则控制配置可能被误当成新版本，给所有用户弹
+  /// 一个装不上的"发现新版本"。
+  static const String gateConfigPrefix = 'control-v';
+
   /// 号段内已被专用页面占用的 tag，其余同类 tag 走右上角提示
   static const List<String> reservedNoticeTags = [
     killSwitchVersion,
@@ -196,16 +197,10 @@ class UpdateService {
     legacyBroadcastDisableVersion,
   ];
 
-  /// Release 列表（含全部 tag 与 body），用于在 114 号段里找当前广播条目
+  /// 全部远程能力共享同一份 Release 列表缓存：更新、红/蓝屏、广播都不能各自
+  /// 再发请求，否则反复启动很容易耗尽 GitHub 匿名 API 限额。
   static const String _releasesListApi =
-      'https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=50';
-
-  /// 按 tag 精确取单个 Release 的 API 前缀
-  ///
-  /// 不用 `/releases/latest`：latest 只能看到最新一条，无法区分
-  /// 「tag 被删除」与「tag 存在但 body 为空」，也看不到非最新 tag。
-  static const String _releaseByTagApiPrefix =
-      'https://api.github.com/repos/$repoOwner/$repoName/releases/tags/';
+      'https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=100';
 
   /// 发行状态：'Release' 正式版 / 'Beta' 测试版（主页左下角展示，发布时手动更新）
   // ignore: constant_identifier_names
@@ -214,6 +209,49 @@ class UpdateService {
   static const Duration _timeout = Duration(seconds: 20);
   static const int _maxRetries = 3;
   static const Duration _retryDelay = Duration(seconds: 2);
+  static const Duration _releaseCacheTtl = Duration(minutes: 5);
+
+  List<Map<String, dynamic>>? _releaseCache;
+  DateTime? _releaseCacheAt;
+  Future<List<Map<String, dynamic>>?>? _releaseListInFlight;
+
+  Future<List<Map<String, dynamic>>?> _fetchReleaseList({bool force = false}) {
+    final cached = _releaseCache;
+    final fetchedAt = _releaseCacheAt;
+    if (!force &&
+        cached != null &&
+        fetchedAt != null &&
+        DateTime.now().difference(fetchedAt) < _releaseCacheTtl) {
+      return Future<List<Map<String, dynamic>>?>.value(cached);
+    }
+    final running = _releaseListInFlight;
+    if (running != null) return running;
+    final future = _loadReleaseList();
+    _releaseListInFlight = future;
+    return future.whenComplete(() => _releaseListInFlight = null);
+  }
+
+  Future<List<Map<String, dynamic>>?> _loadReleaseList() async {
+    try {
+      final response = await _dio.get<String>(
+        _releasesListApi,
+        options: Options(responseType: ResponseType.plain),
+      );
+      if (response.statusCode != 200 || response.data == null) return null;
+      final decoded = jsonDecode(response.data!);
+      if (decoded is! List) return null;
+      final releases = <Map<String, dynamic>>[
+        for (final item in decoded)
+          if (item is Map<String, dynamic>) item,
+      ];
+      _releaseCache = releases;
+      _releaseCacheAt = DateTime.now();
+      return releases;
+    } catch (e) {
+      _log.warning('Release 列表读取失败（沿用上一份缓存）: $e');
+      return _releaseCache;
+    }
+  }
 
   /// 后端滥用标记轮询周期：低频读取后端监控状态（开销可忽略）
   static const Duration _abuseCheckInterval = Duration(seconds: 30);
@@ -318,9 +356,27 @@ class UpdateService {
     _abuseTimer = Timer.periodic(_abuseCheckInterval, (_) => _checkAbuse());
   }
 
+  /// 取消 [init] 建立的两个周期定时器并置空。
+  ///
+  /// 本服务是进程级单例，正常运行时不需要停止；该入口供测试收尾与
+  /// 需要重置单例状态（热重启、集成测试）的场景使用。幂等：可重复调用。
+  /// 取消后再次调用 [init] 会重新建立定时器。
+  void cancelTimers() {
+    _updateTimer?.cancel();
+    _updateTimer = null;
+    _abuseTimer?.cancel();
+    _abuseTimer = null;
+  }
+
   /// 上报一次成绩查询（供客户端防滥用滑动窗口统计）
   void reportQuery() {
     if (disabled.value || _abuseTriggered) return;
+    // Flag-1067：客户端防滥用滑动窗口可被远程静默下线
+    if (!FeatureGateService.instance.isEnabled(
+      FeatureGateService.flag1067AbuseGuard,
+    )) {
+      return;
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     _queryTimestamps.add(now);
     while (_queryTimestamps.isNotEmpty &&
@@ -337,6 +393,12 @@ class UpdateService {
   /// 后端滥用标记轮询：读取后端监控状态中的滥用标记
   Future<void> _checkAbuse() async {
     if (disabled.value) return;
+    // Flag-1067：后端滥用标记轮询同样受该开关控制
+    if (!FeatureGateService.instance.isEnabled(
+      FeatureGateService.flag1067AbuseGuard,
+    )) {
+      return;
+    }
     try {
       final token = ApiToken.value;
       final resp = await _dio.get<Map<String, dynamic>>(
@@ -357,6 +419,12 @@ class UpdateService {
   /// 检查更新。手动调用方需处理 ok=false 时的用户提示。
   /// [silent] 为 true 时不打日志（启动时的静默检查）。
   Future<UpdateCheckResult> checkForUpdate({bool silent = false}) async {
+    // Flag-1060：检查更新可被远程静默下线（返回不可用，不打断调用方）
+    if (!FeatureGateService.instance.isEnabled(
+      FeatureGateService.flag1060CheckUpdate,
+    )) {
+      return const UpdateCheckResult(ok: false, error: '检查更新当前不可用');
+    }
     if (_checking) {
       return const UpdateCheckResult(ok: false, error: '正在检查中，请稍候');
     }
@@ -376,37 +444,28 @@ class UpdateService {
       // 首次尝试 + 最多 3 次重试
       for (int attempt = 0; attempt <= _maxRetries; attempt++) {
         try {
-          // 按纯文本接收后手动解析 JSON：代理/网络劫持场景下响应可能不是
-          // JSON（Content-Type 非 JSON 时 Dio 会把 body 当 String，泛型
-          // 强转 Map 会直接抛 TypeError），手动解析才能给出明确错误
-          final response = await _dio.get<String>(
-            _latestReleaseApi,
-            options: Options(responseType: ResponseType.plain),
-          );
-
-          // 仓库尚未发布任何 Release：无需重试
-          if (response.statusCode == 404) {
+          final releases = await _fetchReleaseList();
+          if (releases == null) throw Exception('GitHub Release 列表读取失败');
+          if (releases.isEmpty) {
             return const UpdateCheckResult(ok: false, error: '仓库暂未发布任何版本');
           }
-          if (response.statusCode != 200 || response.data == null) {
-            throw Exception('GitHub API 返回 ${response.statusCode}');
+          // 模拟 /releases/latest：仅取最新正式应用发布，永不把控制配置、
+          // 红蓝屏或广播 Release 当作安装包更新。
+          Map<String, dynamic>? data;
+          for (final item in releases) {
+            final tag = (item['tag_name'] ?? '').toString();
+            final isPre = item['prerelease'] == true || item['draft'] == true;
+            if (!isPre &&
+                !isKillSwitchTag(tag) &&
+                !isNoticeSeriesTag(tag) &&
+                !isGateConfigTag(tag)) {
+              data = item;
+              break;
+            }
           }
-
-          final Object decoded;
-          try {
-            decoded = jsonDecode(response.data!);
-          } catch (_) {
-            final body = response.data!;
-            _log.warning(
-              'GitHub 返回非 JSON 内容: '
-              '${body.length > 120 ? body.substring(0, 120) : body}',
-            );
-            throw Exception('GitHub 返回了非 JSON 内容（可能被代理或网络劫持拦截）');
+          if (data == null) {
+            return const UpdateCheckResult(ok: false, error: '未找到正式应用版本');
           }
-          if (decoded is! Map<String, dynamic>) {
-            throw Exception('GitHub 返回了非预期的数据格式');
-          }
-          final data = decoded;
 
           final tag = data['tag_name'] as String? ?? '';
           if (tag.isEmpty) {
@@ -452,6 +511,19 @@ class UpdateService {
           if (isNoticeSeriesTag(tag)) {
             _log.info('Release $tag 属于通知号段，跳过版本比较');
             unawaited(checkReleaseNotices());
+            return UpdateCheckResult(
+              ok: true,
+              latestVersion: latestVersion,
+              releaseNotes: releaseNotes,
+              assets: assets,
+              manifests: manifests,
+            );
+          }
+
+          // control-v* 是独立的「远程功能开关」频道，由后端拉取并验签；
+          // 前端只负责把它排除在版本比较之外。
+          if (isGateConfigTag(tag)) {
+            _log.info('Release $tag 属于功能开关号段，跳过版本比较');
             return UpdateCheckResult(
               ok: true,
               latestVersion: latestVersion,
@@ -526,6 +598,13 @@ class UpdateService {
     return !reservedNoticeTags.contains(t);
   }
 
+  /// 是否为远程功能开关指令 tag（`control-v<rev>`）。
+  ///
+  /// 该号段由后端消费，前端只负责把它挡在版本比较之外。
+  static bool isGateConfigTag(String tag) {
+    return tag.trim().startsWith(gateConfigPrefix);
+  }
+
   /// 关闭开发者提醒页：仅清空提示状态，回到 AppNavigation，不退出软件。
   ///
   /// [disabled] 保持 false —— 提醒页从不让 App 进入禁用态。
@@ -581,11 +660,17 @@ class UpdateService {
 
   Future<void> _runReleaseNoticeCheck() async {
     try {
+      final releases = await _fetchReleaseList();
+      if (releases == null) return; // 网络失败：保守地保持现状
       final probes = await Future.wait([
-        _probeReleaseTag(killSwitchVersion),
-        _probeReleaseTag(killSwitchVersionFallback),
-        _probeReleaseTag(developerNoticeVersion),
-        _probeReleaseTag(legacyBroadcastDisableVersion),
+        _probeReleaseFromList(releases, killSwitchVersion, kind: 'red'),
+        _probeReleaseFromList(releases, killSwitchVersionFallback, kind: 'red'),
+        _probeReleaseFromList(releases, developerNoticeVersion, kind: 'blue'),
+        _probeReleaseFromList(
+          releases,
+          legacyBroadcastDisableVersion,
+          kind: 'disable114',
+        ),
       ]);
       final primary = probes[0];
       final fallback = probes[1];
@@ -610,9 +695,18 @@ class UpdateService {
       }
 
       _lastKillTag = desired;
-      if (desired == null) {
+      // Flag-1066：红屏停用页可被远程静默下线。
+      // 下线时只清本地禁用态，不覆盖滥用保护（与 _clearKillSwitch 同语义）。
+      final killEnabled = FeatureGateService.instance.isEnabled(
+        FeatureGateService.flag1066KillSwitch,
+      );
+      if (!killEnabled) {
         _clearKillSwitch();
-      } else if (desired == killSwitchVersion && primary.exists == true) {
+      } else if (desired == null) {
+        _clearKillSwitch();
+      } else if (killEnabled &&
+          desired == killSwitchVersion &&
+          primary.exists == true) {
         _applyKillSwitch(killSwitchVersion, primary);
       } else if (desired == killSwitchVersionFallback &&
           fallback.exists == true) {
@@ -623,6 +717,12 @@ class UpdateService {
       // 2) 开发者提醒判定（独立于停用）：禁用态优先，提醒页不覆盖禁用页
       if (disabled.value) return;
       if (developer.exists == true) {
+        // Flag-1065：蓝屏开发者提醒可被远程静默下线
+        if (!FeatureGateService.instance.isEnabled(
+          FeatureGateService.flag1065DeveloperNotice,
+        )) {
+          return;
+        }
         if (_dismissedDeveloperTags.contains(developerNoticeVersion)) return;
         _applyDeveloperNotice(developerNoticeVersion, developer);
       } else if (developer.exists == false) {
@@ -639,10 +739,16 @@ class UpdateService {
       // 3) 广播通知（114 号段里除 513/514/515 之外的 tag）：右上角提示卡
       // 旧 114 普通广播可被本地常量或远程标记整体关闭；两者都不影响
       // 上面的 114.515 蓝屏与 114.514/513 红屏探测。
-      if (!enableLegacy114BroadcastNotices || legacyDisable.exists == true) {
+      // Flag-1064：114 号段广播卡可被远程静默下线
+      final broadcastEnabled = FeatureGateService.instance.isEnabled(
+        FeatureGateService.flag1064Broadcast,
+      );
+      if (!broadcastEnabled ||
+          !enableLegacy114BroadcastNotices ||
+          legacyDisable.exists == true) {
         broadcastNotice.value = null;
       } else {
-        await _checkBroadcast();
+        await _checkBroadcast(releases);
       }
     } catch (e) {
       // 任何异常都不改界面：宁可这次不弹，也不误弹/误清
@@ -655,32 +761,26 @@ class UpdateService {
   /// 用列表接口一次取回全部 Release：号段 tag 是按需新增/删除的，
   /// 没有固定名称可逐个探测。列表为空或网络异常时**不动**界面，
   /// 已展示的卡片不会被莫名其妙撤掉。
-  Future<void> _checkBroadcast() async {
+  Future<void> _checkBroadcast(List<Map<String, dynamic>> releases) async {
     try {
-      final response = await _dio.get<String>(
-        _releasesListApi,
-        options: Options(responseType: ResponseType.plain),
-      );
-      if (response.statusCode != 200 || response.data == null) return;
-      final Object? decoded;
-      try {
-        decoded = jsonDecode(response.data!);
-      } catch (_) {
-        return;
-      }
-      if (decoded is! List) return;
-
       _TagProbe? hit;
       String? hitTag;
-      for (final raw in decoded) {
-        if (raw is! Map<String, dynamic>) continue;
+      for (final raw in releases) {
         final tag = _normalizeVersion((raw['tag_name'] ?? '').toString());
         if (!isBroadcastTag(tag)) continue;
+        // 广播同样必须验签：列表接口是匿名可读的，只有签名能把
+        // 「拥有仓库写权限」与「能让用户看到这条广播」绑定起来。
+        final rawBody = (raw['body'] ?? '').toString().trim();
+        final verified = await _verifyNotice(tag, rawBody, 'broadcast');
+        if (verified == null) {
+          _log.warning('广播 $tag 缺少有效签名，跳过');
+          continue;
+        }
         hitTag = tag;
         hit = _TagProbe(
           exists: true,
           title: (raw['name'] ?? '').toString().trim(),
-          body: (raw['body'] ?? '').toString().trim(),
+          body: verified,
         );
         // 列表按发布时间倒序，第一条命中即最新
         break;
@@ -716,47 +816,63 @@ class UpdateService {
     }
   }
 
-  /// 请求单个 tag 的 Release。404 才算「已删除」，其余错误一律 unknown。
-  Future<_TagProbe> _probeReleaseTag(String tag) async {
+  /// 从共享 Release 列表中探测固定通知 tag。列表请求失败时调用方保持现状；
+  /// 成功列表中不存在即是确定的“已删除”。
+  Future<_TagProbe> _probeReleaseFromList(
+    List<Map<String, dynamic>> releases,
+    String tag, {
+    required String kind,
+  }) async {
     try {
-      final response = await _dio.get<String>(
-        '$_releaseByTagApiPrefix$tag',
-        options: Options(responseType: ResponseType.plain),
-      );
-      final status = response.statusCode;
-      if (status == 404) {
-        // 明确的删除信号
-        return const _TagProbe(exists: false);
+      Map<String, dynamic>? item;
+      for (final release in releases) {
+        if ((release['tag_name'] ?? '').toString() == tag) {
+          item = release;
+          break;
+        }
       }
-      if (status == 403) {
-        // 限流 / 需要认证：不是删除
-        _log.warning('Release $tag 查询被限流（403），保持原状态');
-        return const _TagProbe(exists: null);
-      }
-      if (status != 200 || response.data == null) {
-        _log.warning('Release $tag 查询返回 $status，保持原状态');
-        return const _TagProbe(exists: null);
-      }
-      final Object decoded;
-      try {
-        decoded = jsonDecode(response.data!);
-      } catch (_) {
-        _log.warning('Release $tag 返回非 JSON 内容，保持原状态');
-        return const _TagProbe(exists: null);
-      }
-      if (decoded is! Map<String, dynamic>) {
+      if (item == null) return const _TagProbe(exists: false);
+      final body = (item['body'] ?? '').toString().trim();
+      final verified = await _verifyNotice(tag, body, kind);
+      if (verified == null) {
+        _log.warning('Release $tag 缺少有效签名，按未生效处理');
         return const _TagProbe(exists: null);
       }
       return _TagProbe(
         exists: true,
-        title: (decoded['name'] ?? '').toString().trim(),
-        body: (decoded['body'] ?? '').toString().trim(),
+        title: (item['name'] ?? '').toString().trim(),
+        body: verified,
       );
     } catch (e) {
       // 超时 / 连接失败 / 5xx：无法判定，绝不当作删除
       _log.warning('Release $tag 查询失败（保持原状态）: $e');
       return const _TagProbe(exists: null);
     }
+  }
+
+  /// 校验一条远程通知的签名，通过则返回去掉签名块后的正文，否则 null。
+  ///
+  /// 三重绑定：签名块里的 `tag` 必须等于实际 tag、`kind` 必须等于该通道
+  /// 的期望值、`sha256` 必须等于去掉签名块后的正文摘要。任何一条不满足
+  /// 都视为无效——这样即使有人拿到仓库写权限，也伪造不出一条能弹屏的通知。
+  Future<String?> _verifyNotice(String tag, String body, String kind) async {
+    if (body.isEmpty) return null;
+    final notice = UpdateVerifier.parseNotice(body);
+    if (notice == null) return null;
+    if (notice.kind != kind) {
+      _log.warning('Release $tag 签名块的 kind=${notice.kind}，该通道期望 $kind');
+      return null;
+    }
+    if (notice.tag != tag) {
+      _log.warning('Release $tag 签名块声明的 tag=${notice.tag}，与实际不符');
+      return null;
+    }
+    final result = await UpdateVerifier.verifyNotice(notice, body);
+    if (!result.ok) {
+      _log.warning('Release $tag 通知验签失败：${result.reason}');
+      return null;
+    }
+    return UpdateVerifier.stripNoticeBlocks(body).trim();
   }
 
   void _applyKillSwitch(String tag, _TagProbe probe) {

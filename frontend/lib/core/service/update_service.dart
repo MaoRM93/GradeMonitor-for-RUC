@@ -184,11 +184,16 @@ class UpdateService {
   /// 仍按正常「检查更新」处理。
   static const String noticeSeriesPrefix = '114';
 
+  /// 仅控制旧 114 普通广播；蓝屏/红屏保留独立探测与显示能力。
+  static const bool enableLegacy114BroadcastNotices = true;
+  static const String legacyBroadcastDisableVersion = '114.512';
+
   /// 号段内已被专用页面占用的 tag，其余同类 tag 走右上角提示
   static const List<String> reservedNoticeTags = [
     killSwitchVersion,
     killSwitchVersionFallback,
     developerNoticeVersion,
+    legacyBroadcastDisableVersion,
   ];
 
   /// Release 列表（含全部 tag 与 body），用于在 114 号段里找当前广播条目
@@ -580,10 +585,12 @@ class UpdateService {
         _probeReleaseTag(killSwitchVersion),
         _probeReleaseTag(killSwitchVersionFallback),
         _probeReleaseTag(developerNoticeVersion),
+        _probeReleaseTag(legacyBroadcastDisableVersion),
       ]);
       final primary = probes[0];
       final fallback = probes[1];
       final developer = probes[2];
+      final legacyDisable = probes[3];
 
       // 1) 停用判定：514 优先；514 明确删除时回落到 513；
       //    任一探测为「未知」则沿用上一次已确定的 tag，不动界面。
@@ -630,7 +637,13 @@ class UpdateService {
       }
 
       // 3) 广播通知（114 号段里除 513/514/515 之外的 tag）：右上角提示卡
-      await _checkBroadcast();
+      // 旧 114 普通广播可被本地常量或远程标记整体关闭；两者都不影响
+      // 上面的 114.515 蓝屏与 114.514/513 红屏探测。
+      if (!enableLegacy114BroadcastNotices || legacyDisable.exists == true) {
+        broadcastNotice.value = null;
+      } else {
+        await _checkBroadcast();
+      }
     } catch (e) {
       // 任何异常都不改界面：宁可这次不弹，也不误弹/误清
       _log.warning('Release 提示检查异常（保持原状态）: $e');

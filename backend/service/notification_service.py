@@ -334,6 +334,13 @@ def _show(title: str, message: str, record: bool = True,
         except Exception as e:
             logger.debug(f"记录最近通知失败: {e}")
 
+        # 外部转发严格是本机通知的附加消费方；其网络问题不能影响监控或桌面通知。
+        try:
+            from backend.service.forwarder_service import forward_notification
+            forward_notification(title, message)
+        except Exception as e:
+            logger.debug(f"初始化移动端通知转发失败: {e}")
+
     # macOS：优先交给 App 原生通知（正确图标 + 可点击回 App）
     if sys.platform == "darwin":
         if _try_send_via_websocket(title, message):

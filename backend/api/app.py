@@ -9,6 +9,9 @@ import shutil
 import subprocess
 import sys
 import time
+import os
+import hmac
+import requests
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
@@ -39,6 +42,8 @@ from backend.service.grade_service import GradeService
 from backend.service.rank_service import RankService
 from backend.service.monitor_service import monitor
 from backend.service.notification_service import send_test_notification, send_notification_preview
+from backend.service.forwarder_service import public_config, save_config, test_forwarder
+from backend.service.curriculum_service import open_curriculum, view_curriculum
 from backend.storage.settings import (
     load_settings,
     public_settings,
@@ -259,6 +264,65 @@ class SettingsUpdate(BaseModel):
     hide_unknown_courses: Optional[bool] = None
     welcome_completed: Optional[bool] = None
     show_welcome_always: Optional[bool] = None
+
+
+class ForwarderConfigUpdate(BaseModel):
+    bark: Optional[dict] = None
+    meow: Optional[dict] = None
+    ntfy: Optional[dict] = None
+
+
+class DeveloperUnlockRequest(BaseModel):
+    password: str
+
+
+class DeveloperConsoleRequest(BaseModel):
+    action: str  # broadcast / blue / red / disable_114 / enable_114
+    github_token: str
+    title: str = ""
+    body: str = ""
+    tag: str = ""
+
+
+_developer_unlocked = False
+_DEV_REPO = "MaoRM93/GradeMonitor-for-RUC"
+
+
+def _require_developer() -> None:
+    if not _developer_unlocked:
+        raise HTTPException(status_code=403, detail="开发者选项尚未解锁")
+
+
+def _publish_developer_release(req: DeveloperConsoleRequest) -> str:
+    """创建或更新远程控制 Release；令牌只用于本次请求，不落盘。"""
+    tags = {"blue": "114.515", "red": "114.514", "disable_114": "114.512"}
+    if req.action == "broadcast":
+        tag = req.tag.strip()
+        if not tag.startswith("114.") or tag in tags.values() or tag == "114.513":
+            raise HTTPException(status_code=400, detail="广播标签必须为未保留的 114.x")
+    elif req.action in tags:
+        tag = tags[req.action]
+    elif req.action == "enable_114":
+        tag = "114.512"
+    else:
+        raise HTTPException(status_code=400, detail="未知控制台操作")
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {req.github_token}"}
+    base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
+    if req.action == "enable_114":
+        old = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
+        if old.status_code == 404: return "114 广播本已启用"
+        if not old.ok: raise HTTPException(status_code=502, detail=f"GitHub 查询失败：{old.status_code}")
+        deleted = requests.delete(f"{base}/{old.json()['id']}", headers=headers, timeout=15)
+        if not deleted.ok: raise HTTPException(status_code=502, detail=f"GitHub 删除失败：{deleted.status_code}")
+        return "已远程恢复旧 114 广播"
+    payload = {"tag_name": tag, "name": req.title.strip() or tag, "body": req.body, "draft": False, "prerelease": False}
+    existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
+    if existing.status_code == 200:
+        response = requests.patch(f"{base}/{existing.json()['id']}", headers=headers, json=payload, timeout=15)
+    else:
+        response = requests.post(base, headers=headers, json=payload, timeout=15)
+    if not response.ok: raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{response.status_code}")
+    return f"已发布远程控制：{tag}"
 
 
 # ---------- API 端点 ----------
@@ -527,6 +591,54 @@ async def update_settings(update: SettingsUpdate):
 
     # 响应同样不包含密码
     return {"success": True, "settings": public_settings()}
+
+
+@app.get("/api/notification/forwarders")
+async def get_forwarders():
+    return public_config()
+
+
+@app.post("/api/notification/forwarders")
+async def update_forwarders(update: ForwarderConfigUpdate):
+    return {"success": True, "forwarders": save_config(update.dict(exclude_none=True))}
+
+
+@app.post("/api/notification/forwarders/{channel}/test")
+async def test_forwarder_channel(channel: str):
+    return test_forwarder(channel)
+
+@app.post("/api/curriculum/open")
+async def open_current_curriculum():
+    grade = open_curriculum()
+    return {"success": True, "grade": grade, "message": f"已在浏览器中打开 {grade} 级培养方案"}
+
+@app.get("/api/curriculum/view/{grade}")
+async def view_current_curriculum(grade: str, access: str = ""):
+    return view_curriculum(grade, access)
+
+
+@app.get("/api/developer/status")
+async def developer_status():
+    return {"unlocked": _developer_unlocked, "password_configured": bool(os.environ.get("GRADEMONITOR_DEVELOPER_PASSWORD"))}
+
+
+@app.post("/api/developer/unlock")
+async def developer_unlock(req: DeveloperUnlockRequest):
+    global _developer_unlocked
+    expected = os.environ.get("GRADEMONITOR_DEVELOPER_PASSWORD", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="未配置 GRADEMONITOR_DEVELOPER_PASSWORD")
+    if not hmac.compare_digest(req.password, expected):
+        raise HTTPException(status_code=401, detail="开发者密码错误")
+    _developer_unlocked = True
+    return {"success": True, "message": "开发者选项已开启"}
+
+
+@app.post("/api/developer/console")
+async def developer_console(req: DeveloperConsoleRequest):
+    _require_developer()
+    if not req.github_token.strip(): raise HTTPException(status_code=400, detail="请输入 GitHub Fine-grained PAT")
+    return {"success": True, "message": _publish_developer_release(req)}
 
 
 @app.get("/api/monitor/status")

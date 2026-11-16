@@ -8,6 +8,8 @@ import '../dashboard/dashboard_page.dart';
 import '../grades/grades_page.dart';
 import '../scheme/scheme_page.dart';
 import '../settings/settings_page.dart';
+import '../forwarders/notification_forwarders_page.dart';
+import 'developer_unlock_dialog.dart';
 import '../welcome/welcome_flow.dart';
 import '../../core/service/update_service.dart';
 import '../../core/service/nav_signal.dart';
@@ -18,6 +20,7 @@ enum NavDestination {
   dashboard(icon: Icons.dashboard_rounded, label: '仪表板'),
   grades(icon: Icons.school_rounded, label: '成绩单'),
   scheme(icon: Icons.calculate_rounded, label: '方案计算'),
+  forwarders(icon: Icons.send_to_mobile_rounded, label: '通知转发'),
   settings(icon: Icons.settings_rounded, label: '设置');
 
   final IconData icon;
@@ -260,6 +263,8 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
         return const GradesPage();
       case NavDestination.scheme:
         return const SchemePage();
+      case NavDestination.forwarders:
+        return const NotificationForwardersPage();
       case NavDestination.settings:
         return const SettingsPage();
     }
@@ -273,27 +278,17 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
     }
     _lastVersionTap = now;
     _versionTapCount++;
-    if (_versionTapCount >= 3) {
+    if (_versionTapCount >= 5) {
       _versionTapCount = 0;
-      _showDevToolsDialog();
+      _showDeveloperUnlockDialog();
     }
   }
 
-  void _showDevToolsDialog() {
+  void _showDeveloperUnlockDialog() {
     final api = ApiClient();
-    final intervalCtrl = TextEditingController();
-
-    // 使用独立的 StatefulWidget 避免 builder 闭包中的变量重置问题
     showDialog(
       context: context,
-      builder: (ctx) => _DevToolsDialog(
-        api: api,
-        intervalCtrl: intervalCtrl,
-        devShowWelcomeAlways: _devShowWelcomeAlways,
-        onWelcomeAlwaysChanged: (v) {
-          _devShowWelcomeAlways = v;
-        },
-      ),
+      builder: (ctx) => DeveloperUnlockDialog(api: api),
     );
   }
 

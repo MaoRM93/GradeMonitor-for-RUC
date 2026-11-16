@@ -78,7 +78,7 @@ class ApiClient {
   }
 
   /// 需要脱敏的字段名（登录密码不应以任何形式落盘到日志）
-  static const Set<String> _secretKeys = {'password', 'token'};
+  static const Set<String> _secretKeys = {'password', 'token', 'url', 'topic', 'nickname'};
 
   /// 递归替换敏感字段的值为 `***`
   ///
@@ -216,6 +216,15 @@ class ApiClient {
       queryParameters: {'mode': mode},
     );
   }
+
+  Future<Response> getNotificationForwarders() => dio.get(ApiPath.notificationForwarders);
+  Future<Response> updateNotificationForwarders(Map<String, dynamic> data) => dio.post(ApiPath.notificationForwarders, data: data);
+  Future<Response> testNotificationForwarder(String channel) => dio.post('${ApiPath.notificationForwarders}/$channel/test');
+
+  Future<Response> getDeveloperStatus() => dio.get(ApiPath.developerStatus);
+  Future<Response> unlockDeveloper(String password) => dio.post(ApiPath.developerUnlock, data: {'password': password});
+  Future<Response> developerConsole(Map<String, dynamic> data) => dio.post(ApiPath.developerConsole, data: data);
+  Future<Response> openCurriculum() => dio.post(ApiPath.curriculumOpen);
 
   // ---- Dev Tools ----
 

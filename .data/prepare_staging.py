@@ -9,6 +9,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = os.path.join(ROOT, "frontend", "build", "windows", "x64", "runner", "Release")
 BACKEND = os.path.join(ROOT, "backend")
+ASSETS = os.path.join(ROOT, "assets")
 RUNTIME_TOOLS = os.path.join(ROOT, "runtime", "tools")
 DATA_DIR = os.path.join(ROOT, ".data")
 STAGING = os.path.join(DATA_DIR, "staging")
@@ -94,6 +95,8 @@ def main():
         os.path.join(STAGING, "backend"),
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    if os.path.isdir(ASSETS):
+        shutil.copytree(ASSETS, os.path.join(STAGING, "assets"))
 
     # 4. 复制 Python runtime（排除开发用目录 include/libs 及缓存）
     print("[3/4] 复制 Python runtime ...")

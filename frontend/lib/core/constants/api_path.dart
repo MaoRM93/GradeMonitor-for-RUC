@@ -29,6 +29,11 @@ class ApiPath {
   // Notification
   static const String notificationTest = '/api/notification/test';
   static const String notificationPreview = '/api/notification/preview';
+  static const String notificationForwarders = '/api/notification/forwarders';
+  static const String developerStatus = '/api/developer/status';
+  static const String developerUnlock = '/api/developer/unlock';
+  static const String developerConsole = '/api/developer/console';
+  static const String curriculumOpen = '/api/curriculum/open';
 
   // Dev Tools
   static const String devQueryOnce = '/api/dev/query-once';

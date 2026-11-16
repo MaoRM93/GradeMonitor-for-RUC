@@ -17,6 +17,8 @@ import '../../providers/monitor_provider.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/note_banner.dart';
 import '../../widgets/toast_host.dart';
+import '../../core/service/nav_signal.dart';
+import 'developer_options.dart';
 
 /// 系统设置页面（所有开关即时生效）
 class SettingsPage extends ConsumerStatefulWidget {
@@ -72,6 +74,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _hideUnknownCourses = true;
   bool _prevShowMenubarIcon = true;
   bool _loaded = false;
+  bool _developerEnabled = false;
 
   // 检查更新状态
   _UpdateStatus _updateStatus = _UpdateStatus.idle;
@@ -80,11 +83,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    developerOptionsEnabled.addListener(_onDeveloperEnabled);
     Future.microtask(_loadSettings);
   }
 
+  void _onDeveloperEnabled() { if (mounted) setState(() => _developerEnabled = developerOptionsEnabled.value); }
+
   Future<void> _loadSettings() async {
     await ref.read(settingsProvider.notifier).fetchSettings();
+    // 后端在本次进程中已验证过口令时，返回设置页仍保持开发者分区可见。
+    try {
+      final status = await ref.read(apiClientProvider).getDeveloperStatus();
+      _developerEnabled = status.data['unlocked'] == true;
+      developerOptionsEnabled.value = _developerEnabled;
+    } catch (_) {}
     final s = ref.read(settingsProvider);
     _usernameCtrl.text = s.username;
     // 后端不再回传密码（安全存储），输入框留空；
@@ -740,6 +752,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   void dispose() {
+    developerOptionsEnabled.removeListener(_onDeveloperEnabled);
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
     _captchaCtrl.dispose();
@@ -1057,6 +1070,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
               ),
               const SizedBox(height: 24),
+
+              if (_developerEnabled) ...[
+                const DeveloperOptions(),
+                const SizedBox(height: 24),
+              ],
 
               // ---- ⑥ 检查更新 ----
               _SectionTitle(

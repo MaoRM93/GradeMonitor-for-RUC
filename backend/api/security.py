@@ -96,7 +96,9 @@ def get_token() -> str:
 
 
 def is_public_path(path: str) -> bool:
-    return path in _PUBLIC_PATHS
+    # 浏览器查看培养方案时不能附加本机 API 头；该路径仍由一次性能力令牌、
+    # 账号年级复核和 5 分钟有效期保护，不能据此枚举或下载资源。
+    return path in _PUBLIC_PATHS or path.startswith("/api/curriculum/view/")
 
 
 def token_valid(provided: Optional[str]) -> bool:

@@ -7,6 +7,9 @@ enum AppNavTarget { dashboard, grades, scheme, settings }
 /// 当前待处理的导航请求；AppNavigation 消费后会置回 null。
 final ValueNotifier<AppNavTarget?> navRequest = ValueNotifier<AppNavTarget?>(null);
 
+/// 已在本次后端会话解锁开发者选项；设置页据此显示开发者分区。
+final ValueNotifier<bool> developerOptionsEnabled = ValueNotifier<bool>(false);
+
 /// 请求切换到某个页面。先置 null 再置目标，保证同一目标连续点击也能触发。
 void requestNav(AppNavTarget target) {
   navRequest.value = null;

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/network/api_client.dart';
+import '../../providers/settings_provider.dart';
+import '../../widgets/toast_host.dart';
 import '../../providers/grades_provider.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/note_banner.dart';
@@ -46,6 +49,31 @@ class _SchemePageState extends ConsumerState<SchemePage> {
 
   /// 计算结果精度开关：true = 5 位小数（不足补 0），false = 保留 2 位
   bool _precise5 = false;
+  bool _openingCurriculum = false;
+
+  String? get _curriculumGrade {
+    final username = ref.read(settingsProvider).username.trim();
+    final grade = username.length >= 4 ? username.substring(0, 4) : '';
+    return const {'2024', '2025', '2026'}.contains(grade) ? grade : null;
+  }
+
+  Future<void> _openCurriculum() async {
+    if (_curriculumGrade == null) {
+      ToastHost().show('当前登录账号未匹配可用培养方案');
+      return;
+    }
+    setState(() => _openingCurriculum = true);
+    try {
+      await ApiClient().openCurriculum();
+      if (mounted) {
+        ToastHost().show('已在浏览器中打开培养方案；如无法打开，请检查网络条件后重试。');
+      }
+    } catch (e) {
+      if (mounted) ToastHost().show('打开失败：请检查网络条件后重试。');
+    } finally {
+      if (mounted) setState(() => _openingCurriculum = false);
+    }
+  }
 
   @override
   void initState() {
@@ -173,6 +201,21 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                   color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _openingCurriculum || _curriculumGrade == null
+                      ? null
+                      : _openCurriculum,
+                  icon: _openingCurriculum
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.open_in_new_rounded, size: 17),
+                  label: Text(_curriculumGrade == null
+                      ? '当前账号暂无匹配培养方案'
+                      : '查看 ${_curriculumGrade!} 级培养方案 ↗'),
                 ),
               ),
               const SizedBox(height: 20),

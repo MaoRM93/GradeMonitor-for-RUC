@@ -175,7 +175,7 @@ if (Test-Path -LiteralPath $pywin32System32) {
 Write-Step '验证依赖导入'
 $verifyScript = @'
 import importlib, sys
-mods = ['uvicorn', 'fastapi', 'pydantic', 'requests', 'bs4', 'websockets', 'win11toast']
+mods = ['uvicorn', 'fastapi', 'pydantic', 'requests', 'bs4', 'websockets', 'cryptography', 'win11toast']
 missing = []
 for m in mods:
     try:

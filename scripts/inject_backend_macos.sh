@@ -11,6 +11,7 @@
 # 本脚本把以下内容放进 .app/Contents/Resources：
 #   runtime/python/   便携 CPython（python-build-standalone，可重定位）
 #   backend/          后端源码（排除 __pycache__）
+#   assets/curricula/ 加密培养方案资源
 #
 # 前端 frontend/lib/core/service/backend_service.dart 会优先在
 # Contents/Resources 下寻找 backend/api/app.py 与 runtime/python/bin/python3。
@@ -65,6 +66,11 @@ rsync -a \
   --exclude '.DS_Store' \
   "$PROJECT_ROOT/backend/" "$RES/backend/"
 
+# 培养方案仅以 AES-GCM 密文随包分发；解密由本机后端按登录账号完成。
+if [[ -d "$PROJECT_ROOT/assets" ]]; then
+  rsync -a --exclude '.DS_Store' "$PROJECT_ROOT/assets/" "$RES/assets/"
+fi
+
 # ---------- 2. 复制便携 Python（并裁剪无用体积） ----------
 echo "==> [2/4] 复制便携 Python 运行时"
 rm -rf "$RES/runtime/python"
@@ -99,7 +105,7 @@ find "$PY/bin" -maxdepth 1 -type l ! -exec test -e {} \; -delete 2>/dev/null || 
 
 # ---------- 3. 冒烟：包内解释器必须能 import uvicorn 且能加载 backend ----------
 echo "==> [3/4] 冒烟测试包内运行时"
-if ! "$PY/bin/python3" -c 'import uvicorn, fastapi, requests, bs4, websockets; print("deps ok")'; then
+if ! "$PY/bin/python3" -c 'import uvicorn, fastapi, requests, bs4, websockets, cryptography; print("deps ok")'; then
   echo "错误：包内 Python 缺少依赖（需要 fastapi/uvicorn/requests/bs4/websockets）" >&2
   exit 1
 fi

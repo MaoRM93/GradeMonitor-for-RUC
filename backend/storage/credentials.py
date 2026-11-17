@@ -362,16 +362,10 @@ def _secret_file(name: str) -> str:
 
 def _mac_find_named(account: str) -> Optional[str]:
     try:
-        helper = Path(__file__).resolve().parents[1] / "bin" / "keychain_secret"
-        if helper.is_file():
-            r = subprocess.run(
-                [str(helper), "read", KEYCHAIN_SERVICE, account],
-                capture_output=True,
-                timeout=10,
-            )
-            if r.returncode == 0:
-                return r.stdout.decode("utf-8")
-            return None
+        # 开发者 PAT 等普通命名凭据没有 userPresence 访问控制。此前使用随
+        # 应用路径变化的 helper 读取它们，macOS 会把每次启动都识别为新的
+        # 请求者，反复弹“允许/一律允许”。签名私钥不走这里，而在
+        # signing_keys.py 中继续经 helper + userPresence 读取。
         r = subprocess.run(
             [
                 "security",

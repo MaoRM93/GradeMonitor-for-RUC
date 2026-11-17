@@ -32,6 +32,10 @@ class _NotificationForwardersPageState
   bool _barkConfigured = false,
       _meowConfigured = false,
       _ntfyConfigured = false;
+  bool _showBarkKey = false;
+  bool _showMeowKey = false;
+  bool _showNtfyServer = false;
+  bool _showNtfyTopic = false;
 
   @override
   void initState() {
@@ -144,8 +148,26 @@ class _NotificationForwardersPageState
     }
   }
 
-  InputDecoration _field(String label, String? hint) =>
-      InputDecoration(labelText: label, hintText: hint);
+  InputDecoration _field(
+    String label,
+    String? hint, {
+    required bool revealed,
+    required VoidCallback onToggleReveal,
+  }) => InputDecoration(
+    labelText: label,
+    hintText: hint,
+    suffixIcon: IconButton(
+      tooltip: revealed ? '隐藏内容' : '显示内容',
+      icon: Icon(
+        revealed ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+        size: 19,
+      ),
+      onPressed: onToggleReveal,
+    ),
+  );
+
+  TextStyle? _secretStyle(bool revealed) =>
+      revealed ? null : const TextStyle(letterSpacing: -2.4);
 
   Widget _link(String text, String url) => InkWell(
     onTap: () => _openLink(url),
@@ -297,11 +319,15 @@ class _NotificationForwardersPageState
                   fields: [
                     TextField(
                       controller: _barkUrl,
-                      obscureText: true,
+                      obscureText: !_showBarkKey,
+                      style: _secretStyle(_showBarkKey),
                       onChanged: (_) => _markDirty('bark'),
                       decoration: _field(
                         '地址和 Key',
                         'https://api.day.app/你的设备密钥',
+                        revealed: _showBarkKey,
+                        onToggleReveal: () =>
+                            setState(() => _showBarkKey = !_showBarkKey),
                       ),
                     ),
                   ],
@@ -325,9 +351,16 @@ class _NotificationForwardersPageState
                   fields: [
                     TextField(
                       controller: _meowNickname,
-                      obscureText: true,
+                      obscureText: !_showMeowKey,
+                      style: _secretStyle(_showMeowKey),
                       onChanged: (_) => _markDirty('meow'),
-                      decoration: _field('昵称', null),
+                      decoration: _field(
+                        '昵称',
+                        null,
+                        revealed: _showMeowKey,
+                        onToggleReveal: () =>
+                            setState(() => _showMeowKey = !_showMeowKey),
+                      ),
                     ),
                   ],
                   description: const Text(
@@ -351,15 +384,30 @@ class _NotificationForwardersPageState
                   fields: [
                     TextField(
                       controller: _ntfyServer,
+                      obscureText: !_showNtfyServer,
+                      style: _secretStyle(_showNtfyServer),
                       onChanged: (_) => _markDirty('ntfy'),
-                      decoration: _field('服务器', null),
+                      decoration: _field(
+                        '服务器',
+                        null,
+                        revealed: _showNtfyServer,
+                        onToggleReveal: () =>
+                            setState(() => _showNtfyServer = !_showNtfyServer),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: _ntfyTopic,
-                      obscureText: true,
+                      obscureText: !_showNtfyTopic,
+                      style: _secretStyle(_showNtfyTopic),
                       onChanged: (_) => _markDirty('ntfy'),
-                      decoration: _field('Topic', '例如 grade_随机长字符串'),
+                      decoration: _field(
+                        'Topic',
+                        '例如 grade_随机长字符串',
+                        revealed: _showNtfyTopic,
+                        onToggleReveal: () =>
+                            setState(() => _showNtfyTopic = !_showNtfyTopic),
+                      ),
                     ),
                   ],
                   description: Wrap(

@@ -12,6 +12,9 @@ import subprocess
 import sys
 import time
 import os
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
 import requests
 from pathlib import Path
 
@@ -43,7 +46,7 @@ from backend.service.grade_service import GradeService
 from backend.service.rank_service import RankService
 from backend.service.monitor_service import monitor
 from backend.service.notification_service import send_test_notification, send_notification_preview
-from backend.service.forwarder_service import public_config, save_config, test_forwarder
+from backend.service.forwarder_service import client_config, public_config, save_config, test_forwarder
 from backend.service.curriculum_service import open_curriculum, view_curriculum
 from backend.service import developer_auth
 from backend.storage.flags import DEFAULT_FLAGS, load_flags, set_flag
@@ -68,7 +71,7 @@ from backend.storage.cache import (
     get_data_dir, get_data_file_path,
     load_total_query_count, increment_query_count, reset_query_count,
     load_local_grades, load_local_ranks,
-    save_local_grades, save_local_ranks,
+    save_local_grades, save_local_ranks, atomic_write_json,
 )
 from backend.utils.logger import get_logger, get_log_dir
 
@@ -361,6 +364,115 @@ class NoticePublishRequest(BaseModel):
 
 
 _DEV_REPO = "MaoRM93/GradeMonitor-for-RUC"
+_NOTICE_RECORDS_FILE = get_data_file_path("developer_notification_records.json")
+
+
+def _load_notice_records() -> list[dict]:
+    try:
+        with open(_NOTICE_RECORDS_FILE, "r", encoding="utf-8") as f:
+            records = json.load(f)
+        return records if isinstance(records, list) else []
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def _save_notice_records(records: list[dict]) -> None:
+    # 仅保留最近 100 条，避免开发者本地记录无限增长。
+    atomic_write_json(_NOTICE_RECORDS_FILE, records[:100])
+
+
+def _append_notice_record(record: dict) -> None:
+    records = _load_notice_records()
+    records.insert(0, record)
+    _save_notice_records(records)
+
+
+def _notice_time(value: object = None) -> str:
+    """统一输出东八区通知时间；兼容旧记录里的 UTC `Z` 字符串。"""
+    try:
+        raw = str(value or "").strip()
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00")) if raw else datetime.now(timezone.utc)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        parsed = datetime.now(timezone.utc)
+    return parsed.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _notice_type_from_tag(tag: str) -> Optional[str]:
+    if tag == "developer-alert":
+        return "Important (BL)"
+    if tag == "service-suspension":
+        return "Disable (RE)"
+    if tag.startswith("114."):
+        return "Default_Notice"
+    return None
+
+
+def _notice_body_from_release(body: object) -> str:
+    # 线上 Release 正文尾部的签名围栏是传输元数据，不属于用户通知正文。
+    return str(body or "").split("\n\n```text\n", 1)[0].strip()
+
+
+def _merge_online_notice_records() -> list[dict]:
+    """将仍发布在 GitHub 的通知并入本地历史；网络失败时保留历史。"""
+    records = _load_notice_records()
+    by_release = {str(item.get("release_id")): item for item in records if item.get("release_id") is not None}
+    # 蓝/红通知复用固定 tag。已撤回的旧记录不能吞掉同 tag 的后来发布。
+    by_tag = {
+        str(item.get("tag")): item
+        for item in records
+        if item.get("tag") and item.get("status") != "已撤回"
+    }
+    try:
+        response = requests.get(
+            f"https://api.github.com/repos/{_DEV_REPO}/releases?per_page=100",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=15,
+        )
+        releases = response.json() if response.ok else []
+    except (requests.RequestException, ValueError):
+        releases = []
+    if not isinstance(releases, list):
+        releases = []
+    changed = False
+    for release in releases:
+        if not isinstance(release, dict):
+            continue
+        tag = str(release.get("tag_name") or "")
+        notice_type = _notice_type_from_tag(tag)
+        if notice_type is None:
+            continue
+        release_id = release.get("id")
+        record = by_release.get(str(release_id)) or by_tag.get(tag)
+        if record is None:
+            record = {
+                "id": uuid.uuid4().hex,
+                "type": notice_type,
+                "time": _notice_time(release.get("published_at") or release.get("created_at")),
+                "status": "已发送",
+                "title": str(release.get("name") or "") if notice_type == "Default_Notice" else "",
+                "body": _notice_body_from_release(release.get("body")),
+                "tag": tag,
+                "release_id": release_id,
+            }
+            records.insert(0, record)
+            by_release[str(release_id)] = record
+            by_tag[tag] = record
+            changed = True
+        elif record.get("status") != "已撤回":
+            # 发布仍存在即是有效状态；同步 Release id，便于稍后撤回。
+            if record.get("release_id") != release_id or record.get("status") != "已发送":
+                record["release_id"] = release_id
+                record["status"] = "已发送"
+                changed = True
+        normalized = _notice_time(record.get("time"))
+        if record.get("time") != normalized:
+            record["time"] = normalized
+            changed = True
+    if changed:
+        _save_notice_records(records)
+    return records
 
 
 def _build_notice_block(kind: str, tag: str, body: str) -> str:
@@ -515,7 +627,7 @@ async def login_captcha(req: CaptchaRequest):
 async def login_modes():
     """返回可用的登录入口（前端欢迎页据此渲染选项）
 
-    顺序即推荐优先级：教务系统直连（默认）→ CAS → 传统 v.ruc。
+    顺序即界面优先级：CAS 统一认证（推荐）→ 教务系统直连（经典）→ 传统 v.ruc。
     被功能组关掉的入口不会出现在列表里（静默下线，前端无需改动）。
     """
     from backend.auth.login import MODE_CAS, MODE_JW, MODE_VRUC
@@ -529,31 +641,32 @@ async def login_modes():
 
     all_modes = [
         {
-            "id": "jw",
-            "name": "教务系统",
-            "description": "无需验证码，登录最快，推荐使用",
-            "needs_captcha": False,
+            "id": "cas",
+            "name": "CAS 统一身份验证",
+            "description": "",
+            "needs_captcha": True,
             "recommended": True,
         },
         {
-            "id": "cas",
-            "name": "CAS 统一身份验证",
-            "description": "学校统一认证平台，需要输入验证码；登录后可 7 天免登录",
-            "needs_captcha": True,
+            "id": "jw",
+            "name": "教务系统",
+            "description": "",
+            "needs_captcha": False,
             "recommended": False,
         },
         {
             "id": "vruc",
             "name": "传统登录",
-            "description": "旧版登录方式，官方即将停止支持",
+            "description": "",
             "needs_captcha": False,
             "recommended": False,
         },
     ]
     modes = [m for m in all_modes if m["id"] not in disabled_modes]
 
-    # 默认入口也下线时，退到列表里的第一个；全都下线则保持原默认（前端会拿到空列表）
-    default_mode = DEFAULT_MODE
+    # 界面默认入口随推荐项走 CAS；后台无人值守的默认重登仍由 login.py 的
+    # DEFAULT_MODE（jw）独立决定，二者不能混淆。
+    default_mode = MODE_CAS
     if default_mode in disabled_modes:
         default_mode = modes[0]["id"] if modes else DEFAULT_MODE
 
@@ -729,7 +842,9 @@ async def update_settings(update: SettingsUpdate):
 @app.get("/api/notification/forwarders")
 async def get_forwarders():
     _require_gate("Flag-1030", "通知转发")
-    return public_config()
+    # 此端点受一次性本地 API token 保护，只给当前桌面客户端回填用户自己保存
+    # 的地址/Topic；不得改成公开端点，也不得写入日志。
+    return client_config()
 
 
 @app.post("/api/notification/forwarders")
@@ -975,14 +1090,66 @@ async def developer_publish_notice(req: NoticePublishRequest):
     base = f"https://api.github.com/repos/{_DEV_REPO}/releases"
     headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
     payload = {"tag_name": tag, "name": title or tag, "body": full_body, "draft": False, "prerelease": True}
+    record = {
+        "id": uuid.uuid4().hex,
+        "type": channel,
+        "time": _notice_time(),
+        "status": "发送失败",
+        "title": title,
+        "body": body,
+        "tag": tag,
+        "release_id": None,
+    }
     try:
         existing = requests.get(f"{base}/tags/{tag}", headers=headers, timeout=15)
         response = requests.patch(f"{base}/{existing.json()['id']}", headers=headers, json=payload, timeout=15) if existing.status_code == 200 else requests.post(base, headers=headers, json=payload, timeout=15)
     except requests.RequestException as e:
+        _append_notice_record(record)
         raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{e}")
     if not response.ok:
+        _append_notice_record(record)
         raise HTTPException(status_code=502, detail=f"GitHub 发布失败：{response.status_code}")
+    record["status"] = "已发送"
+    record["release_id"] = response.json().get("id")
+    _append_notice_record(record)
     return {"success": True, "tag": tag, "message": "通知已发送"}
+
+
+@app.get("/api/developer/notices")
+async def developer_notice_records():
+    # 通知本身已是公开 Release；读取记录不需要拿开发者钥匙串令牌，避免设置页
+    # 在覆盖升级后的启动阶段触发 macOS 授权弹窗。撤回仍要求开发者鉴权。
+    return {"records": _merge_online_notice_records()}
+
+
+@app.post("/api/developer/notices/{record_id}/recall")
+async def developer_recall_notice(record_id: str):
+    _require_developer()
+    records = _load_notice_records()
+    record = next((item for item in records if item.get("id") == record_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail="通知记录不存在")
+    if record.get("status") == "已撤回":
+        return {"success": True, "message": "通知已撤回"}
+    release_id = record.get("release_id")
+    token = developer_auth.developer_token()
+    if not token or not release_id:
+        raise HTTPException(status_code=400, detail="该通知没有可撤回的发布记录")
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
+    try:
+        response = requests.delete(
+            f"https://api.github.com/repos/{_DEV_REPO}/releases/{release_id}",
+            headers=headers,
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"GitHub 撤回失败：{e}")
+    if response.status_code not in (204, 404):
+        raise HTTPException(status_code=502, detail=f"GitHub 撤回失败：{response.status_code}")
+    record["status"] = "已撤回"
+    record["recalled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _save_notice_records(records)
+    return {"success": True, "message": "通知已撤回"}
 
 
 @app.get("/api/monitor/status")
@@ -1273,7 +1440,16 @@ async def clear_all_data():
     _grades_cache = {}
     _rank_cache = {}
     cleaned = []
-    for fname in ["local_grades.json", "local_ranks.json", "settings.json", "stats.json"]:
+    try:
+        if monitor.is_running:
+            await monitor.stop()
+        session_store.clear()
+        from backend.storage.credentials import clear_password
+        clear_password()
+        developer_auth.logout()
+    except Exception as e:
+        logger.warning(f"清除登录信息时出现问题: {e}")
+    for fname in ["local_grades.json", "local_ranks.json", "settings.json", "stats.json", "developer_notification_records.json"]:
         fp = Path(get_data_file_path(fname))
         if fp.exists():
             fp.unlink()

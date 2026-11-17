@@ -49,7 +49,9 @@ class _DeveloperLoginDialogState extends State<DeveloperLoginDialog> {
   @override
   void initState() {
     super.initState();
-    _probe();
+    // 不在打开弹窗时探测后端已登录状态。探测会读取开发者钥匙串凭据，
+    // 而连续点击版本号只是打开入口，不应要求 macOS 授权。
+    _probing = false;
   }
 
   @override
@@ -57,25 +59,6 @@ class _DeveloperLoginDialogState extends State<DeveloperLoginDialog> {
     _account.dispose();
     _token.dispose();
     super.dispose();
-  }
-
-  /// 先问一次后端：本机是否已经存有有效身份。
-  ///
-  /// 已登录时不再让用户重填，改为展示当前账号 + 退出登录入口。
-  Future<void> _probe() async {
-    try {
-      final r = await widget.api.getDeveloperStatus();
-      final data = r.data;
-      final unlocked = data is Map && data['unlocked'] == true;
-      final login = (data is Map ? data['login'] : null)?.toString() ?? '';
-      if (!mounted) return;
-      setState(() {
-        _existingLogin = unlocked ? login : '';
-        _probing = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _probing = false);
-    }
   }
 
   Future<void> _submit() async {
@@ -231,6 +214,7 @@ class _DeveloperLoginDialogState extends State<DeveloperLoginDialog> {
         TextField(
           controller: _token,
           obscureText: true,
+          style: const TextStyle(letterSpacing: -2.4),
           onSubmitted: (_) => _busy ? null : _submit(),
           decoration: const InputDecoration(labelText: 'Password'),
         ),

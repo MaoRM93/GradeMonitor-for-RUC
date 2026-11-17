@@ -51,6 +51,7 @@ GitHub 的用户名**可以被改名，改名后旧名会被释放，任何人�
 - `GRADEMONITOR_DEVELOPER_PASSWORD` 被本模块取代，不再读取。
 """
 from dataclasses import dataclass
+import time
 from typing import Optional
 
 import requests
@@ -90,6 +91,13 @@ _SECRET_USERID = "developer-userid"
 
 _GITHUB_USER_URL = "https://api.github.com/user"
 _GITHUB_TIMEOUT = 15
+
+# 登录成功或在线复核成功后，短时间内在本进程复用身份结果。缓存仍然以
+# 钥匙串中的令牌和可信 GitHub 数字 id 为前提；后端重启即失效并重新复核。
+# 这样不会把 GitHub 的瞬时限流误报为“本机未解锁”。
+_AUTH_CACHE_SECONDS = 15 * 60
+_verified_user_id: Optional[int] = None
+_verified_at: float = 0.0
 
 # 统一的拒绝文案（前端原样红字显示）
 REJECT_MESSAGE = "您登录的不是合法的开发者账户。"
@@ -145,6 +153,7 @@ def is_authenticated() -> bool:
     敏感操作前会周期性向 GitHub 复核令牌归属。仅靠可独立篡改的本地
     token/id 条目判断会允许同一系统用户伪造已登录状态。
     """
+    global _verified_user_id, _verified_at
     token = developer_token()
     if not token:
         return False
@@ -158,12 +167,19 @@ def is_authenticated() -> bool:
     manager = _lookup_by_user_id(user_id)
     if manager is None:
         return False
+    if (
+        _verified_user_id == manager.user_id
+        and time.monotonic() - _verified_at < _AUTH_CACHE_SECONDS
+    ):
+        return True
     try:
         actual_id, actual_login = _fetch_github_identity(token)
     except DeveloperAuthError:
         return False
     if actual_id != manager.user_id or actual_login.lower() != manager.login.lower():
         return False
+    _verified_user_id = manager.user_id
+    _verified_at = time.monotonic()
     return True
 
 
@@ -230,6 +246,7 @@ def verify_and_store(mng_id: str, account: str, token: str) -> dict:
 
     失败抛 [DeveloperAuthError]，调用方转成 HTTP 错误。
     """
+    global _verified_user_id, _verified_at
     mng_id = (mng_id or "").strip()
     account = (account or "").strip()
     token = (token or "").strip()
@@ -259,9 +276,17 @@ def verify_and_store(mng_id: str, account: str, token: str) -> dict:
     # 令牌落系统凭据存储；保存的是 GitHub 返回的规范大小写
     if not save_secret(_SECRET_TOKEN, token):
         raise DeveloperAuthError("无法安全保存登录信息，请检查系统钥匙串权限。", status_code=500)
-    save_secret(_SECRET_LOGIN, actual_login)
-    save_secret(_SECRET_MNGID, manager.mng_id)
-    save_secret(_SECRET_USERID, str(manager.user_id))
+    saved_metadata = (
+        save_secret(_SECRET_LOGIN, actual_login)
+        and save_secret(_SECRET_MNGID, manager.mng_id)
+        and save_secret(_SECRET_USERID, str(manager.user_id))
+    )
+    if not saved_metadata:
+        # 不允许出现“登录成功但下一次鉴权立刻 403”的半完成状态。
+        logout()
+        raise DeveloperAuthError("无法安全保存登录信息，请检查系统钥匙串权限。", status_code=500)
+    _verified_user_id = manager.user_id
+    _verified_at = time.monotonic()
 
     logger.info(f"开发者身份校验通过：{actual_login} (id={manager.user_id})")
     return {
@@ -274,10 +299,13 @@ def verify_and_store(mng_id: str, account: str, token: str) -> dict:
 
 def logout() -> None:
     """清除已保存的开发者身份（令牌 + 登录名 + 编号 + id）。"""
+    global _verified_user_id, _verified_at
     clear_secret(_SECRET_TOKEN)
     clear_secret(_SECRET_LOGIN)
     clear_secret(_SECRET_MNGID)
     clear_secret(_SECRET_USERID)
+    _verified_user_id = None
+    _verified_at = 0.0
     logger.info("已清除开发者登录信息")
 
 

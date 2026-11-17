@@ -280,8 +280,9 @@ class DisabledScreen extends StatefulWidget {
   /// 由 main.dart 传入：body 后到时 widget 身份变化，页面会重建刷新正文，
   /// 避免先弹禁用页、正文稍后才出现的空窗。
   final ReleaseNotice? notice;
+  final Duration? autoDismissAfter;
 
-  const DisabledScreen({super.key, this.notice});
+  const DisabledScreen({super.key, this.notice, this.autoDismissAfter});
 
   @override
   State<DisabledScreen> createState() => _DisabledScreenState();
@@ -296,17 +297,25 @@ class _DisabledScreenState extends State<DisabledScreen> {
   // 隐秘后门：900ms 内连续点击 3 次"版本号"解除禁用
   int _secretTaps = 0;
   Timer? _secretTimer;
+  Timer? _autoDismissTimer;
 
   @override
   void initState() {
     super.initState();
     _versionRecognizer.onTap = _onSecretTap;
+    final delay = widget.autoDismissAfter;
+    if (delay != null) {
+      _autoDismissTimer = Timer(delay, () {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
   }
 
   @override
   void dispose() {
     _versionRecognizer.dispose();
     _secretTimer?.cancel();
+    _autoDismissTimer?.cancel();
     super.dispose();
   }
 

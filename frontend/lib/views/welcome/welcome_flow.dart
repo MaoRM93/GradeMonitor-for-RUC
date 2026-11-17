@@ -78,7 +78,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   // ---- 登录入口选择页 ----
   List<LoginMode> _loginModes = const [];
-  String _loginMode = 'jw';
+  String _loginMode = 'cas';
   bool _modesLoading = false;
   bool _modesLoaded = false;
 
@@ -279,9 +279,10 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             _usernameCtrl.text.trim().isNotEmpty &&
             _passwordCtrl.text.isNotEmpty &&
             !_verifying;
-        // 需要验证码时，必须填满 4 位才能提交
+        // 验证码字符数由教务系统决定，可能是字母、数字或二者混合；前端只
+        // 约束为非空，避免新版验证码因位数变化而无法提交。
         if (_showCaptcha) {
-          return base && _captchaCtrl.text.trim().length >= 4;
+          return base && _captchaCtrl.text.trim().isNotEmpty;
         }
         return base;
       case _pMonitor:
@@ -644,36 +645,26 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     }
   }
 
-  /// 引导页成块容器统一阴影，取值与 GlassCard 完全同源：
-  /// light = 1E293B alpha .04 / blur 20 / offset (0,4) + alpha .02 / blur 4 / offset (0,1)；
-  /// dark  = black alpha .3 / blur 20 / offset (0,4) + alpha .15 / blur 4 / offset (0,1)。
-  /// 只此两层，不加发光、不加彩色阴影；selected 仅让选中态主阴影轻微加深。
+  /// 欢迎页以清晰的表面色块作为层级主体，阴影只负责轻微托起，不再用厚重
+  /// 阴影代替分组。色块由 Container 的背景先绘制在上层，阴影留在其下方。
   List<BoxShadow> _blockShadow({bool selected = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     if (isDark) {
       return [
         BoxShadow(
-          color: Colors.black.withValues(alpha: selected ? .35 : .3),
-          blurRadius: 20,
-          offset: const Offset(0, 4),
-        ),
-        BoxShadow(
-          color: Colors.black.withValues(alpha: .15),
-          blurRadius: 4,
-          offset: const Offset(0, 1),
+          color: Colors.black.withValues(alpha: selected ? .20 : .14),
+          blurRadius: 12,
+          offset: const Offset(0, 3),
         ),
       ];
     }
     return [
       BoxShadow(
-        color: const Color(0xFF1E293B).withValues(alpha: selected ? .06 : .04),
-        blurRadius: 20,
-        offset: const Offset(0, 4),
-      ),
-      BoxShadow(
-        color: const Color(0xFF1E293B).withValues(alpha: .02),
-        blurRadius: 4,
-        offset: const Offset(0, 1),
+        color: const Color(
+          0xFF1E293B,
+        ).withValues(alpha: selected ? .055 : .035),
+        blurRadius: 12,
+        offset: const Offset(0, 3),
       ),
     ];
   }
@@ -873,7 +864,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                 ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(_blockRadius),
-                  color: cs.surfaceContainerHighest.withValues(alpha: .3),
+                  color: cs.surfaceContainerHighest.withValues(alpha: .74),
                   boxShadow: _blockShadow(),
                 ),
                 child: Scrollbar(
@@ -958,7 +949,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             borderRadius: BorderRadius.circular(_blockRadius),
             color: selected
                 ? cs.primary.withValues(alpha: .07)
-                : cs.surfaceContainerHighest.withValues(alpha: .25),
+                : cs.surfaceContainerHighest.withValues(alpha: .72),
             boxShadow: _blockShadow(selected: selected),
           ),
           child: Row(
@@ -1012,6 +1003,27 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                             ),
                           ),
                         ],
+                        if (m.id == 'jw') ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.secondary.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '经典',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: cs.secondary,
+                              ),
+                            ),
+                          ),
+                        ],
                         if (m.needsCaptcha) ...[
                           const SizedBox(width: 8),
                           Container(
@@ -1034,15 +1046,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                           ),
                         ],
                       ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      m.description,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        height: 1.35,
-                        color: cs.onSurface.withValues(alpha: .6),
-                      ),
                     ),
                   ],
                 ),
@@ -1078,6 +1081,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             TextField(
               controller: _passwordCtrl,
               obscureText: _hidePassword,
+              style: _hidePassword
+                  ? const TextStyle(letterSpacing: -2.4)
+                  : null,
               keyboardType: TextInputType.visiblePassword,
               enableSuggestions: false,
               autocorrect: false,
@@ -1111,14 +1117,17 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                   Expanded(
                     child: TextField(
                       controller: _captchaCtrl,
-                      keyboardType: TextInputType.number,
-                      maxLength: 4,
+                      keyboardType: TextInputType.visiblePassword,
                       enableSuggestions: false,
                       autocorrect: false,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[A-Za-z0-9]'),
+                        ),
+                      ],
                       decoration: const InputDecoration(
                         labelText: '验证码',
-                        hintText: '4 位数字',
+                        hintText: '请输入验证码',
                         counterText: '',
                         prefixIcon: Icon(Icons.verified_outlined, size: 18),
                       ),
@@ -1207,7 +1216,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: .35),
+                color: cs.surfaceContainerHighest.withValues(alpha: .76),
                 borderRadius: BorderRadius.circular(_blockRadius),
                 boxShadow: _blockShadow(),
               ),
@@ -1418,7 +1427,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             borderRadius: BorderRadius.circular(_blockRadius),
             color: selected
                 ? cs.primary.withValues(alpha: .1)
-                : cs.surfaceContainerHighest.withValues(alpha: .3),
+                : cs.surfaceContainerHighest.withValues(alpha: .72),
             boxShadow: _blockShadow(selected: selected),
           ),
           child: Row(
@@ -1499,7 +1508,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: .35),
+                color: cs.surfaceContainerHighest.withValues(alpha: .76),
                 borderRadius: BorderRadius.circular(_blockRadius),
                 boxShadow: _blockShadow(),
               ),

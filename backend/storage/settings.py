@@ -40,8 +40,8 @@ DEFAULT_SETTINGS = {
     "username": "",
     "password": "",
     "remember_me": False,
-    # 登录入口：jw（教务系统直连，默认）/ cas（统一身份认证）/ vruc（传统）
-    "login_mode": "jw",
+    # 首次由界面优先展示 CAS；后台失效后的无人值守重登仍由 login.py 回落 jw。
+    "login_mode": "cas",
     "notify_mode": "详细",
     "start_time": "08:00",
     "end_time": "23:00",

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/service/update_service.dart';
@@ -13,8 +15,9 @@ import 'disabled_page.dart';
 class DeveloperNoticeScreen extends StatefulWidget {
   /// 当前提示记录；为空时页面仍可渲染兜底文案（例如加载期间被重建）
   final ReleaseNotice? notice;
+  final Duration? autoDismissAfter;
 
-  const DeveloperNoticeScreen({super.key, this.notice});
+  const DeveloperNoticeScreen({super.key, this.notice, this.autoDismissAfter});
 
   @override
   State<DeveloperNoticeScreen> createState() => _DeveloperNoticeScreenState();
@@ -23,6 +26,24 @@ class DeveloperNoticeScreen extends StatefulWidget {
 class _DeveloperNoticeScreenState extends State<DeveloperNoticeScreen> {
   /// 整页背景色（深蓝，与禁用页深红同深度），所有文字白色系
   static const Color _bgColor = Color(0xFF0B4EAE);
+  Timer? _autoDismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    final delay = widget.autoDismissAfter;
+    if (delay != null) {
+      _autoDismissTimer = Timer(delay, () {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoDismissTimer?.cancel();
+    super.dispose();
+  }
 
   /// 兜底：正常应由 main.dart 传入 notice，这里再兜一层
   ReleaseNotice? get _notice =>

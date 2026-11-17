@@ -39,6 +39,7 @@ class ApiPath {
   static const String developerFeatures = '/api/developer/features';
   static const String developerGatesPublish = '/api/developer/gates/publish';
   static const String developerNoticePublish = '/api/developer/notices/publish';
+  static const String developerNotices = '/api/developer/notices';
 
   // Dev Tools
   static const String devQueryOnce = '/api/dev/query-once';

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -52,7 +53,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   // 登录入口与验证码（与欢迎向导一致）
   List<LoginMode> _loginModes = const [];
-  String _loginMode = 'jw';
+  String _loginMode = 'cas';
   bool _modeNeedsCaptcha = false;
   bool _captchaRequiredByServer = false;
   final _captchaCtrl = TextEditingController();
@@ -97,29 +98,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _loadSettings() async {
     await ref.read(settingsProvider.notifier).fetchSettings();
-    // 开发者分区一旦打开就常驻：只有点「关闭开发者选项」才会收起。
-    // 后端凭据可能读不到（钥匙串被清、后端刚重启），所以本地另存一份标记，
-    // 避免面板在用户没操作的情况下自己消失。
-    await UiPrefsService.ensureLoaded();
-    var pinned = UiPrefsService.readBoolPref(UiPrefsService.prefDevPanelPinned);
-    try {
-      final status = await ref.read(apiClientProvider).getDeveloperStatus();
-      final data = status.data;
-      final unlocked = data is Map && data['unlocked'] == true;
-      if (unlocked && !pinned) {
-        await UiPrefsService.writeBoolPref(
-          UiPrefsService.prefDevPanelPinned,
-          true,
-        );
-        pinned = true;
-      }
-      _developerEnabled = unlocked || pinned;
-      developerOptionsEnabled.value = _developerEnabled;
-    } catch (_) {
-      // 后端不可达时以本地标记为准，不要悄悄收起面板
-      _developerEnabled = pinned;
-      developerOptionsEnabled.value = pinned;
-    }
     final s = ref.read(settingsProvider);
     _usernameCtrl.text = s.username;
     // 后端不再回传密码（安全存储），输入框留空；
@@ -149,12 +127,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _loaded = true;
     setState(() {});
 
+    // 开发者状态可能触发钥匙串或 GitHub 身份复核，不能阻塞账号/监控设置的
+    // 首帧，否则已经登录的用户会短暂看到“未登录”表单。
+    unawaited(_restoreDeveloperVisibility());
+
     // 登录入口列表与验证码：失败不阻塞设置页
     _loadLoginModes();
 
     if (!s.showMenubarIcon) {
       await TrayService().destroy();
     }
+  }
+
+  Future<void> _restoreDeveloperVisibility() async {
+    // 开发者分区一旦打开就常驻：只有点「关闭开发者选项」才会收起。
+    // 这里绝不能请求后端 developer/status：它会读取钥匙串中的开发者凭据，
+    // 导致普通启动也弹出 macOS 授权框。显示与敏感操作鉴权是两件事；后者
+    // 仅在真正执行通知/下发等操作时才由后端进行。
+    await UiPrefsService.ensureLoaded();
+    _developerEnabled = UiPrefsService.readBoolPref(
+      UiPrefsService.prefDevPanelPinned,
+    );
+    developerOptionsEnabled.value = _developerEnabled;
+    if (mounted) setState(() {});
   }
 
   TimeOfDay _parseTime(String t) {
@@ -329,6 +324,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         TextField(
           controller: _passwordCtrl,
           obscureText: _hidePassword,
+          style: _hidePassword ? const TextStyle(letterSpacing: -2.4) : null,
           keyboardType: TextInputType.visiblePassword,
           enableSuggestions: false,
           autocorrect: false,
@@ -361,15 +357,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               Expanded(
                 child: TextField(
                   controller: _captchaCtrl,
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
+                  keyboardType: TextInputType.visiblePassword,
                   enableSuggestions: false,
                   autocorrect: false,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                  ],
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: '验证码',
-                    hintText: '4 位数字',
+                    hintText: '请输入验证码',
                     counterText: '',
                     prefixIcon: Icon(Icons.verified_rounded, size: 20),
                   ),
@@ -839,7 +836,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               // ---- ① 账号（无分组标题：头像与学号本身已足够说明）----
               GlassCard(
                 padding: const EdgeInsets.all(20),
-                child: _loggedIn
+                child: !_loaded
+                    ? const SizedBox(
+                        height: 84,
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      )
+                    : _loggedIn
                     ? _buildAccountRow(colorScheme)
                     : _buildLoginForm(colorScheme),
               ),
@@ -1098,11 +1106,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(height: 24),
 
-              if (_developerEnabled) ...[
-                const DeveloperOptions(),
-                const SizedBox(height: 24),
-              ],
-
               // ---- ⑥ 检查更新 ----
               _SectionTitle(
                 title: '检查更新',
@@ -1172,7 +1175,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
+              // 开发者区是设置页的末段管理内容，与检查更新和版权信息都留出
+              // 更明确的呼吸空间，避免大标题紧贴上一行版本信息。
+              if (_developerEnabled) ...[
+                const SizedBox(height: 40),
+                const DeveloperOptions(),
+                const SizedBox(height: 32),
+              ] else
+                const SizedBox(height: 24),
 
               // ── 版本与版权 ──
               Center(

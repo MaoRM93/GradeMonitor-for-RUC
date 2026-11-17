@@ -95,7 +95,7 @@ def captcha_required(session: requests.Session) -> bool:
 
 
 def fetch_captcha(session: requests.Session) -> bytes:
-    """下载验证码图片（4 位数字，约 60x20 的 jpeg）"""
+    """下载验证码图片（通常为 4 位，可能包含字母或数字）。"""
     url = (
         SEC_API
         + "/kaptcha?t="

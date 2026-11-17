@@ -1,4 +1,5 @@
 """成绩变动的可选移动端通知转发器（Bark / MeoW / ntfy）。"""
+import json
 import threading
 from urllib.parse import quote
 
@@ -37,13 +38,22 @@ def _config() -> dict:
 
 
 def public_config() -> dict:
-    """只返回启用状态和是否已配置，绝不把接收地址回传到 UI。"""
+    """返回配置状态，供不需要编辑凭据的调用方使用。"""
     cfg = _config()
     return {
         "bark": {"enabled": bool(cfg["bark"]["enabled"]), "configured": bool(cfg["bark"]["url"])},
         "meow": {"enabled": bool(cfg["meow"]["enabled"]), "configured": bool(cfg["meow"]["nickname"])},
         "ntfy": {"enabled": bool(cfg["ntfy"]["enabled"]), "configured": bool(cfg["ntfy"]["topic"]), "server": cfg["ntfy"]["server"]},
     }
+
+
+def client_config() -> dict:
+    """返回本机 UI 重启后回填所需的完整配置。
+
+    只允许受一次性本地 API token 保护的客户端端点调用；不会传往远端或写入
+    日志。用户的转发地址和 Topic 因此可以在重启后恢复到输入框。
+    """
+    return _config()
 
 
 def save_config(incoming: dict) -> dict:
@@ -82,7 +92,23 @@ def _send(cfg: dict, title: str, message: str) -> dict:
         try:
             base = str(ntfy["server"] or "https://ntfy.sh").rstrip("/")
             url = f"{base}/{quote(str(ntfy['topic']), safe='')}"
-            r = requests.post(url, json={"title": title, "message": message, "tags": ["mortar_board"], "priority": 4}, timeout=10)
+            # 强制按 UTF-8 JSON API 投递。部分 ntfy 反向代理无法可靠推断
+            # json= 的请求类型，会把整个 JSON 当正文显示在 Android 客户端。
+            payload = json.dumps(
+                {
+                    "title": title,
+                    "message": message,
+                    "tags": ["mortar_board"],
+                    "priority": 4,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+            r = requests.post(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                timeout=10,
+            )
             results["ntfy"] = "成功" if r.ok else f"HTTP {r.status_code}"
         except Exception as e:
             results["ntfy"] = f"失败：{e}"

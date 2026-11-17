@@ -273,6 +273,11 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   }
 
   void _onVersionTap() {
+    // 已启用的设备不再重复弹出登录探测（也不应触发钥匙串访问）。
+    if (developerOptionsEnabled.value) {
+      requestNav(AppNavTarget.settings);
+      return;
+    }
     final now = DateTime.now();
     // Reset if more than 1 second since last tap
     if (now.difference(_lastVersionTap).inMilliseconds > 1000) {

@@ -111,6 +111,20 @@ class ApiClient {
     return s.length > maxLen ? '${s.substring(0, maxLen)}...' : s;
   }
 
+  /// 将后端的可展示错误压缩为一条人话，避免 UI 直接露出 Dio 的长堆栈。
+  /// 后端规范错误放在 `{"detail": "…"}` 中，优先保留该信息。
+  String errorMessage(Object error, {String fallback = '请求失败'}) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map && data['detail'] != null) {
+        return data['detail'].toString();
+      }
+      final status = error.response?.statusCode;
+      if (status != null) return '$fallback（HTTP $status）';
+    }
+    return fallback;
+  }
+
   // ---- Auth ----
 
   /// 登录
@@ -293,6 +307,11 @@ class ApiClient {
     ApiPath.developerNoticePublish,
     data: {'channel': channel, 'title': title, 'body': body},
   );
+
+  Future<Response> getDeveloperNotices() => dio.get(ApiPath.developerNotices);
+
+  Future<Response> recallDeveloperNotice(String id) =>
+      dio.post('${ApiPath.developerNotices}/$id/recall');
 
   /// 打开培养方案。
   ///

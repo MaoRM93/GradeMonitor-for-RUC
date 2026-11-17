@@ -53,7 +53,9 @@ def release_private_key():
     return _load_ed25519(RELEASE_KEY_SECRET)
 
 
-def store_developer_key(secret_name: str, pem: bytes) -> None:
+def store_developer_key(secret_name: str, pem: bytes | str) -> None:
     """仅开发机初始化时写入；通过 stdin 交给 Security.framework，不经过 argv。"""
+    if isinstance(pem, str):
+        pem = pem.encode("utf-8")
     _run_keychain("write", secret_name, pem)
 

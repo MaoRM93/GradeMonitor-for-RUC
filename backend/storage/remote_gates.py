@@ -56,7 +56,7 @@ logger = get_logger(__name__)
 REMOTE_FILE = get_data_file_path("feature_gates_remote.json")
 
 # 控制通道独立信任根；绝不能复用安装包/通知的发布签名密钥。
-PUBLIC_KEY_B64 = "TYRbLidZ76u2qPMF8MwOinVn10QIs+E+0n1/KmO9oMM="
+PUBLIC_KEY_B64 = "6/as6xSRMN4yVd+Fj7dnnMvfYVet/BnU3ONf6JCJ74c="
 
 # 控制频道与 app-v* 更新频道严格分离；不能让控制发布被版本比较误认为更新。
 TAG_PREFIX = "control-v"

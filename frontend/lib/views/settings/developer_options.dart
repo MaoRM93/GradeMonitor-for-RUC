@@ -5,6 +5,9 @@ import '../../core/service/feature_gate_service.dart';
 import '../../core/service/nav_signal.dart';
 import '../../core/service/ui_prefs_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../disabled/developer_notice_page.dart';
+import '../disabled/disabled_page.dart';
+import '../../core/service/update_service.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/toast_host.dart';
 
@@ -62,6 +65,9 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
   final _noticeBody = TextEditingController();
   String? _noticeChannel;
   bool _sendingNotice = false;
+  bool _loadingNoticeRecords = false;
+  String? _recallingNoticeId;
+  List<Map<String, dynamic>> _noticeRecords = <Map<String, dynamic>>[];
 
   /// 开发者开关的本地镜像（键 → 状态）。点击时乐观更新，失败回滚。
   final Map<String, bool> _flags = Map<String, bool>.of(_kDefaultFlagStates);
@@ -114,6 +120,27 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
     }
     await _loadFlags();
     await _loadGates();
+    await _loadNoticeRecords();
+  }
+
+  Future<void> _loadNoticeRecords() async {
+    if (_loadingNoticeRecords) return;
+    if (mounted) setState(() => _loadingNoticeRecords = true);
+    try {
+      final response = await _api.getDeveloperNotices();
+      final raw = response.data is Map ? response.data['records'] : null;
+      if (!mounted || raw is! List) return;
+      setState(() {
+        _noticeRecords = raw
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+      });
+    } catch (_) {
+      // 保持已加载的记录；开发者身份过期时由实际操作给出提示。
+    } finally {
+      if (mounted) setState(() => _loadingNoticeRecords = false);
+    }
   }
 
   /// 拉一次全部开关状态；失败时保持当前镜像（不弹错，避免进页面就吵）。
@@ -189,7 +216,11 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
         ToastHost().show('已生成签名块 rev=$rev');
       }
     } catch (e) {
-      if (mounted) ToastHost().show('${push ? '下发' : '签发'}失败：$e');
+      if (mounted) {
+        ToastHost().show(
+          '${push ? '下发' : '签发'}失败：${_api.errorMessage(e, fallback: '请检查开发者登录和网络状态')}',
+        );
+      }
     } finally {
       if (mounted) setState(() => _publishing = false);
     }
@@ -303,11 +334,78 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
         ToastHost().show(
           (r.data is Map ? r.data['message'] : null)?.toString() ?? '通知已发送',
         );
+      await _loadNoticeRecords();
     } catch (e) {
-      if (mounted) ToastHost().show('发送失败：$e');
+      if (mounted) {
+        ToastHost().show(
+          '发送失败：${_api.errorMessage(e, fallback: '请检查开发者登录和网络状态')}',
+        );
+      }
     } finally {
       if (mounted) setState(() => _sendingNotice = false);
     }
+  }
+
+  Future<void> _recallNotice(Map<String, dynamic> record) async {
+    final id = record['id']?.toString() ?? '';
+    if (id.isEmpty || _recallingNoticeId != null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认撤回通知？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('撤回'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _recallingNoticeId = id);
+    try {
+      final response = await _api.recallDeveloperNotice(id);
+      if (mounted) {
+        ToastHost().show(
+          (response.data is Map ? response.data['message'] : null)
+                  ?.toString() ??
+              '通知已撤回',
+        );
+      }
+      await _loadNoticeRecords();
+    } catch (e) {
+      if (mounted)
+        ToastHost().show(
+          '撤回失败：${_api.errorMessage(e, fallback: '请检查开发者登录和网络状态')}',
+        );
+    } finally {
+      if (mounted) setState(() => _recallingNoticeId = null);
+    }
+  }
+
+  Future<void> _showFullPageTest(bool red) async {
+    final notice = ReleaseNotice(
+      kind: red ? NoticeKind.killSwitch : NoticeKind.developerNotice,
+      tag: red ? 'local-red-test' : 'local-blue-test',
+      body: '',
+    );
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => red
+            ? DisabledScreen(
+                notice: notice,
+                autoDismissAfter: const Duration(seconds: 7),
+              )
+            : DeveloperNoticeScreen(
+                notice: notice,
+                autoDismissAfter: const Duration(seconds: 7),
+              ),
+      ),
+    );
   }
 
   Future<void> _previewNotice() async {
@@ -421,17 +519,6 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
             ),
           ),
         if (_remoteRev > 0) const SizedBox(height: 8),
-        Text(
-          '本机功能 Flag',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Theme.of(
-              context,
-            ).colorScheme.onSurface.withValues(alpha: .62),
-          ),
-        ),
-        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -534,7 +621,8 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      // 标题与首个功能组之间留白稍大，让“开发者选项”作为独立末段成立。
+      const SizedBox(height: 20),
       _DeveloperSectionTitle(title: '功能遥测', icon: Icons.hub_rounded),
       const SizedBox(height: 12),
       GlassCard(padding: const EdgeInsets.all(20), child: _gateCardBody()),
@@ -604,6 +692,33 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
           ],
         ),
       ),
+      if (_loadingNoticeRecords || _noticeRecords.isNotEmpty) ...[
+        const SizedBox(height: 24),
+        _DeveloperSectionTitle(title: '通知记录', icon: Icons.history_rounded),
+        const SizedBox(height: 12),
+        if (_loadingNoticeRecords)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: LinearProgressIndicator(),
+          ),
+        if (_noticeRecords.isNotEmpty)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final twoColumns = constraints.maxWidth >= 760;
+              final width = twoColumns
+                  ? (constraints.maxWidth - 16) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  for (final record in _noticeRecords)
+                    SizedBox(width: width, child: _noticeRecord(record)),
+                ],
+              );
+            },
+          ),
+      ],
       const SizedBox(height: 24),
       _DeveloperSectionTitle(title: '本地工具', icon: Icons.handyman_rounded),
       const SizedBox(height: 12),
@@ -621,6 +736,8 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
                   '测试通知',
                   () => _local('测试通知', _api.sendTestNotification),
                 ),
+                _toolButton('BL_Full_Page', () => _showFullPageTest(false)),
+                _toolButton('RE_Full_Page', () => _showFullPageTest(true)),
                 _toolButton('打开数据目录', () => _local('打开数据目录', _api.openLogDir)),
                 _toolButton('清理缓存', () => _local('清理缓存', _api.clearCache)),
                 _toolButton(
@@ -694,6 +811,31 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
                 Text(label),
               ],
             ),
+    );
+  }
+
+  Widget _noticeRecord(Map<String, dynamic> record) {
+    String value(String key) => record[key]?.toString() ?? '';
+    final recalled = value('status') == '已撤回';
+    return GlassCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('通知类型：${value('type')}'),
+          Text('通知时间：${value('time')}'),
+          Text('发送状态：${value('status')}'),
+          Text('标题：${value('title')}'),
+          Text('正文：${value('body')}'),
+          const SizedBox(height: 10),
+          OutlinedButton(
+            onPressed: recalled || _recallingNoticeId != null
+                ? null
+                : () => _recallNotice(record),
+            child: Text(_recallingNoticeId == value('id') ? '撤回中' : '撤回通知'),
+          ),
+        ],
+      ),
     );
   }
 }

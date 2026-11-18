@@ -10,6 +10,7 @@ import '../../core/constants/api_path.dart';
 import '../../core/constants/api_token.dart';
 import '../logger/app_logger.dart';
 import 'feature_gate_service.dart';
+import 'ui_prefs_service.dart';
 import 'update_verifier.dart';
 
 /// GitHub Release 的安装包资源
@@ -314,12 +315,9 @@ class UpdateService {
   static final ValueNotifier<UpdateCheckResult?> preReleaseFound =
       ValueNotifier<UpdateCheckResult?>(null);
 
-  /// 右上角通知广播（114 号段里除 513/514/515 之外的 tag）。
-  ///
-  /// null = 没有待展示的广播。主壳把它渲染成右上角的小提示卡，
-  /// 点「好」调用 [dismissBroadcast] 关闭。
-  static final ValueNotifier<ReleaseNotice?> broadcastNotice =
-      ValueNotifier<ReleaseNotice?>(null);
+  /// 右上角通知广播：按发布时间最多同时展示三条，每条单独确认。
+  static final ValueNotifier<List<ReleaseNotice>> broadcastNotices =
+      ValueNotifier<List<ReleaseNotice>>(const []);
 
   /// 运行时完整版本号（如 108.1.0.100），未加载完成时为空字符串
   String _currentVersion = '';
@@ -328,6 +326,7 @@ class UpdateService {
   /// 初始化：读取完整版本号 + 静默检查远程停用开关（不弹任何 UI）
   /// + 启动后端滥用标记轮询
   Future<void> init() async {
+    await UiPrefsService.ensureLoaded();
     try {
       final info = await PackageInfo.fromPlatform();
       final build = info.buildNumber.trim();
@@ -612,18 +611,29 @@ class UpdateService {
     final notice = releaseNotice.value;
     if (notice == null || notice.kind != NoticeKind.developerNotice) return;
     _instance._dismissedDeveloperTags.add(notice.tag);
+    unawaited(
+      UiPrefsService.dismissPermanently(_noticeDismissKey('blue', notice.tag)),
+    );
     releaseNotice.value = null;
     _instance._log.info('开发者提醒已关闭: ${notice.tag}');
   }
 
-  /// 关闭右上角通知广播卡片（仅清 UI 状态，不落盘：下次启动重新判定）
-  static void dismissBroadcast() {
-    final notice = broadcastNotice.value;
-    if (notice == null) return;
+  /// 关闭右上角通知广播卡片，并记住本次确认直到通知被撤回。
+  static void dismissBroadcast(ReleaseNotice notice) {
     _instance._dismissedBroadcastTags.add(notice.tag);
-    broadcastNotice.value = null;
+    unawaited(
+      UiPrefsService.dismissPermanently(
+        _noticeDismissKey('broadcast', notice.tag),
+      ),
+    );
+    broadcastNotices.value = List<ReleaseNotice>.unmodifiable(
+      broadcastNotices.value.where((item) => item.tag != notice.tag),
+    );
     _instance._log.info('通知广播已关闭: ${notice.tag}');
   }
+
+  static String _noticeDismissKey(String kind, String tag) =>
+      'release_notice_$kind:${tag.trim()}';
 
   /// 清除停用态（开发者后门 / 外部调用）：同时复位 disabled 与提示记录。
   ///
@@ -723,11 +733,21 @@ class UpdateService {
         )) {
           return;
         }
-        if (_dismissedDeveloperTags.contains(developerNoticeVersion)) return;
+        if (_dismissedDeveloperTags.contains(developerNoticeVersion) ||
+            UiPrefsService.isPermanentlyDismissed(
+              _noticeDismissKey('blue', developerNoticeVersion),
+            )) {
+          return;
+        }
         _applyDeveloperNotice(developerNoticeVersion, developer);
       } else if (developer.exists == false) {
         // tag 已删除：撤下提醒页，并清掉关闭记录（下次若重建则重新提醒）
         _dismissedDeveloperTags.remove(developerNoticeVersion);
+        unawaited(
+          UiPrefsService.restorePermanentlyDismissed(
+            _noticeDismissKey('blue', developerNoticeVersion),
+          ),
+        );
         final current = releaseNotice.value;
         if (current != null &&
             current.kind == NoticeKind.developerNotice &&
@@ -746,7 +766,7 @@ class UpdateService {
       if (!broadcastEnabled ||
           !enableLegacy114BroadcastNotices ||
           legacyDisable.exists == true) {
-        broadcastNotice.value = null;
+        broadcastNotices.value = const [];
       } else {
         await _checkBroadcast(releases);
       }
@@ -756,15 +776,14 @@ class UpdateService {
     }
   }
 
-  /// 在 114 号段里找一条待广播的 Release（最新的一条），展示到右上角。
+  /// 在 114 号段里找最多三条待广播的 Release，同时展示到右上角。
   ///
   /// 用列表接口一次取回全部 Release：号段 tag 是按需新增/删除的，
   /// 没有固定名称可逐个探测。列表为空或网络异常时**不动**界面，
   /// 已展示的卡片不会被莫名其妙撤掉。
   Future<void> _checkBroadcast(List<Map<String, dynamic>> releases) async {
     try {
-      _TagProbe? hit;
-      String? hitTag;
+      final hits = <ReleaseNotice>[];
       for (final raw in releases) {
         final tag = _normalizeVersion((raw['tag_name'] ?? '').toString());
         if (!isBroadcastTag(tag)) continue;
@@ -776,41 +795,43 @@ class UpdateService {
           _log.warning('广播 $tag 缺少有效签名，跳过');
           continue;
         }
-        hitTag = tag;
-        hit = _TagProbe(
-          exists: true,
-          title: (raw['name'] ?? '').toString().trim(),
-          body: verified,
+        if (_dismissedBroadcastTags.contains(tag) ||
+            UiPrefsService.isPermanentlyDismissed(
+              _noticeDismissKey('broadcast', tag),
+            )) {
+          continue;
+        }
+        hits.add(
+          ReleaseNotice(
+            kind: NoticeKind.broadcast,
+            title: (raw['name'] ?? '').toString().trim(),
+            body: verified,
+            tag: tag,
+          ),
         );
-        // 列表按发布时间倒序，第一条命中即最新
-        break;
+        // 列表按发布时间倒序，最多保留三条最新通知。
+        if (hits.length == 3) break;
       }
 
-      if (hitTag == null || hit == null) {
+      if (hits.isEmpty) {
         // 号段里没有任何广播条目：撤下卡片，并清掉本次进程的关闭记录
         _dismissedBroadcastTags.clear();
-        final current = broadcastNotice.value;
-        if (current != null && current.kind == NoticeKind.broadcast) {
-          broadcastNotice.value = null;
-        }
+        broadcastNotices.value = const [];
         return;
       }
-      if (_dismissedBroadcastTags.contains(hitTag)) return;
       if (disabled.value) return;
-      final current = broadcastNotice.value;
+      final current = broadcastNotices.value;
       final same =
-          current != null &&
-          current.kind == NoticeKind.broadcast &&
-          current.tag == hitTag &&
-          current.body == hit.body;
+          current.length == hits.length &&
+          List.generate(
+            current.length,
+            (index) =>
+                current[index].tag == hits[index].tag &&
+                current[index].body == hits[index].body,
+          ).every((value) => value);
       if (same) return;
-      broadcastNotice.value = ReleaseNotice(
-        kind: NoticeKind.broadcast,
-        tag: hitTag,
-        title: hit.title,
-        body: hit.body,
-      );
-      _log.info('命中通知广播（$hitTag）');
+      broadcastNotices.value = List<ReleaseNotice>.unmodifiable(hits);
+      _log.info('命中 ${hits.length} 条通知广播');
     } catch (e) {
       _log.warning('广播通知检查失败（保持原状态）: $e');
     }

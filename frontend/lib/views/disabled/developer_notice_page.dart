@@ -63,7 +63,7 @@ class _DeveloperNoticeScreenState extends State<DeveloperNoticeScreen> {
 
     return ReleaseNoticeScaffold(
       bgColor: _bgColor,
-      icon: Icons.notifications_active_rounded,
+      icon: Icons.notifications_outlined,
       title: '来自开发者的重要提醒',
       markdown: notice?.body ?? '',
       action: FilledButton(

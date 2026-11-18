@@ -24,6 +24,10 @@ class UiPrefsService {
   /// 开发者选项里「轮询秒数」输入框的上次值（跨重启、跨选项卡保持）。
   static const String prefDevIntervalSeconds = 'dev_interval_seconds';
 
+  /// 用户选中的视觉主题与明暗模式（system / light / dark）。
+  static const String prefThemePreset = 'theme_preset';
+  static const String prefThemeMode = 'theme_mode';
+
   static const String _fileName = 'ui_prefs.json';
 
   /// 永久隐藏的提示条 key 集合
@@ -129,5 +133,9 @@ class UiPrefsService {
   static Future<void> dismissPermanently(String key) async {
     _permanentDismissed.add(key);
     await _flush();
+  }
+
+  static Future<void> restorePermanentlyDismissed(String key) async {
+    if (_permanentDismissed.remove(key)) await _flush();
   }
 }

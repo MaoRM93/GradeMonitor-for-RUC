@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
@@ -27,6 +28,34 @@ enum NavDestination {
   final IconData icon;
   final String label;
   const NavDestination({required this.icon, required this.label});
+}
+
+const _navigationGroups = <List<NavDestination>>[
+  [NavDestination.dashboard, NavDestination.grades],
+  [NavDestination.scheme, NavDestination.forwarders],
+  [NavDestination.settings],
+];
+
+/// SVG 中的黑色字形跟随明暗反相；单独标记为洋红的 i 点跟随当前主题主色。
+class _LogoColorMapper extends ColorMapper {
+  const _LogoColorMapper({required this.ink, required this.accent});
+
+  final Color ink;
+  final Color accent;
+
+  @override
+  Color substitute(
+    String? id,
+    String elementName,
+    String attributeName,
+    Color color,
+  ) {
+    if (color.toARGB32() == const Color(0xFFFF00FF).toARGB32()) {
+      return accent;
+    }
+    if (color.toARGB32() == const Color(0xFF000000).toARGB32()) return ink;
+    return color;
+  }
 }
 
 class AppNavigation extends StatefulWidget {
@@ -302,6 +331,21 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isRucRed = ThemeController.instance.preset == ThemePreset.rucRed;
+    final navigationSurface = Color.alphaBlend(
+      colorScheme.primary.withValues(alpha: isDark ? .14 : .08),
+      colorScheme.surfaceContainerHighest,
+    );
+    final railSurface = isRucRed
+        ? (isDark ? const Color(0xFF681915) : const Color(0xFF941E17))
+        : navigationSurface;
+    final railOnSurface = isRucRed
+        ? const Color(0xFFFFF7F0)
+        : colorScheme.onSurface;
+    final selectedSurface = isRucRed
+        ? const Color(0xFFB34C44)
+        : colorScheme.primary.withValues(alpha: isDark ? .24 : .15);
 
     return Scaffold(
       body: Column(
@@ -313,9 +357,7 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                 ? Container(
                     // 检查中：与欢迎页同色底遮盖主区域，
                     // 避免仪表板先渲染再被欢迎页覆盖造成闪烁
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF1C1C1E)
-                        : Colors.white,
+                    color: colorScheme.surface,
                     width: double.infinity,
                   )
                 : _welcomePhase == 'welcome'
@@ -335,74 +377,98 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                       if (featureEnabled(FeatureGateService.flag1051SideNav))
                         Material(
                           elevation: 0,
-                          // 侧栏用固定色块与右侧内容区拉开色差（浅色偏冷的灰蓝，
-                          // 深色更深一档），不再靠分割线区分
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? const Color(0xFF131C29)
-                              : const Color(0xFFE9EFF7),
+                          color: railSurface,
                           child: SizedBox(
-                            width: 132,
-                            child: Column(
-                              children: [
-                                const SizedBox(height: 40),
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    top: 2,
-                                    bottom: 12,
-                                  ),
-                                  child: Icon(
-                                    Icons.search_rounded,
-                                    size: 28,
-                                    color: colorScheme.primary,
-                                  ),
-                                ),
-                                Text(
-                                  'Grade\nMonitor',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: colorScheme.onSurface,
-                                    height: 1.3,
-                                  ),
-                                ),
-                                const SizedBox(height: 28),
-                                // 导航组上下留白按 1:2 分配：上方窄、下方宽，
-                                // 整组相对几何中心上移约一个条目的高度（≈60），
-                                // 视觉重心才落在侧栏正中
-                                const Spacer(flex: 1),
-                                ...NavDestination.values.map((dest) {
-                                  final selected = _currentDest == dest;
-                                  return _NavItem(
-                                    icon: dest.icon,
-                                    label: dest.label,
-                                    selected: selected,
-                                    onTap: () =>
-                                        setState(() => _currentDest = dest),
-                                  );
-                                }),
-                                const Spacer(flex: 2),
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    bottom: 16,
-                                    top: 8,
-                                  ),
-                                  child: GestureDetector(
-                                    onTap: _onVersionTap,
-                                    child: Text(
-                                      UpdateService.VerStatus.isEmpty
-                                          ? '…'
-                                          : UpdateService.VerStatus,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: colorScheme.onSurface.withValues(
-                                          alpha: .3,
+                            width: 212,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 48),
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 164,
+                                        child: SvgPicture.asset(
+                                          'assets/grade_monitor_logo.svg',
+                                          colorMapper: _LogoColorMapper(
+                                            ink: isDark
+                                                ? Colors.white
+                                                : railOnSurface,
+                                            accent: isRucRed
+                                                ? const Color(0xFFE9C680)
+                                                : colorScheme.primary,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 66),
+                                  Expanded(
+                                    child: Transform.translate(
+                                      offset: const Offset(0, -58),
+                                      child: Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            for (
+                                              var index = 0;
+                                              index < _navigationGroups.length;
+                                              index++
+                                            ) ...[
+                                              _NavGroup(
+                                                destinations:
+                                                    _navigationGroups[index],
+                                                current: _currentDest,
+                                                onColor: railOnSurface,
+                                                groupColor: isRucRed
+                                                    ? Colors.white.withValues(
+                                                        alpha: .08,
+                                                      )
+                                                    : colorScheme.surface
+                                                          .withValues(
+                                                            alpha: .62,
+                                                          ),
+                                                selectedColor: selectedSurface,
+                                                onSelect: (dest) => setState(
+                                                  () => _currentDest = dest,
+                                                ),
+                                              ),
+                                              if (index !=
+                                                  _navigationGroups.length - 1)
+                                                const SizedBox(height: 14),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 14),
+                                    child: Center(
+                                      child: GestureDetector(
+                                        onTap: _onVersionTap,
+                                        child: Text(
+                                          UpdateService.VerStatus.isEmpty
+                                              ? '…'
+                                              : UpdateService.VerStatus,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: railOnSurface.withValues(
+                                              alpha: .48,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -416,56 +482,100 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   }
 }
 
+class _NavGroup extends StatelessWidget {
+  const _NavGroup({
+    required this.destinations,
+    required this.current,
+    required this.onColor,
+    required this.groupColor,
+    required this.selectedColor,
+    required this.onSelect,
+  });
+
+  final List<NavDestination> destinations;
+  final NavDestination current;
+  final Color onColor;
+  final Color groupColor;
+  final Color selectedColor;
+  final ValueChanged<NavDestination> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var index = 0; index < destinations.length; index++) ...[
+          _NavItem(
+            destination: destinations[index],
+            selected: current == destinations[index],
+            first: index == 0,
+            last: index == destinations.length - 1,
+            onColor: onColor,
+            groupColor: groupColor,
+            selectedColor: selectedColor,
+            onTap: () => onSelect(destinations[index]),
+          ),
+          if (index != destinations.length - 1) const SizedBox(height: 4),
+        ],
+      ],
+    );
+  }
+}
+
 class _NavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
+  final NavDestination destination;
   final bool selected;
+  final bool first;
+  final bool last;
+  final Color onColor;
+  final Color groupColor;
+  final Color selectedColor;
   final VoidCallback onTap;
   const _NavItem({
-    required this.icon,
-    required this.label,
+    required this.destination,
     required this.selected,
+    required this.first,
+    required this.last,
+    required this.onColor,
+    required this.groupColor,
+    required this.selectedColor,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textColor = selected
-        ? colorScheme.onSurface
-        : colorScheme.onSurface.withValues(alpha: .45);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 6),
-      child: Material(
-        color: selected
-            ? colorScheme.primary.withValues(alpha: .15)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          splashColor: colorScheme.primary.withValues(alpha: .2),
-          highlightColor: colorScheme.primary.withValues(alpha: .08),
-          child: SizedBox(
-            width: double.infinity,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 22, color: textColor),
-                  const SizedBox(height: 5),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                      color: textColor,
-                    ),
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(first ? 24 : 7),
+      topRight: Radius.circular(first ? 24 : 7),
+      bottomLeft: Radius.circular(last ? 24 : 7),
+      bottomRight: Radius.circular(last ? 24 : 7),
+    );
+    final textColor = selected ? onColor : onColor.withValues(alpha: .68);
+    return Material(
+      color: selected ? selectedColor : groupColor,
+      borderRadius: radius,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: radius,
+        onTap: onTap,
+        splashColor: onColor.withValues(alpha: .10),
+        highlightColor: onColor.withValues(alpha: .05),
+        child: SizedBox(
+          height: 62,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Icon(destination.icon, size: 20, color: textColor),
+                const SizedBox(width: 13),
+                Text(
+                  destination.label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: textColor,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),

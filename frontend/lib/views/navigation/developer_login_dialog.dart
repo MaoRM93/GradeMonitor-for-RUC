@@ -214,9 +214,14 @@ class _DeveloperLoginDialogState extends State<DeveloperLoginDialog> {
         TextField(
           controller: _token,
           obscureText: true,
-          style: const TextStyle(letterSpacing: -2.4),
+          style: const TextStyle(letterSpacing: -1.2),
           onSubmitted: (_) => _busy ? null : _submit(),
-          decoration: const InputDecoration(labelText: 'Password'),
+          decoration: const InputDecoration(
+            labelText: 'Password',
+            labelStyle: TextStyle(letterSpacing: 0),
+            floatingLabelStyle: TextStyle(letterSpacing: 0),
+            hintStyle: TextStyle(letterSpacing: 0),
+          ),
         ),
         if (_error != null)
           Padding(

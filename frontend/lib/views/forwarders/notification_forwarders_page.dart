@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/network/api_client.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/service/feature_gate_service.dart';
 import '../../widgets/feature_gate.dart';
+import '../../widgets/expressive_switch.dart';
 import '../../widgets/toast_host.dart';
 
 /// 收件凭据只保留在本机后端；本页在当前应用会话内保留已保存草稿。
@@ -156,6 +158,9 @@ class _NotificationForwardersPageState
   }) => InputDecoration(
     labelText: label,
     hintText: hint,
+    labelStyle: const TextStyle(letterSpacing: 0),
+    floatingLabelStyle: const TextStyle(letterSpacing: 0),
+    hintStyle: const TextStyle(letterSpacing: 0),
     suffixIcon: IconButton(
       tooltip: revealed ? '隐藏内容' : '显示内容',
       icon: Icon(
@@ -167,7 +172,7 @@ class _NotificationForwardersPageState
   );
 
   TextStyle? _secretStyle(bool revealed) =>
-      revealed ? null : const TextStyle(letterSpacing: -2.4);
+      revealed ? null : const TextStyle(letterSpacing: -1.2);
 
   Widget _link(String text, String url) => InkWell(
     onTap: () => _openLink(url),
@@ -224,17 +229,19 @@ class _NotificationForwardersPageState
                 child: Text(
                   title,
                   style: const TextStyle(
+                    fontFamily: AppTheme.serifFontFamily,
                     fontWeight: FontWeight.w700,
                     fontSize: 17,
                   ),
                 ),
               ),
-              Switch(
+              ExpressiveSwitch(
                 value: enabled,
                 onChanged: (value) {
                   onChanged(value);
                   _markDirty(id);
                 },
+                height: 30,
               ),
             ],
           ),
@@ -301,7 +308,11 @@ class _NotificationForwardersPageState
             children: [
               const Text(
                 '通知转发',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontFamily: AppTheme.serifFontFamily,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 20),
               FeatureGate(

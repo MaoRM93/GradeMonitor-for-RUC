@@ -48,14 +48,28 @@ Rect _rectOf(Element e) {
 }
 
 void main() {
+  testWidgets('默认窗口扣除侧栏后筛选栏仍为一行且输入框等高', (tester) async {
+    await _pumpPage(tester, const Size(888, 720));
+    Rect frame(String name) =>
+        tester.getRect(find.byKey(ValueKey('grades-$name-frame')));
+    final search = frame('search');
+    final semester = frame('semester');
+    final scope = frame('scope');
+    final core = tester.getRect(find.textContaining('核心课数：'));
+    expect(search.top, semester.top);
+    expect(search.top, scope.top);
+    expect(search.bottom, semester.bottom);
+    expect(search.bottom, scope.bottom);
+    expect(core.center.dy, closeTo(search.center.dy, 0.5));
+    expect(core.left, greaterThan(scope.right));
+    expect(core.right, lessThanOrEqualTo(888 - 28));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('表格铺满内容区、与统计卡对齐、无横向滚动', (tester) async {
     await _pumpPage(tester, const Size(1440, 900));
 
-    final tables = find
-        .byType(DataTable)
-        .evaluate()
-        .map(_rectOf)
-        .toList();
+    final tables = find.byType(DataTable).evaluate().map(_rectOf).toList();
     expect(tables.length, 2, reason: '表头表 + 数据表');
     // 两表列宽必须一致，否则表头与数据列错位
     expect(tables[0].width, closeTo(tables[1].width, 0.01));
@@ -117,20 +131,19 @@ void main() {
     });
   }
 
-  testWidgets('各学期统计排除 PF 制课程，概览行已移除', (
-    tester,
-  ) async {
+  testWidgets('各学期统计排除 PF 制课程，概览行已移除', (tester) async {
     await _pumpPage(tester, const Size(1440, 900));
     // 概览行（合计/PF 门数）已按设计要求移除，只保留各学期卡片
     expect(find.textContaining('按学期统计'), findsNothing);
     expect(find.textContaining('合计 52 门'), findsNothing);
     expect(find.textContaining('PF 6 门'), findsNothing);
     // 各学期口径（与教务 sumxf/pjxfjd 一致；PF 课程仍不计入 GPA）
-    expect(find.text('14 门'), findsOneWidget);
-    expect(find.text('26.0 学分'), findsOneWidget);
-    expect(find.text('GPA 3.78'), findsOneWidget);
-    expect(find.text('GPA 3.49'), findsOneWidget); // 2024-2025 秋，含 3 门 PF
-    expect(find.text('GPA 3.70'), findsOneWidget); // 国际小学期
+    expect(find.text('14门，26.0学分，绩点：3.78'), findsOneWidget);
+    expect(
+      find.textContaining('绩点：3.49'),
+      findsOneWidget,
+    ); // 2024-2025 秋，含 3 门 PF
+    expect(find.textContaining('绩点：3.70'), findsOneWidget); // 国际小学期
   });
 
   testWidgets('窄窗口下退回最小列宽并由横向滚动兜底', (tester) async {

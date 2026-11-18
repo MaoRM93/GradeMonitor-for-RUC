@@ -1,5 +1,4 @@
 """成绩变动的可选移动端通知转发器（Bark / MeoW / ntfy）。"""
-import json
 import threading
 from urllib.parse import quote
 
@@ -91,22 +90,17 @@ def _send(cfg: dict, title: str, message: str) -> dict:
     if ntfy["enabled"] and ntfy["topic"]:
         try:
             base = str(ntfy["server"] or "https://ntfy.sh").rstrip("/")
-            url = f"{base}/{quote(str(ntfy['topic']), safe='')}"
-            # 强制按 UTF-8 JSON API 投递。部分 ntfy 反向代理无法可靠推断
-            # json= 的请求类型，会把整个 JSON 当正文显示在 Android 客户端。
-            payload = json.dumps(
-                {
-                    "title": title,
-                    "message": message,
-                    "tags": ["mortar_board"],
-                    "priority": 4,
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
+            # 使用 ntfy 的最小发布接口：正文直接 POST 到主题地址。这样不会让
+            # JSON 字段（title、tags、priority 等）在某些反向代理或兼容服务中
+            # 被当作通知正文显示；手机端只会收到 GradeMonitor 的实际消息内容。
+            endpoint = f"{base}/{quote(str(ntfy['topic']).strip(), safe='')}"
             r = requests.post(
-                url,
-                data=payload,
-                headers={"Content-Type": "application/json; charset=utf-8"},
+                endpoint,
+                data=message.encode("utf-8"),
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Accept": "application/json",
+                },
                 timeout=10,
             )
             results["ntfy"] = "成功" if r.ok else f"HTTP {r.status_code}"

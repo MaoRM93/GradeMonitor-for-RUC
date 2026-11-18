@@ -28,6 +28,9 @@ final navigatorKey = toastNavigatorKey;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 主题在启动阶段先从本机偏好恢复，避免首帧显示默认蓝色后再跳变。
+  await ThemeController.instance.load();
+
   await AppLogger.init(minLevel: LogLevel.debug);
   final log = AppLogger('main');
 
@@ -178,41 +181,44 @@ class _GradeMonitorAppState extends State<GradeMonitorApp> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'GradeMonitor',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: navigatorKey,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      // 全屏提示优先级：禁用态 → 禁用页；否则开发者提醒 → 提醒页；否则 App。
-      // 两个 notifier 一起监听，任意一个变化即重建（不 push 路由，
-      // 因此提醒页关闭后会自动回到 AppNavigation）。
-      home: AnimatedBuilder(
-        animation: Listenable.merge([
-          UpdateService.disabled,
-          UpdateService.releaseNotice,
-        ]),
-        builder: (context, child) {
-          final notice = UpdateService.releaseNotice.value;
-          if (UpdateService.disabled.value) {
-            // 传入停用记录，让正文（Markdown）随探测结果到达而刷新
-            return DisabledScreen(
-              notice: notice?.kind == NoticeKind.killSwitch ? notice : null,
-            );
-          }
-          if (notice != null && notice.kind == NoticeKind.developerNotice) {
-            return DeveloperNoticeScreen(notice: notice);
-          }
-          // 广播提示卡浮在业务界面右上角，不占用路由，关闭后原地消失
-          return const Stack(
-            children: [
-              AppNavigation(),
-              Positioned(top: 30, right: 26, child: BroadcastToast()),
-            ],
-          );
-        },
-      ),
+    return AnimatedBuilder(
+      animation: ThemeController.instance,
+      builder: (context, _) {
+        final controller = ThemeController.instance;
+        return MaterialApp(
+          title: 'GradeMonitor',
+          debugShowCheckedModeBanner: false,
+          navigatorKey: navigatorKey,
+          theme: AppTheme.lightThemeFor(controller.preset),
+          darkTheme: AppTheme.darkThemeFor(controller.preset),
+          themeMode: controller.mode,
+          themeAnimationDuration: const Duration(milliseconds: 280),
+          themeAnimationCurve: Curves.easeInOutCubic,
+          home: AnimatedBuilder(
+            animation: Listenable.merge([
+              UpdateService.disabled,
+              UpdateService.releaseNotice,
+            ]),
+            builder: (context, child) {
+              final notice = UpdateService.releaseNotice.value;
+              if (UpdateService.disabled.value) {
+                return DisabledScreen(
+                  notice: notice?.kind == NoticeKind.killSwitch ? notice : null,
+                );
+              }
+              if (notice != null && notice.kind == NoticeKind.developerNotice) {
+                return DeveloperNoticeScreen(notice: notice);
+              }
+              return const Stack(
+                children: [
+                  AppNavigation(),
+                  Positioned(top: 30, right: 26, child: BroadcastToast()),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

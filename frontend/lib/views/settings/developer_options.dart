@@ -352,7 +352,7 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('确认撤回通知？'),
+        title: const Text('确认关闭通知？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -360,7 +360,7 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('撤回'),
+            child: const Text('关闭'),
           ),
         ],
       ),
@@ -373,14 +373,14 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
         ToastHost().show(
           (response.data is Map ? response.data['message'] : null)
                   ?.toString() ??
-              '通知已撤回',
+              '通知已关闭',
         );
       }
       await _loadNoticeRecords();
     } catch (e) {
       if (mounted)
         ToastHost().show(
-          '撤回失败：${_api.errorMessage(e, fallback: '请检查开发者登录和网络状态')}',
+          '关闭失败：${_api.errorMessage(e, fallback: '请检查开发者登录和网络状态')}',
         );
     } finally {
       if (mounted) setState(() => _recallingNoticeId = null);
@@ -611,7 +611,11 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
           const SizedBox(width: 10),
           const Text(
             '开发者选项',
-            style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              fontFamily: AppTheme.serifFontFamily,
+              fontSize: 21,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const Spacer(),
           TextButton.icon(
@@ -817,6 +821,7 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
   Widget _noticeRecord(Map<String, dynamic> record) {
     String value(String key) => record[key]?.toString() ?? '';
     final recalled = value('status') == '已撤回';
+    final status = recalled ? '已关闭' : value('status');
     return GlassCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -824,7 +829,7 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
         children: [
           Text('通知类型：${value('type')}'),
           Text('通知时间：${value('time')}'),
-          Text('发送状态：${value('status')}'),
+          Text('发送状态：$status'),
           Text('标题：${value('title')}'),
           Text('正文：${value('body')}'),
           const SizedBox(height: 10),
@@ -832,7 +837,7 @@ class _DeveloperOptionsState extends State<DeveloperOptions> {
             onPressed: recalled || _recallingNoticeId != null
                 ? null
                 : () => _recallNotice(record),
-            child: Text(_recallingNoticeId == value('id') ? '撤回中' : '撤回通知'),
+            child: Text(_recallingNoticeId == value('id') ? '关闭中' : '关闭通知'),
           ),
         ],
       ),
@@ -856,6 +861,7 @@ class _DeveloperSectionTitle extends StatelessWidget {
         Text(
           title,
           style: TextStyle(
+            fontFamily: AppTheme.serifFontFamily,
             fontSize: 17,
             fontWeight: FontWeight.w700,
             color: colorScheme.onSurface,

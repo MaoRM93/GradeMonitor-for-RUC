@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/service/feature_gate_service.dart';
+import '../../core/service/ui_prefs_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../../widgets/feature_gate.dart';
+import '../../widgets/expressive_switch.dart';
 import '../../providers/settings_provider.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../widgets/toast_host.dart';
@@ -31,13 +33,15 @@ const _termsText = '''
 6. 如不同意上述条款，请立即停止使用并彻底删除本程序。
 ''';
 
+enum _WelcomePageMotion { idle, exiting, entering }
+
 /// 沉稳的大红（同意/不同意并排时使用，不刺眼）
 const Color _disagreeRed = Color(0xFFB04A46);
 
 /// 全窗口欢迎向导（iPhone 激活式）：占满主窗口，一页一页顺序设置。
 ///
 /// 页面序列：0 欢迎 → 1 法律性声明 → 2 账号登录 → 3 监控设置
-/// → 4 通知设置 → 5 完成设置。
+/// → 4 通知设置 → 5 选择主题 → 6 完成设置。
 /// 完成后通过 [onCompleted] 通知宿主切回主界面。
 ///
 /// 布局约定：内容组整体水平居中，组内元素一律左对齐。
@@ -50,16 +54,25 @@ class WelcomeFlow extends ConsumerStatefulWidget {
   ConsumerState<WelcomeFlow> createState() => _WelcomeFlowState();
 }
 
-class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
+class _ThemeMeta {
+  const _ThemeMeta(this.title, this.color);
+
+  final String title;
+  final Color color;
+}
+
+class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
+    with SingleTickerProviderStateMixin {
   // 页面序列：0 欢迎 → 1 法律性声明 → 2 选择登录入口 → 3 账号登录
-  // → 4 监控设置 → 5 通知设置 → 6 完成
+  // → 4 监控设置 → 5 通知设置 → 6 主题选择 → 7 完成
   static const int _pIntro = 0;
   static const int _pAgreement = 1;
   static const int _pLoginMode = 2;
   static const int _pAccount = 3;
   static const int _pMonitor = 4;
   static const int _pNotify = 5;
-  static const int _pConfirm = 6;
+  static const int _pTheme = 6;
+  static const int _pConfirm = 7;
 
   /// 引导页「卡片级」容器统一圆角：与主按钮、全局输入框的 12 对齐。
   /// 4px 只用于「推荐 / 需验证码」小标签，不参与此常量。
@@ -70,6 +83,10 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   static const double _captchaTileHeight = 55;
 
   int _page = _pIntro;
+  int _transitionDirection = 1;
+  _WelcomePageMotion _pageMotion = _WelcomePageMotion.idle;
+  bool _pageTransitioning = false;
+  int? _queuedPage;
 
   // ---- 法律声明页 ----
   bool _agreed = false;
@@ -113,16 +130,43 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   // ---- 通知设置页 ----
   String _notifyMode = '详细';
 
+  // ---- 主题选择页 ----
+  ThemePreset _selectedTheme = AppTheme.defaultPreset;
+  ThemeMode _selectedThemeMode = ThemeMode.system;
+
   // ---- 完成页 ----
   bool _saving = false;
+  late final AnimationController _ambientController;
+  late final AnimationController _pageMotionController;
 
   @override
   void initState() {
     super.initState();
+    _ambientController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 5200),
+    )..repeat(reverse: true);
+    _pageMotionController = AnimationController(vsync: this);
     // 账号/密码输入实时刷新主按钮可用状态
     _usernameCtrl.addListener(_refreshState);
     _passwordCtrl.addListener(_refreshState);
     _captchaCtrl.addListener(_refreshState);
+
+    UiPrefsService.ensureLoaded().then((_) {
+      if (!mounted) return;
+      final storedPreset = AppTheme.presetForId(
+        UiPrefsService.readPref(UiPrefsService.prefThemePreset),
+      );
+      final storedMode = UiPrefsService.readPref(UiPrefsService.prefThemeMode);
+      setState(() {
+        _selectedTheme = storedPreset;
+        _selectedThemeMode = switch (storedMode) {
+          'light' => ThemeMode.light,
+          'dark' => ThemeMode.dark,
+          _ => ThemeMode.system,
+        };
+      });
+    });
 
     // Flag-1040~1045 决定引导流程里哪些步骤仍然存在。
     // 开关拉取是异步的：先按"全开"渲染，回来后若当前步骤已被下线再跳到下一步。
@@ -148,6 +192,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         return featureEnabled(FeatureGateService.flag1043MonitorStep);
       case _pNotify:
         return featureEnabled(FeatureGateService.flag1044NotifyStep);
+      case _pTheme:
+        return true;
       case _pConfirm:
         return featureEnabled(FeatureGateService.flag1045Confirm);
       default:
@@ -182,13 +228,48 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   }
 
   /// 切到目标步骤，并补上该步骤的"进入副作用"（登录入口列表、验证码）。
-  void _goto(int page) {
+  Future<void> _goto(int page) async {
+    if (!mounted || page == _page) return;
+    if (_pageTransitioning) {
+      _queuedPage = page;
+      return;
+    }
+    _pageTransitioning = true;
+    setState(() {
+      _transitionDirection = page >= _page ? 1 : -1;
+      _pageMotion = _WelcomePageMotion.exiting;
+    });
+
+    // 串行交接：旧页完全离开后才创建并推进新页，避免两个复杂页面
+    // 同时布局/绘制造成卡顿与“下一页抢先出现”的视觉问题。
+    await _pageMotionController.animateTo(
+      1,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInCubic,
+    );
     if (!mounted) return;
-    setState(() => _page = page);
+
+    _pageMotionController.value = 0;
+    setState(() {
+      _page = page;
+      _pageMotion = _WelcomePageMotion.entering;
+    });
     if (page == _pLoginMode) _loadLoginModes();
     if (page == _pAccount && _showCaptcha && _captchaImage.isEmpty) {
       _refreshCaptcha();
     }
+
+    await _pageMotionController.animateTo(
+      1,
+      duration: const Duration(milliseconds: 460),
+      curve: const Cubic(.16, .88, .24, 1),
+    );
+    if (!mounted) return;
+    setState(() => _pageMotion = _WelcomePageMotion.idle);
+    _pageTransitioning = false;
+    final queued = _queuedPage;
+    _queuedPage = null;
+    if (queued != null && queued != _page) _goto(queued);
   }
 
   void _refreshState() {
@@ -219,6 +300,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _ambientController.dispose();
+    _pageMotionController.dispose();
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
     _captchaCtrl.dispose();
@@ -260,6 +343,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         return _verifying ? '正在验证...' : '下一步';
       case _pMonitor:
       case _pNotify:
+      case _pTheme:
         return '下一步';
       default:
         return _saving ? '正在保存...' : '好';
@@ -267,6 +351,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
   }
 
   bool _primaryEnabled() {
+    if (_pageTransitioning) return false;
     switch (_page) {
       case _pIntro:
         return true;
@@ -287,6 +372,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         return base;
       case _pMonitor:
       case _pNotify:
+      case _pTheme:
         return true;
       default:
         return !_saving;
@@ -404,6 +490,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         break;
       case _pMonitor:
       case _pNotify:
+      case _pTheme:
         _advance();
         break;
       default:
@@ -413,6 +500,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   Future<void> _finish() async {
     setState(() => _saving = true);
+
+    await ThemeController.instance.setPreset(_selectedTheme);
+    await ThemeController.instance.setMode(_selectedThemeMode);
 
     // 凭据已在账号页验证通过（login() 已把密码交给后端安全存储），
     // 这里只保存其余设置，不再重复提交密码。
@@ -445,10 +535,15 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
 
   @override
   Widget build(BuildContext context) {
-    // 底色跟随系统主题：亮色纯白，深色用深底，避免深色模式下刺眼
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final systemBrightness = MediaQuery.platformBrightnessOf(context);
+    final brightness = switch (_selectedThemeMode) {
+      ThemeMode.light => Brightness.light,
+      ThemeMode.dark => Brightness.dark,
+      _ => systemBrightness,
+    };
+    final isDark = brightness == Brightness.dark;
     return Theme(
-      data: isDark ? AppTheme.darkTheme : AppTheme.lightTheme,
+      data: AppTheme.themeFor(_selectedTheme, brightness),
       child: Builder(
         builder: (context) {
           final cs = Theme.of(context).colorScheme;
@@ -456,61 +551,83 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           final topInset = Platform.isMacOS ? 26.0 : 0.0;
           return Scaffold(
             backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-            body: Padding(
-              padding: EdgeInsets.only(top: topInset),
-              child: Column(
-                children: [
-                  // 顶部返回区（欢迎页不显示返回）
-                  SizedBox(height: 40, child: _buildBackRow(cs)),
-                  // 页面内容（切换时淡入 + 轻微上移；外层 AnimatedSize
-                  // 让步骤间页面高度差异平滑过渡，避免内容跳变）
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: AnimatedSize(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeInOutCubic,
-                        alignment: Alignment.topCenter,
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeOutCubic,
-                          transitionBuilder: (child, anim) {
-                            final offset = Tween<Offset>(
-                              begin: const Offset(0, .04),
-                              end: Offset.zero,
-                            ).animate(anim);
-                            return FadeTransition(
-                              opacity: anim,
-                              child: SlideTransition(
-                                position: offset,
-                                child: child,
-                              ),
-                            );
-                          },
-                          // 顶部对齐叠放：旧页淡出时新页从旧页顶部位置起始，
-                          // 高度变化完全交给 AnimatedSize 平滑处理
-                          layoutBuilder: (currentChild, previousChildren) {
-                            return Stack(
-                              alignment: Alignment.topCenter,
-                              children: <Widget>[
-                                ...previousChildren,
-                                ?currentChild,
-                              ],
-                            );
-                          },
-                          child: KeyedSubtree(
-                            key: ValueKey(_page),
-                            child: _buildPage(cs),
-                          ),
-                        ),
+            body: Stack(
+              children: [
+                Positioned.fill(
+                  child: RepaintBoundary(
+                    child: IgnorePointer(
+                      child: _WelcomeAtmosphere(
+                        animation: _ambientController,
+                        color: cs.primary,
+                        isDark: isDark,
                       ),
                     ),
                   ),
-                  // 底部：主按钮（无圆点进度条）
-                  _buildBottomBar(cs),
-                ],
-              ),
+                ),
+                Padding(
+                  padding: EdgeInsets.only(top: topInset),
+                  child: Column(
+                    children: [
+                      // 顶部返回区（欢迎页不显示返回）
+                      SizedBox(height: 40, child: _buildBackRow(cs)),
+                      // 页面内容按流程方向横向交接；背景动画隔离在独立重绘层中，
+                      // 避免内容输入或倒计时触发整页反复绘制。
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: AnimatedSize(
+                            duration: const Duration(milliseconds: 440),
+                            curve: Curves.easeInOutCubic,
+                            alignment: Alignment.topCenter,
+                            child: AnimatedBuilder(
+                              animation: _pageMotionController,
+                              child: RepaintBoundary(
+                                child: KeyedSubtree(
+                                  key: ValueKey(_page),
+                                  child: _buildPage(cs),
+                                ),
+                              ),
+                              builder: (context, child) {
+                                final t = _pageMotionController.value;
+                                final progress = Curves.easeOutCubic.transform(
+                                  t,
+                                );
+                                final direction = _transitionDirection
+                                    .toDouble();
+                                final offset = switch (_pageMotion) {
+                                  _WelcomePageMotion.exiting => Offset(
+                                    -.10 * direction * progress,
+                                    0,
+                                  ),
+                                  _WelcomePageMotion.entering => Offset(
+                                    .10 * direction * (1 - progress),
+                                    0,
+                                  ),
+                                  _WelcomePageMotion.idle => Offset.zero,
+                                };
+                                final opacity = switch (_pageMotion) {
+                                  _WelcomePageMotion.exiting => 1 - progress,
+                                  _WelcomePageMotion.entering => progress,
+                                  _WelcomePageMotion.idle => 1.0,
+                                };
+                                return Opacity(
+                                  opacity: opacity,
+                                  child: FractionalTranslation(
+                                    translation: offset,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 底部：主按钮（无圆点进度条）
+                      _buildBottomBar(cs),
+                    ],
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -527,6 +644,10 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         child: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           color: cs.onSurface.withValues(alpha: .6),
+          style: IconButton.styleFrom(
+            backgroundColor: cs.surfaceContainerHighest.withValues(alpha: .72),
+            shape: const StadiumBorder(),
+          ),
           tooltip: '返回',
           onPressed: _back,
         ),
@@ -549,7 +670,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                 onPressed: _primaryEnabled() ? _onPrimary : null,
                 style: FilledButton.styleFrom(
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
                 child: Text(
@@ -570,7 +691,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                 onPressed: () => exit(0),
                 style: FilledButton.styleFrom(
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(999),
                   ),
                   backgroundColor: _disagreeRed,
                 ),
@@ -599,7 +720,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
           onPressed: _primaryEnabled() ? _onPrimary : null,
           style: FilledButton.styleFrom(
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(999),
             ),
           ),
           child: (_verifying || _saving)
@@ -640,33 +761,16 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         return _buildMonitorPage(cs);
       case _pNotify:
         return _buildNotifyPage(cs);
+      case _pTheme:
+        return _buildThemePage(cs);
       default:
         return _buildConfirmPage(cs);
     }
   }
 
-  /// 欢迎页以清晰的表面色块作为层级主体，阴影只负责轻微托起，不再用厚重
-  /// 阴影代替分组。色块由 Container 的背景先绘制在上层，阴影留在其下方。
+  /// 欢迎页仅以不同表面色块区分层级，不使用阴影制造分组关系。
   List<BoxShadow> _blockShadow({bool selected = false}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    if (isDark) {
-      return [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: selected ? .20 : .14),
-          blurRadius: 12,
-          offset: const Offset(0, 3),
-        ),
-      ];
-    }
-    return [
-      BoxShadow(
-        color: const Color(
-          0xFF1E293B,
-        ).withValues(alpha: selected ? .055 : .035),
-        blurRadius: 12,
-        offset: const Offset(0, 3),
-      ),
-    ];
+    return const [];
   }
 
   /// 内容组容器：整体水平居中，组内左对齐
@@ -697,6 +801,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
         Text(
           title,
           style: TextStyle(
+            fontFamily: AppTheme.serifFontFamily,
             fontSize: 28,
             fontWeight: FontWeight.w700,
             height: 1.3,
@@ -752,6 +857,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
             Text(
               '欢迎使用 Grade Monitor',
               style: TextStyle(
+                fontFamily: AppTheme.serifFontFamily,
                 fontSize: 34,
                 fontWeight: FontWeight.w800,
                 height: 1.25,
@@ -1082,7 +1188,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               controller: _passwordCtrl,
               obscureText: _hidePassword,
               style: _hidePassword
-                  ? const TextStyle(letterSpacing: -2.4)
+                  ? const TextStyle(letterSpacing: -1.2)
                   : null,
               keyboardType: TextInputType.visiblePassword,
               enableSuggestions: false,
@@ -1093,6 +1199,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               decoration: InputDecoration(
                 labelText: '密码',
                 hintText: 'ShuZhi / V RUC 密码',
+                labelStyle: const TextStyle(letterSpacing: 0),
+                floatingLabelStyle: const TextStyle(letterSpacing: 0),
+                hintStyle: const TextStyle(letterSpacing: 0),
                 prefixIcon: const Icon(Icons.key_outlined, size: 18),
                 suffixIcon: IconButton(
                   icon: Icon(
@@ -1335,32 +1444,62 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                       ),
                     ),
                   ),
-                  SwitchListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    title: const Text('成绩自动监控', style: TextStyle(fontSize: 14)),
-                    subtitle: const Text(
-                      '检测新出成绩或成绩变动',
-                      style: TextStyle(fontSize: 12),
-                    ),
+                  _welcomeMonitorToggle(
+                    cs,
+                    title: '成绩自动监控',
+                    subtitle: '检测新出成绩或成绩变动',
                     value: _autoMonitor,
                     onChanged: (v) => setState(() => _autoMonitor = v),
-                    dense: true,
                   ),
-                  SwitchListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    title: const Text('排名自动监控', style: TextStyle(fontSize: 14)),
-                    subtitle: const Text(
-                      '检测专业排名或班级排名变动',
-                      style: TextStyle(fontSize: 12),
-                    ),
+                  _welcomeMonitorToggle(
+                    cs,
+                    title: '排名自动监控',
+                    subtitle: '检测专业排名或班级排名变动',
                     value: _rankMonitor,
                     onChanged: (v) => setState(() => _rankMonitor = v),
-                    dense: true,
                   ),
                   const SizedBox(height: 4),
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _welcomeMonitorToggle(
+    ColorScheme cs, {
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: cs.onSurface.withValues(alpha: .58),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            ExpressiveSwitch(value: value, onChanged: onChanged, height: 30),
           ],
         ),
       ),
@@ -1479,7 +1618,146 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
     );
   }
 
-  // ---- Page 5: 完成设置 ----
+  // ---- Page 6: 主题选择 ----
+  Widget _buildThemePage(ColorScheme cs) {
+    final presets = ThemePreset.values;
+    return _contentGroup(
+      680,
+      SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _pageHeader(
+              cs,
+              Icons.palette_outlined,
+              '选择一套主题吧',
+              null,
+              inkShift: 7.4,
+            ),
+            const SizedBox(height: 18),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const gap = 10.0;
+                final columns = constraints.maxWidth >= 560 ? 3 : 2;
+                final width =
+                    (constraints.maxWidth - gap * (columns - 1)) / columns;
+                return Wrap(
+                  spacing: gap,
+                  runSpacing: gap,
+                  children: [
+                    for (final preset in presets)
+                      SizedBox(
+                        width: width,
+                        child: _themePresetCard(cs, preset),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 18),
+            Text(
+              '显示模式',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _themeModeChip(cs, ThemeMode.system, '跟随系统'),
+                _themeModeChip(cs, ThemeMode.light, '浅色'),
+                _themeModeChip(cs, ThemeMode.dark, '深色'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _themePresetCard(ColorScheme cs, ThemePreset preset) {
+    final selected = preset == _selectedTheme;
+    final meta = _themeMeta(preset);
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(_blockRadius),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(_blockRadius),
+        onTap: () => setState(() => _selectedTheme = preset),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected
+                ? meta.color.withValues(alpha: .18)
+                : cs.surfaceContainerHighest.withValues(alpha: .72),
+            borderRadius: BorderRadius.circular(_blockRadius),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: selected ? 56 : 42,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: meta.color,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                meta.title,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _themeModeChip(ColorScheme cs, ThemeMode mode, String label) {
+    final selected = _selectedThemeMode == mode;
+    return ChoiceChip(
+      selected: selected,
+      onSelected: (_) => setState(() => _selectedThemeMode = mode),
+      label: Text(label),
+      labelStyle: TextStyle(
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        color: selected ? cs.primary : cs.onSurface,
+      ),
+      side: BorderSide.none,
+      backgroundColor: cs.surfaceContainerHighest.withValues(alpha: .72),
+      selectedColor: cs.primary.withValues(alpha: .16),
+    );
+  }
+
+  _ThemeMeta _themeMeta(ThemePreset preset) {
+    return switch (preset) {
+      ThemePreset.classicBlue => const _ThemeMeta('经典蓝', Color(0xFF1565C0)),
+      ThemePreset.rucRed => const _ThemeMeta('人大红', Color(0xFFAE0B2A)),
+      ThemePreset.glacierBlue => const _ThemeMeta('冰川蓝', Color(0xFF34618A)),
+      ThemePreset.sageGreen => const _ThemeMeta('鼠尾草绿', Color(0xFF486548)),
+      ThemePreset.snowWhite => const _ThemeMeta('典雅灰', Color(0xFF62717D)),
+      ThemePreset.obsidianGold => const _ThemeMeta('古檀褐', Color(0xFF78602F)),
+    };
+  }
+
+  // ---- Page 7: 完成设置 ----
   Widget _buildConfirmPage(ColorScheme cs) {
     final monitorDesc = [];
     if (_autoMonitor) monitorDesc.add('成绩监控');
@@ -1523,6 +1801,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
                     '通知模式',
                     _notifyMode == '详细' ? '完整模式' : '简洁模式',
                   ),
+                  _confirmRow(cs, '主题', _themeMeta(_selectedTheme).title),
                 ],
               ),
             ),
@@ -1532,7 +1811,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
               decoration: BoxDecoration(
                 color: cs.primary.withValues(alpha: .08),
                 borderRadius: BorderRadius.circular(_blockRadius),
-                border: Border.all(color: cs.primary.withValues(alpha: .2)),
                 boxShadow: _blockShadow(),
               ),
               child: Row(
@@ -1590,4 +1868,52 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow> {
       ),
     );
   }
+}
+
+class _WelcomeAtmosphere extends StatelessWidget {
+  const _WelcomeAtmosphere({
+    required this.animation,
+    required this.color,
+    required this.isDark,
+  });
+
+  final Animation<double> animation;
+  final Color color;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, _) {
+        final travel = Curves.easeInOutSine.transform(animation.value);
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              top: -170 + travel * 38,
+              right: -120 - travel * 26,
+              child: _orb(color.withValues(alpha: isDark ? .12 : .075), 360),
+            ),
+            Positioned(
+              bottom: -210 - travel * 30,
+              left: -150 + travel * 42,
+              child: _orb(color.withValues(alpha: isDark ? .09 : .055), 410),
+            ),
+            Positioned(
+              top: 118 + travel * 24,
+              left: 74 - travel * 16,
+              child: _orb(color.withValues(alpha: isDark ? .06 : .04), 96),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _orb(Color color, double size) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+  );
 }

@@ -37,7 +37,12 @@ class GlassCard extends StatelessWidget {
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
-        color: backgroundColor ?? theme.cardTheme.color,
+        // Keep a card one surface step above the page.  This is deliberately
+        // a filled surface rather than a white, outlined rectangle.
+        color:
+            backgroundColor ??
+            theme.cardTheme.color ??
+            theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(borderRadius),
         // 卡片靠底色 + 阴影与背景区分，不再画描边分割线；
         // 需要描边时由调用方显式传 border。

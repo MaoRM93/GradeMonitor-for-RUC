@@ -240,6 +240,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               Text(
                 '方案计算',
                 style: TextStyle(
+                  fontFamily: AppTheme.serifFontFamily,
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                   color: colorScheme.onSurface,
@@ -346,8 +347,9 @@ class _SchemePageState extends ConsumerState<SchemePage> {
           Text(
             '方案',
             style: TextStyle(
+              fontFamily: AppTheme.serifFontFamily,
               fontSize: 14,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               color: cs.onSurface.withValues(alpha: .85),
             ),
           ),
@@ -418,6 +420,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
               Text(
                 '核心绩',
                 style: TextStyle(
+                  fontFamily: AppTheme.serifFontFamily,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: cs.onSurface.withValues(alpha: .85),
@@ -666,6 +669,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                     Text(
                       '计算结果',
                       style: TextStyle(
+                        fontFamily: AppTheme.serifFontFamily,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         color: cs.onSurface.withValues(alpha: .85),

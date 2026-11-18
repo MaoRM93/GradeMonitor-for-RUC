@@ -11,13 +11,13 @@ import '../../core/service/tray_service.dart';
 import '../../core/service/session_service.dart';
 import '../../core/service/feature_gate_service.dart';
 import '../../widgets/feature_gate.dart';
+import '../../widgets/expressive_switch.dart';
 import '../../core/logger/app_logger.dart';
 import '../../core/service/update_installer.dart';
 import '../../core/service/update_service.dart';
 import '../../core/service/update_verifier.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/monitor_provider.dart';
-import '../../widgets/glass_card.dart';
 import '../../widgets/note_banner.dart';
 import '../../widgets/toast_host.dart';
 import '../../core/service/nav_signal.dart';
@@ -150,6 +150,137 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
     developerOptionsEnabled.value = _developerEnabled;
     if (mounted) setState(() {});
+  }
+
+  Future<void> _showThemePicker() async {
+    final controller = ThemeController.instance;
+    await controller.load();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final colorScheme = Theme.of(context).colorScheme;
+          String modeLabel(ThemeMode mode) => switch (mode) {
+            ThemeMode.system => '跟随系统',
+            ThemeMode.light => '浅色',
+            ThemeMode.dark => '深色',
+          };
+          return AlertDialog(
+            title: const Text('选择一套主题吧'),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '外观模式',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      children: ThemeMode.values.map((mode) {
+                        return ChoiceChip(
+                          label: Text(modeLabel(mode)),
+                          selected: controller.mode == mode,
+                          side: BorderSide.none,
+                          backgroundColor: colorScheme.surfaceContainerHighest,
+                          selectedColor: colorScheme.primary.withValues(
+                            alpha: .16,
+                          ),
+                          onSelected: (_) async {
+                            await controller.setMode(mode);
+                            setDialogState(() {});
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      '主题色',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...ThemePreset.values.map((preset) {
+                      final selected = controller.preset == preset;
+                      final preview = AppTheme.previewColor(preset);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Material(
+                          color: selected
+                              ? preview.withValues(alpha: .12)
+                              : colorScheme.surfaceContainerHighest.withValues(
+                                  alpha: .55,
+                                ),
+                          borderRadius: BorderRadius.circular(14),
+                          child: ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            leading: Container(
+                              width: selected ? 34 : 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: preview,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                            ),
+                            title: Text(preset.label),
+                            subtitle: Text(
+                              preset.description,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            onTap: () async {
+                              await controller.setPreset(preset);
+                              setDialogState(() {});
+                            },
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('完成'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _modeChip(String label, ThemeMode mode, ThemeController controller) {
+    final selected = controller.mode == mode;
+    final scheme = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      side: BorderSide.none,
+      backgroundColor: scheme.surfaceContainerHighest,
+      selectedColor: scheme.primary.withValues(alpha: .16),
+      labelStyle: TextStyle(
+        color: selected ? scheme.primary : scheme.onSurface,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      ),
+      onSelected: (_) => controller.setMode(mode),
+    );
   }
 
   TimeOfDay _parseTime(String t) {
@@ -324,7 +455,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         TextField(
           controller: _passwordCtrl,
           obscureText: _hidePassword,
-          style: _hidePassword ? const TextStyle(letterSpacing: -2.4) : null,
+          style: _hidePassword ? const TextStyle(letterSpacing: -1.2) : null,
           keyboardType: TextInputType.visiblePassword,
           enableSuggestions: false,
           autocorrect: false,
@@ -337,6 +468,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             hintText: _hasSavedPassword
                 ? '已保存密码（留空则保持不变）'
                 : '输入教务系统密码（仅英文/数字/符号）',
+            labelStyle: const TextStyle(letterSpacing: 0),
+            floatingLabelStyle: const TextStyle(letterSpacing: 0),
+            hintStyle: const TextStyle(letterSpacing: 0),
             prefixIcon: const Icon(Icons.key_rounded, size: 20),
             suffixIcon: IconButton(
               icon: Icon(
@@ -826,6 +960,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               Text(
                 '设置',
                 style: TextStyle(
+                  fontFamily: AppTheme.serifFontFamily,
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                   color: colorScheme.onSurface,
@@ -834,7 +969,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               const SizedBox(height: 20),
 
               // ---- ① 账号（无分组标题：头像与学号本身已足够说明）----
-              GlassCard(
+              _SettingsGroup(
                 padding: const EdgeInsets.all(20),
                 child: !_loaded
                     ? const SizedBox(
@@ -856,43 +991,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               // ---- ② 监控内容 ----
               _SectionTitle(title: '监控内容', icon: Icons.timer_rounded),
               const SizedBox(height: 12),
-              GlassCard(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '成绩自动监控',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      value: _autoMonitor,
-                      onChanged: _onAutoMonitorChanged,
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '排名自动监控',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      value: _rankMonitor,
-                      onChanged: _onRankMonitorChanged,
-                    ),
-                  ],
-                ),
+              _SegmentedSettingsGroup(
+                children: [
+                  _SettingsToggleItem(
+                    title: '成绩自动监控',
+                    value: _autoMonitor,
+                    onChanged: _onAutoMonitorChanged,
+                  ),
+                  _SettingsToggleItem(
+                    title: '排名自动监控',
+                    value: _rankMonitor,
+                    onChanged: _onRankMonitorChanged,
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
 
               // ---- ③ 监控时间 ----
               _SectionTitle(title: '监控时间', icon: Icons.schedule_rounded),
               const SizedBox(height: 12),
-              GlassCard(
+              _SettingsGroup(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -903,8 +1021,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       title: '提示',
                       text:
                           '通常，教师会在8:00至20:00之间录入并发布成绩。'
-                          '为避免给服务器造成过大负载，程序仅允许您最低设置 300 秒查询一次。'
-                          '如您有特殊需求，请联系开发者。',
+                          '为避免给服务器造成过大负载，程序仅允许您最低设置 300 秒查询一次。',
                     ),
                     const SizedBox(height: 14),
                     // 两个时间项：各自一张浅色圆角卡（标题在左上、大号时间在下、
@@ -990,23 +1107,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '安全模式',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '在设定轮询间隔的 ±100 秒范围内随机取值查询，'
-                        '开启以降低账号被风控的风险。',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: colorScheme.onSurface.withValues(alpha: .45),
-                        ),
-                      ),
+                    _SettingsToggleItem(
+                      title: '安全模式',
+                      subtitle: '在设定轮询间隔的 ±100 秒范围内随机取值查询，开启以降低账号被风控的风险。',
                       value: _safeMode,
                       onChanged: _onSafeModeChanged,
                     ),
@@ -1018,91 +1121,148 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               // ---- ④ 通知设置 ----
               _SectionTitle(title: '通知设置', icon: Icons.notifications_rounded),
               const SizedBox(height: 12),
-              GlassCard(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: ['详细', '简洁'].map((mode) {
-                    return InkWell(
-                      onTap: () => _onNotifyModeChanged(mode),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 4,
-                        ),
-                        child: Row(
-                          children: [
-                            Radio<String>(
-                              value: mode,
-                              groupValue: _notifyMode,
-                              onChanged: (v) => _onNotifyModeChanged(v ?? '详细'),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              mode == '详细'
-                                  ? '完整模式：显示课程名称、成绩与位次'
-                                  : '简洁模式：仅显示有成绩或位次更新',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
+              _SegmentedSettingsGroup(
+                children: ['详细', '简洁'].map((mode) {
+                  return InkWell(
+                    onTap: () => _onNotifyModeChanged(mode),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
                       ),
-                    );
-                  }).toList(),
-                ),
+                      child: Row(
+                        children: [
+                          Radio<String>(
+                            value: mode,
+                            groupValue: _notifyMode,
+                            onChanged: (value) =>
+                                _onNotifyModeChanged(value ?? '详细'),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            mode == '详细'
+                                ? '完整模式：显示课程名称、成绩与位次'
+                                : '简洁模式：仅显示有成绩或位次更新',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
               const SizedBox(height: 24),
 
-              // ---- ⑤ 高级设置 ----
-              _SectionTitle(title: '高级设置', icon: Icons.tune_rounded),
+              // ---- ⑤ 显示效果 ----
+              _SectionTitle(title: '显示效果', icon: Icons.tune_rounded),
               const SizedBox(height: 12),
-              GlassCard(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    // Flag-1055：开机自启动开关可被远程静默下线
-                    if (featureEnabled(FeatureGateService.flag1055AutoStart))
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          '开机自启动',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
+              _SegmentedSettingsGroup(
+                children: [
+                  AnimatedBuilder(
+                    animation: ThemeController.instance,
+                    builder: (context, _) {
+                      final controller = ThemeController.instance;
+                      return Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 14,
+                          runSpacing: 10,
+                          children: [
+                            const Text('主题色：'),
+                            for (final preset in ThemePreset.values)
+                              InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: () => controller.setPreset(preset),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
+                                      width: controller.preset == preset
+                                          ? 30
+                                          : 22,
+                                      height: controller.preset == preset
+                                          ? 30
+                                          : 22,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.previewColor(preset),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      preset.label,
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: controller.preset == preset
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                        color: controller.preset == preset
+                                            ? colorScheme.primary
+                                            : colorScheme.onSurface.withValues(
+                                                alpha: .62,
+                                              ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
-                        value: _autoStart,
-                        onChanged: _onAutoStartChanged,
-                      ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '菜单栏图标',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                      );
+                    },
+                  ),
+                  AnimatedBuilder(
+                    animation: ThemeController.instance,
+                    builder: (context, _) {
+                      final controller = ThemeController.instance;
+                      return Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            const Text('深色模式：'),
+                            _modeChip('启用', ThemeMode.dark, controller),
+                            _modeChip('关闭', ThemeMode.light, controller),
+                            _modeChip('跟随系统', ThemeMode.system, controller),
+                          ],
                         ),
-                      ),
-                      value: _showMenubarIcon,
-                      onChanged: _onMenubarIconChanged,
+                      );
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              _SectionTitle(title: '通用设置', icon: Icons.settings_outlined),
+              const SizedBox(height: 12),
+              _SegmentedSettingsGroup(
+                children: [
+                  if (featureEnabled(FeatureGateService.flag1055AutoStart))
+                    _SettingsToggleItem(
+                      title: '开机自启动',
+                      value: _autoStart,
+                      onChanged: _onAutoStartChanged,
                     ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '隐藏未知课程',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      value: _hideUnknownCourses,
-                      onChanged: _onHideUnknownChanged,
-                    ),
-                  ],
-                ),
+                  _SettingsToggleItem(
+                    title: '菜单栏图标',
+                    value: _showMenubarIcon,
+                    onChanged: _onMenubarIconChanged,
+                  ),
+                  _SettingsToggleItem(
+                    title: '隐藏未知课程',
+                    value: _hideUnknownCourses,
+                    onChanged: _onHideUnknownChanged,
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
 
@@ -1112,7 +1272,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 icon: Icons.system_update_alt_rounded,
               ),
               const SizedBox(height: 12),
-              GlassCard(
+              _SettingsGroup(
                 padding: const EdgeInsets.all(20),
                 child: Row(
                   children: [
@@ -1256,8 +1416,8 @@ class _PreReleaseDialog extends StatelessWidget {
     final danger = isDark ? const Color(0xFFFF6B6B) : const Color(0xFFD32F2F);
 
     return AlertDialog(
-      // 底色跟随主题：浅色纯白、深色用卡片色，避免深色下出现刺眼白块
-      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+      // 底色跟随当前主题，避免浅色主题中的突兀白块。
+      backgroundColor: Theme.of(context).colorScheme.surface,
       surfaceTintColor: Colors.transparent,
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 460),
@@ -1869,6 +2029,149 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
 /// 检查更新状态（四态 + 空闲初始态）
 enum _UpdateStatus { idle, checking, upToDate, hasUpdate, failed }
 
+/// 设置页的单一内容组。
+///
+/// 不用描边或阴影切割内容，而用较深的表面色与 24px 外圆角建立层级；
+/// 分区之间的留白负责说明它们属于不同的功能组。
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({
+    required this.child,
+    this.padding = const EdgeInsets.all(20),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Expressive 分段列表：项目彼此独立，以 2dp 页面底色间隙代替分割线。
+class _SegmentedSettingsGroup extends StatelessWidget {
+  const _SegmentedSettingsGroup({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = children.where((child) => child is! SizedBox).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var index = 0; index < items.length; index++) ...[
+          _SegmentedSettingsItem(
+            first: index == 0,
+            last: index == items.length - 1,
+            child: items[index],
+          ),
+          if (index != items.length - 1) const SizedBox(height: 2),
+        ],
+      ],
+    );
+  }
+}
+
+class _SegmentedSettingsItem extends StatelessWidget {
+  const _SegmentedSettingsItem({
+    required this.first,
+    required this.last,
+    required this.child,
+  });
+
+  final bool first;
+  final bool last;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(first ? 24 : 4),
+      topRight: Radius.circular(first ? 24 : 4),
+      bottomLeft: Radius.circular(last ? 24 : 4),
+      bottomRight: Radius.circular(last ? 24 : 4),
+    );
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: radius,
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+}
+
+class _SettingsToggleItem extends StatelessWidget {
+  const _SettingsToggleItem({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textHeight =
+        (DefaultTextStyle.of(context).style.fontSize ?? 14) * 2.15;
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.45,
+                        color: scheme.onSurface.withValues(alpha: .5),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            ExpressiveSwitch(
+              value: value,
+              onChanged: onChanged,
+              height: textHeight,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 时间选择卡片：左上小标题、下方大号时间、右下角展开箭头。
 /// 只靠底色与圆角成形，不画任何边框/分割线。
 class _TimeFieldCard extends StatelessWidget {
@@ -1956,6 +2259,7 @@ class _SectionTitle extends StatelessWidget {
         Text(
           title,
           style: TextStyle(
+            fontFamily: AppTheme.serifFontFamily,
             fontSize: 16,
             fontWeight: FontWeight.w700,
             color: colorScheme.onSurface,

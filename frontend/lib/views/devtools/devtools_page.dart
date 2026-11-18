@@ -52,6 +52,7 @@ class _DevToolsPageState extends ConsumerState<DevToolsPage> {
               Text(
                 '开发者工具箱',
                 style: TextStyle(
+                  fontFamily: AppTheme.serifFontFamily,
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                   color: colorScheme.onSurface,

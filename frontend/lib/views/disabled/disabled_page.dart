@@ -159,7 +159,7 @@ class _ReleaseNoticeScaffoldState extends State<ReleaseNoticeScaffold> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 640),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(48, 26, 48, 0),
+                    padding: const EdgeInsets.fromLTRB(48, 72, 48, 0),
                     // 内容块整体水平居中，文字左对齐
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

@@ -173,6 +173,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               Text(
                 '仪表板',
                 style: TextStyle(
+                  fontFamily: AppTheme.serifFontFamily,
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                   color: colorScheme.onSurface,
@@ -228,6 +229,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           Text(
             status.isRunning ? '监控运行中' : '监控已停止',
             style: TextStyle(
+              fontFamily: AppTheme.serifFontFamily,
               fontSize: 17,
               fontWeight: FontWeight.w700,
               color: status.isRunning
@@ -368,6 +370,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
+              fontFamily: AppTheme.serifFontFamily,
               fontSize: 22,
               fontWeight: FontWeight.w800,
               color: cs.onSurface,
@@ -484,57 +487,53 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     AsyncValue<RankData?> rankAsync,
   ) {
     final rd = rankAsync.asData?.value;
+    final tiles = <Widget>[
+      _statTile(
+        icon: Icons.school_rounded,
+        iconColor: const Color(0xFF8B5CF6),
+        label: 'GPA',
+        value: rd?.pjxfjd ?? 'N/A',
+        decimalSmall: true,
+      ),
+      _statTile(
+        icon: Icons.groups_rounded,
+        iconColor: const Color(0xFFF59E0B),
+        label: '班级排名',
+        value: rd?.bjpm ?? 'N/A',
+      ),
+      _statTile(
+        icon: Icons.emoji_events_rounded,
+        iconColor: const Color(0xFF6366F1),
+        label: '专业排名',
+        value: rd?.pm ?? 'N/A',
+      ),
+      _statTile(
+        icon: Icons.menu_book_rounded,
+        iconColor: const Color(0xFF10B981),
+        label: '修读课程',
+        value: rd?.countnum ?? 'N/A',
+      ),
+      if (featureEnabled(FeatureGateService.flag1073QueryCount))
+        _statTile(
+          icon: Icons.query_stats_rounded,
+          iconColor: const Color(0xFF3B82F6),
+          label: '查询次数',
+          value: '${status.totalQueries}',
+        ),
+    ];
     return SizedBox(
       height: 200,
       child: Row(
         children: [
-          Expanded(
-            child: _statTile(
-              icon: Icons.school_rounded,
-              iconColor: const Color(0xFF8B5CF6),
-              label: 'GPA',
-              value: rd?.pjxfjd ?? 'N/A',
-              decimalSmall: true,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: _statTile(
-              icon: Icons.groups_rounded,
-              iconColor: const Color(0xFFF59E0B),
-              label: '班级排名',
-              value: rd?.bjpm ?? 'N/A',
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: _statTile(
-              icon: Icons.emoji_events_rounded,
-              iconColor: const Color(0xFF6366F1),
-              label: '专业排名',
-              value: rd?.pm ?? 'N/A',
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: _statTile(
-              icon: Icons.menu_book_rounded,
-              iconColor: const Color(0xFF10B981),
-              label: '修读课程',
-              value: rd?.countnum ?? 'N/A',
-            ),
-          ),
-          // Flag-1073：查询次数统计卡可被远程静默下线
-          if (featureEnabled(FeatureGateService.flag1073QueryCount)) ...[
-            const SizedBox(width: 14),
+          for (var index = 0; index < tiles.length; index++) ...[
             Expanded(
-              child: _statTile(
-                icon: Icons.query_stats_rounded,
-                iconColor: const Color(0xFF3B82F6),
-                label: '查询次数',
-                value: '${status.totalQueries}',
+              child: _StatSegment(
+                first: index == 0,
+                last: index == tiles.length - 1,
+                child: tiles[index],
               ),
             ),
+            if (index != tiles.length - 1) const SizedBox(width: 2),
           ],
         ],
       ),
@@ -558,7 +557,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
     final dotIdx = decimalSmall ? value.indexOf('.') : -1;
 
-    return GlassCard(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -620,6 +619,33 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StatSegment extends StatelessWidget {
+  const _StatSegment({
+    required this.first,
+    required this.last,
+    required this.child,
+  });
+  final bool first;
+  final bool last;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(first ? 24 : 4),
+      bottomLeft: Radius.circular(first ? 24 : 4),
+      topRight: Radius.circular(last ? 24 : 4),
+      bottomRight: Radius.circular(last ? 24 : 4),
+    );
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: radius,
+      clipBehavior: Clip.antiAlias,
+      child: child,
     );
   }
 }

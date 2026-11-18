@@ -3,34 +3,32 @@ import 'package:flutter/material.dart';
 import '../../core/service/update_service.dart';
 
 /// 右上角通知广播卡片：114 号段（除 513/514/515）的 Release 正文，
-/// 纯文本展示，只有「好」一个按钮，点掉即关闭，不影响任何其他状态。
+/// 纯文本展示，最多三张纵向堆叠；每张只关闭自身，不影响其他通知。
 class BroadcastToast extends StatelessWidget {
   const BroadcastToast({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ReleaseNotice?>(
-      valueListenable: UpdateService.broadcastNotice,
-      builder: (context, notice, child) {
-        final visible =
-            notice != null &&
-            notice.kind == NoticeKind.broadcast &&
-            !UpdateService.disabled.value;
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, -.06),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
-            ),
+    return ValueListenableBuilder<List<ReleaseNotice>>(
+      valueListenable: UpdateService.broadcastNotices,
+      builder: (context, notices, child) {
+        if (UpdateService.disabled.value || notices.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < notices.length; index++) ...[
+                _BroadcastCard(
+                  key: ValueKey(notices[index].tag),
+                  notice: notices[index],
+                ),
+                if (index != notices.length - 1) const SizedBox(height: 12),
+              ],
+            ],
           ),
-          child: visible
-              ? _BroadcastCard(key: ValueKey(notice.tag), notice: notice)
-              : const SizedBox.shrink(),
         );
       },
     );
@@ -49,8 +47,7 @@ class _BroadcastCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: Container(
-        width: 320,
-        constraints: const BoxConstraints(maxHeight: 420),
+        constraints: const BoxConstraints(maxHeight: 220),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1B2534) : Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -70,14 +67,14 @@ class _BroadcastCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  Icons.notifications_active_rounded,
+                  Icons.notifications_outlined,
                   size: 20,
                   color: colorScheme.primary,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '提示',
+                    notice.title.isEmpty ? '提示' : notice.title,
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -85,7 +82,9 @@ class _BroadcastCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                _CloseIconButton(onTap: UpdateService.dismissBroadcast),
+                _CloseIconButton(
+                  onTap: () => UpdateService.dismissBroadcast(notice),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -106,7 +105,7 @@ class _BroadcastCard extends StatelessWidget {
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton(
-                onPressed: UpdateService.dismissBroadcast,
+                onPressed: () => UpdateService.dismissBroadcast(notice),
                 style: FilledButton.styleFrom(
                   backgroundColor: colorScheme.primary,
                   foregroundColor: Colors.white,

@@ -442,7 +442,9 @@ class _NotificationForwardersPageState
                 child: _channel(
                   title: 'Meow',
                   icon: SvgPicture.asset(
-                    'assets/nearlink.svg',
+                    'assets/harmonyos_o.svg',
+                    width: 20,
+                    height: 26,
                     colorFilter: ColorFilter.mode(cs.primary, BlendMode.srcIn),
                   ),
                   enabled: _meow,
@@ -464,7 +466,11 @@ class _NotificationForwardersPageState
                     ),
                   ],
                   description: const Text(
-                    '适用于 HarmonyOS 端，请您在 App Gallery / 应用市场 中下载 Meow 应用，授予其适当的权限，并将其昵称复制到本程序上面的文本框。',
+                    '适用于 HarmonyOS 端，请您在 App Gallery / 应用市场 中下载 Meow 应用，'
+                    '授予其适当的权限，点击我的-登录华为账号，然后自定义下方的 Meow 昵称。'
+                    '将您自定义或默认的 Meow 昵称填入到本程序上面的文本框。'
+                    '请注意，您如果修改过 Meow 昵称，请填写您修改后的字段。'
+                    '本字段支持中文昵称。',
                   ),
                 ),
               ),
@@ -515,11 +521,10 @@ class _NotificationForwardersPageState
                         '适用于 Android 客户端，请您在应用商店下载 ntfy 软件，授予其适当的权限，点按右下角+添加订阅主题，名称自拟且必须具有较强的个性，否则您的成绩可能被配置同名的其他用户接收。自拟之后，勾选低功耗模式下实时推送复选框，然后点击右上角的“订阅”保存，随后将自拟的名称填写到本程序上面的 Topic 文本框。默认配置下无需配置服务器。请注意，国产 Android 手机厂商可能会杀掉 ntfy 的后台，为保证其适用性，请参阅 ',
                       ),
                       _link('dontkillmyapp.com', 'https://dontkillmyapp.com/'),
-                      const Text(' 配置您的手机管家等软件。'),
                       const Text(
-                        'ntfy 的标题栏只支持英文，因此本通道会把全部信息写进正文：'
-                        '科目前 5 个字，后接绩（绩点）、平（平时分）、末（期末分）、'
-                        '总（加权分）、班（班名）、年（年名），各项用“/”分隔。',
+                        ' 配置您的手机管家等软件。'
+                        '由于 ntfy 客户端限制标题字段必须为您自定义的 Topic 值，'
+                        '因此，您所收到的信息将与其它通道略有差异。具体以实际情况为准。',
                       ),
                     ],
                   ),

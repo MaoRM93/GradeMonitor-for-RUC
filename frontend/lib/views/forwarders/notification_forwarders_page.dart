@@ -516,6 +516,11 @@ class _NotificationForwardersPageState
                       ),
                       _link('dontkillmyapp.com', 'https://dontkillmyapp.com/'),
                       const Text(' 配置您的手机管家等软件。'),
+                      const Text(
+                        'ntfy 的标题栏只支持英文，因此本通道会把全部信息写进正文：'
+                        '科目前 5 个字，后接绩（绩点）、平（平时分）、末（期末分）、'
+                        '总（加权分）、班（班名）、年（年名），各项用“/”分隔。',
+                      ),
                     ],
                   ),
                 ),

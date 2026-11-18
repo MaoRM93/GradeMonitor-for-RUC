@@ -69,7 +69,15 @@ def save_config(incoming: dict) -> dict:
     return public_config()
 
 
-def _send(cfg: dict, title: str, message: str) -> dict:
+def _send(cfg: dict, title: str, message: str,
+          ntfy_message: str | None = None) -> dict:
+    """向各通道投递同一条通知。
+
+    [ntfy_message] 是 ntfy 专用的正文：ntfy 的标题只能走 HTTP 头，而头部
+    必须是 ASCII，中文标题到手机端会丢字或乱码。因此 ntfy 收到的是把关键
+    信息压进正文的另一份文本（见 notification_service._ntfy_grades_body）。
+    缺省时退回普通正文。
+    """
     results = {}
     bark = cfg["bark"]
     if bark["enabled"] and bark["url"]:
@@ -94,9 +102,11 @@ def _send(cfg: dict, title: str, message: str) -> dict:
             # JSON 字段（title、tags、priority 等）在某些反向代理或兼容服务中
             # 被当作通知正文显示；手机端只会收到 GradeMonitor 的实际消息内容。
             endpoint = f"{base}/{quote(str(ntfy['topic']).strip(), safe='')}"
+            # 标题在 ntfy 里不可用（HTTP 头只收 ASCII），正文承担全部信息
+            body_text = ntfy_message if ntfy_message else message
             r = requests.post(
                 endpoint,
-                data=message.encode("utf-8"),
+                data=body_text.encode("utf-8"),
                 headers={
                     "Content-Type": "text/plain; charset=utf-8",
                     "Accept": "application/json",
@@ -126,11 +136,15 @@ def _enabled_config() -> dict:
     return cfg
 
 
-def forward_notification(title: str, message: str) -> None:
-    """不阻塞监控循环；移动端服务不可用绝不影响本机通知。"""
+def forward_notification(title: str, message: str,
+                         ntfy_message: str | None = None) -> None:
+    """不阻塞监控循环；移动端服务不可用绝不影响本机通知。
+
+    [ntfy_message] 传给 ntfy 的专用正文；其余通道仍用 [message]。
+    """
     def run():
         try:
-            results = _send(_enabled_config(), title, message)
+            results = _send(_enabled_config(), title, message, ntfy_message)
             if results:
                 logger.info(f"移动端通知转发结果: {results}")
         except Exception as e:
@@ -148,7 +162,18 @@ def test_forwarder(channel: str) -> dict:
     original = {k: dict(v) for k, v in cfg.items()}
     for name in cfg:
         cfg[name]["enabled"] = name == channel
-    result = _send(cfg, "GradeMonitor 测试通知", "测试成功后，成绩或排名更新会通过此通道发送到你的设备。")
+    # 测试通知同样按 ntfy 的正文规则展示，让用户看到真实到达手机的样子
+    ntfy_test = (
+        "示例课程名/绩：4.0/平：99/末：99/总：99/班：1/年：1"
+        if channel == "ntfy"
+        else None
+    )
+    result = _send(
+        cfg,
+        "GradeMonitor 测试通知",
+        "测试成功后，成绩或排名更新会通过此通道发送到你的设备。",
+        ntfy_test,
+    )
     _ = original
     text = result.get(channel, "该通道尚未配置")
     return {"success": text == "成功", "message": text}

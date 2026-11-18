@@ -49,6 +49,14 @@ def _calc_pjxfjd(course: dict) -> str:
     return f"{jd_val / xf_val:.1f}" if xf_val > 0 else "N/A"
 
 
+def _gpa_display(course: dict) -> str:
+    """绩点的展示值：缺字段或算不出时统一给 '-'，不用 0 兜底。"""
+    if _pick_value(course, "jd") == _MISSING:
+        return _MISSING
+    gpa = _calc_pjxfjd(course)
+    return _MISSING if gpa == "N/A" else gpa
+
+
 def _build_grades_extra(course_details: list = None,
                         kind: str = "grades") -> dict:
     """构造 recent_change.json 的结构化字段（向后兼容：不改动 title/message/at）。
@@ -62,12 +70,7 @@ def _build_grades_extra(course_details: list = None,
     for course in courses[:_STRUCTURED_COURSE_LIMIT]:
         if not isinstance(course, dict):
             continue
-        # 绩点字段缺失或为空时不宜用 0 兜底，统一记为 '-'
-        gpa = _MISSING
-        if _pick_value(course, "jd") != _MISSING:
-            gpa = _calc_pjxfjd(course)
-            if gpa == "N/A":
-                gpa = _MISSING
+        gpa = _gpa_display(course)
         items.append({
             "name": _course_name(course),
             "gpa": gpa,
@@ -80,6 +83,56 @@ def _build_grades_extra(course_details: list = None,
         "courseCount": len(courses),
         "courses": items,
     }
+
+
+# ---------- ntfy 专用正文 ----------
+#
+# ntfy 的标题只能走 HTTP 头，而头部值必须是 ASCII：中文标题到手机端会丢字
+# 或直接乱码，等于白写。所以转发到 ntfy 时把关键信息全部塞进正文，并为了
+# 迁就手机通知弹窗的窄宽度改用单字标签：
+#
+#   诺贝尔奖与现代物理学 → 诺贝尔奖与/绩：4.0/平：99/末：99/总：99/班：1/年：1
+#
+# 科目只取前 5 个字，各项之间用「/」分隔，整行读起来是一句话而不是表格。
+_NTFY_NAME_LIMIT = 5
+
+
+def _ntfy_name(name: str) -> str:
+    """科目名前 5 个字：超出部分截断，空名给 '-'。"""
+    text = str(name or "").strip()
+    return text[:_NTFY_NAME_LIMIT] if text else _MISSING
+
+
+def _ntfy_course_line(course: dict) -> str:
+    """单门课的 ntfy 正文行：科目/绩/平/末/总。"""
+    return (
+        f"{_ntfy_name(_course_name(course))}"
+        f"/绩：{_gpa_display(course)}"
+        f"/平：{_pick_value(course, 'cjxm1')}"
+        f"/末：{_pick_value(course, 'cjxm3')}"
+        f"/总：{_pick_value(course, 'zcj')}"
+    )
+
+
+def _ntfy_grades_body(course_details: list, bjpm: str, pm: str) -> str:
+    """成绩通知的 ntfy 正文。
+
+    单门课：所有字段并成一行，班名年名接在末尾（与示例格式一致）。
+    多门课：每门一行（不含班名年名），末尾单独一行给出班名年名，
+    避免同一组排名在每一门课后面重复刷屏。
+    """
+    lines = [_ntfy_course_line(c) for c in course_details if isinstance(c, dict)]
+    if not lines:
+        return ""
+    rank = f"班：{bjpm}/年：{pm}"
+    if len(lines) == 1:
+        return f"{lines[0]}/{rank}"
+    return "\n".join([*lines, rank])
+
+
+def _ntfy_rank_body(pjxfjd: str, bjpm: str, pm: str) -> str:
+    """排名通知的 ntfy 正文：只有排名，没有课程明细。"""
+    return f"绩：{pjxfjd}/班：{bjpm}/年：{pm}"
 
 
 def send_startup_notification(auto_monitor_enabled: bool,
@@ -157,7 +210,12 @@ def send_grades_notification(new_count: int, changed_count: int,
             f"平时分：{c['cjxm1']}；期末分：{c['cjxm3']}；加权分：{c['zcj']}",
             f"平均学分绩点：{c['pjxfjd']}；班名：{bjpm}；年名：{pm}",
         ]
-        _show(title, "\n".join(lines), extra=structured)
+        _show(
+            title,
+            "\n".join(lines),
+            extra=structured,
+            ntfy_message=_ntfy_grades_body(course_details, bjpm, pm),
+        )
     else:
         first_name = course_details[0].get("kcname", "未知课程")
         title = f"您有成绩或排名更新：{first_name} 等 {total} 门"
@@ -165,7 +223,12 @@ def send_grades_notification(new_count: int, changed_count: int,
         for course in course_details:
             c = _format_course(course)
             lines.append(f"{c['name']}：平时{c['cjxm1']} 期末{c['cjxm3']} 加权{c['zcj']} 绩点{c['pjxfjd']}")
-        _show(title, "\n".join(lines), extra=structured)
+        _show(
+            title,
+            "\n".join(lines),
+            extra=structured,
+            ntfy_message=_ntfy_grades_body(course_details, bjpm, pm),
+        )
 
 
 def send_rank_notification(rank_data: dict, change_msgs: list = None,
@@ -188,7 +251,12 @@ def send_rank_notification(rank_data: dict, change_msgs: list = None,
     if change_msgs:
         lines.append("--- 变化 ---")
         lines.extend(change_msgs[:3])
-    _show(title, "\n".join(lines), extra=structured)
+    _show(
+        title,
+        "\n".join(lines),
+        extra=structured,
+        ntfy_message=_ntfy_rank_body(pjxfjd, bjpm, pm),
+    )
 
 
 def send_test_notification(is_simple: bool = False,
@@ -208,7 +276,22 @@ def send_test_notification(is_simple: bool = False,
         "平时分：90；期末分：82；加权分：85.5\n"
         "平均学分绩点：3.7；班名：3；年名：15"
     )
-    _show(title, message, record=False)
+    # ntfy 走同一套正文规则，测试通知也按真实格式展示
+    sample = course_details[0] if course_details else {}
+    ntfy_sample = (sample if isinstance(sample, dict) else {}) or {
+        "kcname": course_name,
+        "jd": 4.0,
+        "xf": 1.0,
+        "cjxm1": 90,
+        "cjxm3": 82,
+        "zcj": 85.5,
+    }
+    _show(
+        title,
+        message,
+        record=False,
+        ntfy_message=_ntfy_grades_body([ntfy_sample], "3", "15"),
+    )
 
 
 def send_notification_preview(is_simple: bool) -> str:
@@ -291,7 +374,8 @@ def _win_toast_launch_target() -> str:
 
 
 def _show(title: str, message: str, record: bool = True,
-          extra: dict | None = None) -> None:
+          extra: dict | None = None,
+          ntfy_message: str | None = None) -> None:
     """发送 macOS/Windows 系统通知。
 
     **macOS 改为由 App 自身的原生通知通道投递**（前端
@@ -315,6 +399,10 @@ def _show(title: str, message: str, record: bool = True,
 
     注意：写文件与后续通知投递使用的是同一份 _data 语义 —— WebSocket 分支
     与 osascript/win11toast 回退分支都只消费 title/message，互不影响。
+
+    [ntfy_message] 只给 ntfy 转发用：ntfy 的标题走 HTTP 头且必须是 ASCII，
+    中文标题到手机端会丢字，因此 ntfy 收到的是把关键信息压进正文的另一份
+    文本。其余转发通道与系统通知仍用 title/message，不受影响。
     """
     if record and gate_enabled("Flag-1072"):
         try:
@@ -341,7 +429,7 @@ def _show(title: str, message: str, record: bool = True,
         # 外部转发严格是本机通知的附加消费方；其网络问题不能影响监控或桌面通知。
         try:
             from backend.service.forwarder_service import forward_notification
-            forward_notification(title, message)
+            forward_notification(title, message, ntfy_message)
         except Exception as e:
             logger.debug(f"初始化移动端通知转发失败: {e}")
 

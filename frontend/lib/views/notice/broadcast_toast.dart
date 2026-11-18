@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/service/update_service.dart';
+import '../../core/theme/app_theme.dart';
 
 /// 右上角通知广播卡片：114 号段（除 513/514/515）的 Release 正文，
 /// 纯文本展示，最多三张纵向堆叠；每张只关闭自身，不影响其他通知。
@@ -49,15 +50,9 @@ class _BroadcastCard extends StatelessWidget {
       child: Container(
         constraints: const BoxConstraints(maxHeight: 220),
         decoration: BoxDecoration(
+          // 广播卡是独立浮层：四角大圆角，靠色差与页面区分，不用阴影。
           color: isDark ? const Color(0xFF1B2534) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? .38 : .14),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          borderRadius: AppShape.outer,
         ),
         padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
         child: Column(
@@ -136,7 +131,7 @@ class _CloseIconButton extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: AppShape.inner,
       child: Padding(
         padding: const EdgeInsets.all(4),
         child: Icon(

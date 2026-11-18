@@ -7,6 +7,10 @@ class GlassCard extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;
   final double borderRadius;
+
+  /// 需要非对称圆角时直接传 [BorderRadius]，优先于 [borderRadius]。
+  /// 用于"一组容器只有最外侧四角是大圆角"的组合场景。
+  final BorderRadius? shape;
   final VoidCallback? onTap;
   final Color? backgroundColor;
   final double? width;
@@ -18,7 +22,8 @@ class GlassCard extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.all(20),
     this.margin,
-    this.borderRadius = 16,
+    this.borderRadius = AppShape.cornerLarge,
+    this.shape,
     this.onTap,
     this.backgroundColor,
     this.width,
@@ -29,7 +34,8 @@ class GlassCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final scheme = theme.colorScheme;
+    final radius = shape ?? BorderRadius.circular(borderRadius);
 
     final card = Container(
       width: width,
@@ -37,42 +43,20 @@ class GlassCard extends StatelessWidget {
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
-        // Keep a card one surface step above the page.  This is deliberately
-        // a filled surface rather than a white, outlined rectangle.
+        // 卡片靠比页面高一阶的表面色与背景区分，不画描边、不投阴影；
+        // 需要描边时由调用方显式传 border。
         color:
             backgroundColor ??
             theme.cardTheme.color ??
-            theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(borderRadius),
-        // 卡片靠底色 + 阴影与背景区分，不再画描边分割线；
-        // 需要描边时由调用方显式传 border。
+            AppShape.groupFill(scheme),
+        borderRadius: radius,
         border: border,
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withValues(alpha: .3)
-                : const Color(0xFF1E293B).withValues(alpha: .04),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withValues(alpha: .15)
-                : const Color(0xFF1E293B).withValues(alpha: .02),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
       ),
       child: child,
     );
 
     if (onTap != null) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: card,
-      );
+      return InkWell(onTap: onTap, borderRadius: radius, child: card);
     }
 
     return card;
@@ -138,14 +122,14 @@ class _PulsingStatusDotState extends State<PulsingStatusDot>
             color: widget.active
                 ? AppTheme.success.withValues(alpha: _animation.value)
                 : Colors.grey.withValues(alpha: .4),
-            boxShadow: widget.active
-                ? [
-                    BoxShadow(
-                      color: AppTheme.success.withValues(alpha: .3),
-                      blurRadius: 8 * _animation.value,
-                      spreadRadius: 1,
+            // 活跃态用一圈同色淡描边表示呼吸，不用外发光阴影。
+            border: widget.active
+                ? Border.all(
+                    color: AppTheme.success.withValues(
+                      alpha: .28 * _animation.value,
                     ),
-                  ]
+                    width: widget.size * .22,
+                  )
                 : null,
           ),
         );
@@ -179,7 +163,7 @@ class GpaBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: AppShape.inner,
       ),
       child: Text(
         value,

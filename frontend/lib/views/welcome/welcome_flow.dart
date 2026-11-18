@@ -62,7 +62,9 @@ class _ThemeMeta {
 }
 
 class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
-    with SingleTickerProviderStateMixin {
+    // 本页同时驱动环境光与页面切换两个 AnimationController，
+    // SingleTickerProviderStateMixin 只允许一个 ticker，会直接断言失败。
+    with TickerProviderStateMixin {
   // 页面序列：0 欢迎 → 1 法律性声明 → 2 选择登录入口 → 3 账号登录
   // → 4 监控设置 → 5 通知设置 → 6 主题选择 → 7 完成
   static const int _pIntro = 0;
@@ -76,7 +78,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
 
   /// 引导页「卡片级」容器统一圆角：与主按钮、全局输入框的 12 对齐。
   /// 4px 只用于「推荐 / 需验证码」小标签，不参与此常量。
-  static const double _blockRadius = 12;
 
   /// 主题输入框（contentPadding 16/14 + 浮动标签）实测渲染高度 55；
   /// 验证码图片块取同值，保证同一行内视觉高度一致。
@@ -645,7 +646,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           color: cs.onSurface.withValues(alpha: .6),
           style: IconButton.styleFrom(
-            backgroundColor: cs.surfaceContainerHighest.withValues(alpha: .72),
+            backgroundColor: AppShape.groupFill(cs),
             shape: const StadiumBorder(),
           ),
           tooltip: '返回',
@@ -669,9 +670,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
               child: FilledButton(
                 onPressed: _primaryEnabled() ? _onPrimary : null,
                 style: FilledButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(999),
-                  ),
+                  shape: const StadiumBorder(),
                 ),
                 child: Text(
                   _primaryLabel(),
@@ -690,9 +689,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
               child: FilledButton(
                 onPressed: () => exit(0),
                 style: FilledButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(999),
-                  ),
+                  shape: const StadiumBorder(),
                   backgroundColor: _disagreeRed,
                 ),
                 child: const Text(
@@ -719,9 +716,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         child: FilledButton(
           onPressed: _primaryEnabled() ? _onPrimary : null,
           style: FilledButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(999),
-            ),
+            shape: const StadiumBorder(),
           ),
           child: (_verifying || _saving)
               ? SizedBox(
@@ -766,11 +761,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
       default:
         return _buildConfirmPage(cs);
     }
-  }
-
-  /// 欢迎页仅以不同表面色块区分层级，不使用阴影制造分组关系。
-  List<BoxShadow> _blockShadow({bool selected = false}) {
-    return const [];
   }
 
   /// 内容组容器：整体水平居中，组内左对齐
@@ -845,7 +835,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
           children: [
             // App 图标：圆角裁切（约为初始尺寸的 80%）
             ClipRRect(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: AppShape.outer,
               child: Image.asset(
                 'assets/app_icon_tb.png',
                 width: 93,
@@ -969,9 +959,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_blockRadius),
-                  color: cs.surfaceContainerHighest.withValues(alpha: .74),
-                  boxShadow: _blockShadow(),
+                  borderRadius: AppShape.outer,
+                  color: AppShape.groupFill(cs),
                 ),
                 child: Scrollbar(
                   child: SingleChildScrollView(
@@ -1033,7 +1022,16 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                 ),
               )
             else
-              ..._loginModes.map((m) => _buildModeTile(cs, m)),
+              // 一组纵向选项：只有首项的上两角、末项的下两角是大圆角，
+              // 中间项一律小圆角，整组视觉上拼成一个圆角矩形。
+              ...List.generate(_loginModes.length, (i) {
+                return _buildModeTile(
+                  cs,
+                  _loginModes[i],
+                  first: i == 0,
+                  last: i == _loginModes.length - 1,
+                );
+              }),
           ],
         ),
       ),
@@ -1041,22 +1039,30 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
   }
 
   /// 单个登录入口选项卡片
-  Widget _buildModeTile(ColorScheme cs, LoginMode m) {
+  ///
+  /// [first] / [last] 决定它是整组的第一项还是最后一项：只有首项的上两角
+  /// 与末项的下两角用大圆角，其余角（含中间项四角）一律小圆角。
+  Widget _buildModeTile(
+    ColorScheme cs,
+    LoginMode m, {
+    required bool first,
+    required bool last,
+  }) {
     final selected = _loginMode == m.id;
+    final radius = AppShape.segmented(first: first, last: last);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(top: first ? 0 : AppShape.gapInner),
       child: InkWell(
-        borderRadius: BorderRadius.circular(_blockRadius),
+        borderRadius: radius,
         onTap: () => _selectLoginMode(m.id),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(_blockRadius),
+            borderRadius: radius,
             color: selected
                 ? cs.primary.withValues(alpha: .07)
-                : cs.surfaceContainerHighest.withValues(alpha: .72),
-            boxShadow: _blockShadow(selected: selected),
+                : AppShape.groupFill(cs),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1088,27 +1094,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                             color: cs.onSurface,
                           ),
                         ),
-                        if (m.recommended) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: cs.primary.withValues(alpha: .12),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              '推荐',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: cs.primary,
-                              ),
-                            ),
-                          ),
-                        ],
                         if (m.id == 'jw') ...[
                           const SizedBox(width: 8),
                           Container(
@@ -1118,7 +1103,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                             ),
                             decoration: BoxDecoration(
                               color: cs.secondary.withValues(alpha: .12),
-                              borderRadius: BorderRadius.circular(4),
+                              borderRadius: AppShape.inner,
                             ),
                             child: Text(
                               '经典',
@@ -1139,7 +1124,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                             ),
                             decoration: BoxDecoration(
                               color: cs.tertiary.withValues(alpha: .12),
-                              borderRadius: BorderRadius.circular(4),
+                              borderRadius: AppShape.inner,
                             ),
                             child: Text(
                               '需验证码',
@@ -1264,16 +1249,15 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
   /// 验证码图片（点击刷新）；加载中显示占位
   Widget _buildCaptchaImage(ColorScheme cs) {
     return InkWell(
-      borderRadius: BorderRadius.circular(_blockRadius),
+      borderRadius: AppShape.outer,
       onTap: _captchaLoading ? null : _refreshCaptcha,
       child: Container(
         width: 120,
         height: _captchaTileHeight,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(_blockRadius),
+          borderRadius: AppShape.outer,
           color: Colors.white,
-          boxShadow: _blockShadow(),
         ),
         child: _captchaLoading
             ? const SizedBox(
@@ -1325,9 +1309,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
             const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: .76),
-                borderRadius: BorderRadius.circular(_blockRadius),
-                boxShadow: _blockShadow(),
+                color: AppShape.groupFill(cs),
+                borderRadius: AppShape.outer,
               ),
               child: Column(
                 children: [
@@ -1477,7 +1460,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
   }) {
     return InkWell(
       onTap: () => onChanged(!value),
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: AppShape.inner,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
@@ -1556,18 +1539,17 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
     final selected = _notifyMode == value;
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(_blockRadius),
+      borderRadius: AppShape.outer,
       child: InkWell(
-        borderRadius: BorderRadius.circular(_blockRadius),
+        borderRadius: AppShape.outer,
         onTap: () => setState(() => _notifyMode = value),
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(_blockRadius),
+            borderRadius: AppShape.outer,
             color: selected
                 ? cs.primary.withValues(alpha: .1)
-                : cs.surfaceContainerHighest.withValues(alpha: .72),
-            boxShadow: _blockShadow(selected: selected),
+                : AppShape.groupFill(cs),
           ),
           child: Row(
             children: [
@@ -1685,9 +1667,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
     final meta = _themeMeta(preset);
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(_blockRadius),
+      borderRadius: AppShape.outer,
       child: InkWell(
-        borderRadius: BorderRadius.circular(_blockRadius),
+        borderRadius: AppShape.outer,
         onTap: () => setState(() => _selectedTheme = preset),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
@@ -1695,8 +1677,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
           decoration: BoxDecoration(
             color: selected
                 ? meta.color.withValues(alpha: .18)
-                : cs.surfaceContainerHighest.withValues(alpha: .72),
-            borderRadius: BorderRadius.circular(_blockRadius),
+                : AppShape.groupFill(cs),
+            borderRadius: AppShape.outer,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1709,7 +1691,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                     height: 30,
                     decoration: BoxDecoration(
                       color: meta.color,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: AppShape.inner,
                     ),
                   ),
                 ],
@@ -1741,7 +1723,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         color: selected ? cs.primary : cs.onSurface,
       ),
       side: BorderSide.none,
-      backgroundColor: cs.surfaceContainerHighest.withValues(alpha: .72),
+      backgroundColor: AppShape.groupFill(cs),
       selectedColor: cs.primary.withValues(alpha: .16),
     );
   }
@@ -1786,9 +1768,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: .76),
-                borderRadius: BorderRadius.circular(_blockRadius),
-                boxShadow: _blockShadow(),
+                color: AppShape.groupFill(cs),
+                borderRadius: AppShape.outer,
               ),
               child: Column(
                 children: [
@@ -1810,8 +1791,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: cs.primary.withValues(alpha: .08),
-                borderRadius: BorderRadius.circular(_blockRadius),
-                boxShadow: _blockShadow(),
+                borderRadius: AppShape.outer,
               ),
               child: Row(
                 children: [

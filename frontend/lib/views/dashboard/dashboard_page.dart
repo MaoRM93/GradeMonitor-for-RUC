@@ -18,6 +18,19 @@ class DashboardPage extends ConsumerStatefulWidget {
 }
 
 class _DashboardPageState extends ConsumerState<DashboardPage> {
+  /// 底部统计卡的网格常量。卡间缝隙固定 4px，两行用同一个值，
+  /// 因此上下两行的左右边界天然对齐（等价于 CSS Grid 的 gap: 4px）。
+  ///
+  /// 行高与字号按默认 1100×720 窗口标定：整页（标题 + 监控行 + 最新出分
+  /// + 两行统计卡）在默认窗口内不出现纵向滚动，布局比例保持不变。
+  static const double _statGap = 4;
+  static const double _statTopRowHeight = 145;
+  static const double _statBottomRowHeight = 112;
+  static const double _statIconSize = 24;
+  static const double _statLabelSize = 15;
+  /// 字号自适应下限：再窄也不低于这个值，溢出交给 FittedBox 兜底
+  static const double _statNumberMin = 26;
+
   bool _settingsReady = false;
   String? _lastUsername;
   bool _isQuerying = false;
@@ -333,6 +346,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
 
     return GlassCard(
+      // 仪表板整页保持更大的组合圆角，与下方统计卡组同一套轮廓。
+      borderRadius: AppShape.cornerHero,
       padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -480,174 +495,318 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return result;
   }
 
-  /// 底部统计卡（Lenovo Vantage 风格：左上图标+灰字说明，右下大数字）
+  /// 底部统计卡：Bento Grid（上三下二），五张卡共用同一个背景 Token。
+  ///
+  /// 视觉上拼成一个完整的大圆角矩形：只有组合最外侧四角是
+  /// [AppShape.cornerHero]，其余一律 [AppShape.cornerSmall]，
+  /// 卡与卡之间留 4px 缝隙露出页面底色。
   /// 顺序：GPA → 班级排名 → 专业排名 → 修读课程 → 查询次数
   Widget _buildStatTiles(
     MonitorStatus status,
     AsyncValue<RankData?> rankAsync,
   ) {
     final rd = rankAsync.asData?.value;
-    final tiles = <Widget>[
-      _statTile(
+
+    final topRow = <_StatTileData>[
+      _StatTileData(
         icon: Icons.school_rounded,
         iconColor: const Color(0xFF8B5CF6),
         label: 'GPA',
         value: rd?.pjxfjd ?? 'N/A',
+        numberSize: 76,
         decimalSmall: true,
       ),
-      _statTile(
+      _StatTileData(
         icon: Icons.groups_rounded,
         iconColor: const Color(0xFFF59E0B),
         label: '班级排名',
         value: rd?.bjpm ?? 'N/A',
+        numberSize: 64,
       ),
-      _statTile(
+      _StatTileData(
         icon: Icons.emoji_events_rounded,
         iconColor: const Color(0xFF6366F1),
         label: '专业排名',
         value: rd?.pm ?? 'N/A',
+        numberSize: 64,
       ),
-      _statTile(
+    ];
+
+    final bottomRow = <_StatTileData>[
+      _StatTileData(
         icon: Icons.menu_book_rounded,
         iconColor: const Color(0xFF10B981),
         label: '修读课程',
         value: rd?.countnum ?? 'N/A',
+        numberSize: 60,
       ),
+      // Flag-1073：查询次数卡可被远程下线；下线后修读课程卡独占整行，
+      // 角落规则由 _statCornerRadius 按实际位置推导，不需要另写分支。
       if (featureEnabled(FeatureGateService.flag1073QueryCount))
-        _statTile(
+        _StatTileData(
           icon: Icons.query_stats_rounded,
           iconColor: const Color(0xFF3B82F6),
           label: '查询次数',
           value: '${status.totalQueries}',
+          numberSize: 60,
         ),
     ];
-    return SizedBox(
-      height: 200,
-      child: Row(
-        children: [
-          for (var index = 0; index < tiles.length; index++) ...[
-            Expanded(
-              child: _StatSegment(
-                first: index == 0,
-                last: index == tiles.length - 1,
-                child: tiles[index],
-              ),
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: _statTopRowHeight,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _statRow(
+              topRow,
+              isTopRow: true,
+              isBottomRow: false,
+              vertical: true,
             ),
-            if (index != tiles.length - 1) const SizedBox(width: 2),
-          ],
-        ],
+          ),
+        ),
+        const SizedBox(height: _statGap),
+        SizedBox(
+          height: _statBottomRowHeight,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _statRow(
+              bottomRow,
+              isTopRow: false,
+              isBottomRow: true,
+              vertical: false,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 一行卡片的子节点：`Expanded` 等分即 CSS Grid 的 `repeat(n, 1fr)`。
+  /// 缝隙是固定 4px 的 SizedBox，所以上下两行的左右边界必然对齐。
+  List<Widget> _statRow(
+    List<_StatTileData> items, {
+    required bool isTopRow,
+    required bool isBottomRow,
+    required bool vertical,
+  }) {
+    final row = <Widget>[];
+    for (var i = 0; i < items.length; i++) {
+      if (i > 0) row.add(const SizedBox(width: _statGap));
+      row.add(
+        Expanded(
+          child: _StatCard(
+            radius: _statCornerRadius(
+              isTopRow: isTopRow,
+              isBottomRow: isBottomRow,
+              isFirst: i == 0,
+              isLast: i == items.length - 1,
+            ),
+            child: vertical
+                ? _statTileVertical(items[i])
+                : _statTileHorizontal(items[i]),
+          ),
+        ),
+      );
+    }
+    return row;
+  }
+
+  /// 组合式圆角：只有整个组合最外侧的四个角用大圆角，其余全是小圆角。
+  /// 规则统一收在 [AppShape.gridCell]，与全程序其余容器保持一致。
+  BorderRadius _statCornerRadius({
+    required bool isTopRow,
+    required bool isBottomRow,
+    required bool isFirst,
+    required bool isLast,
+  }) => AppShape.gridCell(
+    topRow: isTopRow,
+    bottomRow: isBottomRow,
+    first: isFirst,
+    last: isLast,
+  );
+
+  /// 数字字号随卡片可用宽度收缩，但不超过设计稿字号，也不低于 [min]。
+  double _statNumberSize(double available, double design, double factor) =>
+      (available * factor).clamp(_statNumberMin, design).toDouble();
+
+  /// 第一行：顶部图标+指标名，超大数字沉到底部。
+  ///
+  /// 数字用 Spacer 顶到卡片底边而不是居中，是为了让 GPA(104) 与两个排名(88)
+  /// 三个不同字号的数字共享同一条基线 —— 标题基线与内边距也因此完全一致。
+  Widget _statTileVertical(_StatTileData tile) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = _statNumberSize(
+            constraints.maxWidth,
+            tile.numberSize,
+            .45,
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _statHeader(tile, cs),
+              const Spacer(),
+              _statNumber(tile.value, size, cs, decimalSmall: tile.decimalSmall),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _statTile({
-    required IconData icon,
-    required Color iconColor,
-    required String label,
-    required String value,
-    bool decimalSmall = false,
-  }) {
+  /// 第二行：左侧图标+指标名，右侧超大数字，左右垂直居中、数字靠右。
+  Widget _statTileHorizontal(_StatTileData tile) {
     final cs = Theme.of(context).colorScheme;
-    final valueStyle = TextStyle(
-      fontSize: 68,
-      fontWeight: FontWeight.w400,
-      height: 1.0,
-      letterSpacing: -1.5,
-      color: cs.onSurface,
-    );
-    final dotIdx = decimalSmall ? value.indexOf('.') : -1;
-
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 39.6, color: iconColor),
-          const SizedBox(height: 10),
-          Text(
-            label,
+      padding: const EdgeInsets.fromLTRB(16, 12, 20, 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = _statNumberSize(
+            constraints.maxWidth,
+            tile.numberSize,
+            .23,
+          );
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // 左侧留 6 份，保证「修读课程」这类四字标签在最小窗口下不被截断
+              Expanded(flex: 6, child: _statHeader(tile, cs)),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 5,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _statNumber(
+                    tile.value,
+                    size,
+                    cs,
+                    decimalSmall: tile.decimalSmall,
+                    alignRight: true,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 图标 + 指标名（同一行，两行卡片共用，保证基线与内边距一致）
+  Widget _statHeader(_StatTileData tile, ColorScheme cs) {
+    return Row(
+      children: [
+        Icon(tile.icon, size: _statIconSize, color: tile.iconColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            tile.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 15.0,
+              fontSize: _statLabelSize,
               fontWeight: FontWeight.w600,
-              color: cs.onSurface,
+              height: 1.1,
+              color: cs.onSurfaceVariant,
             ),
           ),
-          const Spacer(),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: dotIdx >= 0
-                  ? Text.rich(
-                      TextSpan(
-                        style: valueStyle,
-                        children: [
-                          TextSpan(text: value.substring(0, dotIdx)),
-                          TextSpan(
-                            text: value.substring(dotIdx),
-                            style: const TextStyle(fontSize: 34),
-                          ),
-                        ],
-                      ),
-                    )
-                  // 超过 2 位数：首字保持原尺寸，其余数字缩小以适配卡片宽度
-                  : value.length > 2
-                  ? Text.rich(
-                      TextSpan(
-                        style: valueStyle,
-                        children: [
-                          TextSpan(text: value.substring(0, 1)),
-                          TextSpan(
-                            text: value.substring(1),
-                            style: TextStyle(
-                              fontSize: value.length >= 5 ? 32 : 42,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Text(
-                      value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: valueStyle,
-                    ),
+        ),
+      ],
+    );
+  }
+
+  /// 超大统计数字。Regular 字重 + 等宽数字，小数点与多位数按比例缩小。
+  Widget _statNumber(
+    String value,
+    double size,
+    ColorScheme cs, {
+    bool decimalSmall = false,
+    bool alignRight = false,
+  }) {
+    final base = TextStyle(
+      fontSize: size,
+      fontWeight: FontWeight.w400,
+      height: 1.0,
+      letterSpacing: size * -.015,
+      color: cs.onSurface,
+      // tabular-nums：位数变化时数字宽度不跳动，视觉中心保持稳定
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final dot = decimalSmall ? value.indexOf('.') : -1;
+
+    final Widget text;
+    if (dot >= 0) {
+      // GPA：整数部分满字号，小数部分缩到一半，两者共享同一条基线
+      text = Text.rich(
+        TextSpan(
+          style: base,
+          children: [
+            TextSpan(text: value.substring(0, dot)),
+            TextSpan(
+              text: value.substring(dot),
+              style: TextStyle(fontSize: size * .5),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+        maxLines: 1,
+      );
+    } else {
+      // 整串数字同一字号：位数变化只影响总宽，不产生大小混排，
+      // 数字的视觉重心因此始终落在卡片内的同一位置
+      text = Text(value, maxLines: 1, style: base);
+    }
+
+    // 兜底：窗口被拖到极窄时等比缩小，绝不允许裁切或溢出
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: text,
     );
   }
 }
 
-class _StatSegment extends StatelessWidget {
-  const _StatSegment({
-    required this.first,
-    required this.last,
-    required this.child,
-  });
-  final bool first;
-  final bool last;
+/// 底部统计卡的一张卡：统一的容器底色 + 由位置推导的组合式圆角。
+class _StatCard extends StatelessWidget {
+  const _StatCard({required this.radius, required this.child});
+  final BorderRadius radius;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.only(
-      topLeft: Radius.circular(first ? 24 : 4),
-      bottomLeft: Radius.circular(first ? 24 : 4),
-      topRight: Radius.circular(last ? 24 : 4),
-      bottomRight: Radius.circular(last ? 24 : 4),
-    );
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      // 五张卡共用同一个主题 Token（与重构前的统计卡一致）
+      color: AppShape.groupFill(Theme.of(context).colorScheme),
       borderRadius: radius,
       clipBehavior: Clip.antiAlias,
       child: child,
     );
   }
+}
+
+/// 底部统计卡的展示数据
+class _StatTileData {
+  const _StatTileData({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.value,
+    required this.numberSize,
+    this.decimalSmall = false,
+  });
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String value;
+
+  /// 设计稿字号上限，实际渲染值按卡片宽度收缩
+  final double numberSize;
+  final bool decimalSmall;
 }
 
 class _TagChip extends StatelessWidget {
@@ -659,7 +818,7 @@ class _TagChip extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
       color: color.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: AppShape.inner,
     ),
     child: Text(
       text,
@@ -684,10 +843,10 @@ class _ControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext c) => Material(
     color: color.withValues(alpha: .1),
-    borderRadius: BorderRadius.circular(12),
+    borderRadius: AppShape.inner,
     child: InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: AppShape.inner,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(

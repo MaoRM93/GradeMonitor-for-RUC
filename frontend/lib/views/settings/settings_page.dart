@@ -223,18 +223,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               : colorScheme.surfaceContainerHighest.withValues(
                                   alpha: .55,
                                 ),
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: AppShape.inner,
                           child: ListTile(
                             dense: true,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: AppShape.inner,
                             ),
                             leading: Container(
                               width: selected ? 34 : 28,
                               height: 28,
                               decoration: BoxDecoration(
                                 color: preview,
-                                borderRadius: BorderRadius.circular(9),
+                                borderRadius: AppShape.inner,
                               ),
                             ),
                             title: Text(preset.label),
@@ -508,14 +508,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(width: 12),
               InkWell(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: AppShape.inner,
                 onTap: _captchaLoading ? null : _refreshCaptcha,
                 child: Container(
                   width: 116,
                   height: 46,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: AppShape.inner,
                     color: Colors.white,
                   ),
                   child: _captchaLoading
@@ -1175,7 +1175,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             const Text('主题色：'),
                             for (final preset in ThemePreset.values)
                               InkWell(
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: AppShape.inner,
                                 onTap: () => controller.setPreset(preset),
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -1447,7 +1447,7 @@ class _PreReleaseDialog extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: AppShape.inner,
                 color: danger.withValues(alpha: .07),
               ),
               child: Column(
@@ -1722,8 +1722,8 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
                 decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest.withValues(alpha: .5),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppShape.insetFill(cs),
+                  borderRadius: AppShape.inner,
                 ),
                 child: SingleChildScrollView(
                   child: MarkdownBody(
@@ -2014,7 +2014,7 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       ),
       codeblockDecoration: BoxDecoration(
         color: on.withValues(alpha: .07),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppShape.inner,
       ),
       blockquote: base(null).copyWith(color: on.withValues(alpha: .55)),
       blockquoteDecoration: BoxDecoration(
@@ -2048,8 +2048,8 @@ class _SettingsGroup extends StatelessWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(24),
+        color: AppShape.groupFill(scheme),
+        borderRadius: AppShape.outer,
       ),
       child: child,
     );
@@ -2074,7 +2074,8 @@ class _SegmentedSettingsGroup extends StatelessWidget {
             last: index == items.length - 1,
             child: items[index],
           ),
-          if (index != items.length - 1) const SizedBox(height: 2),
+          if (index != items.length - 1)
+            const SizedBox(height: AppShape.gapInner),
         ],
       ],
     );
@@ -2094,14 +2095,9 @@ class _SegmentedSettingsItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.only(
-      topLeft: Radius.circular(first ? 24 : 4),
-      topRight: Radius.circular(first ? 24 : 4),
-      bottomLeft: Radius.circular(last ? 24 : 4),
-      bottomRight: Radius.circular(last ? 24 : 4),
-    );
+    final radius = AppShape.segmented(first: first, last: last);
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      color: AppShape.groupFill(Theme.of(context).colorScheme),
       borderRadius: radius,
       clipBehavior: Clip.antiAlias,
       child: child,
@@ -2189,11 +2185,11 @@ class _TimeFieldCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Material(
-      color: colorScheme.onSurface.withValues(alpha: .035),
-      borderRadius: BorderRadius.circular(12),
+      color: AppShape.insetFill(colorScheme),
+      borderRadius: AppShape.inner,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShape.inner,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 11, 10, 9),
           child: Column(

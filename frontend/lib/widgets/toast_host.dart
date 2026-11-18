@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../core/theme/app_theme.dart';
 
 /// 全局 Toast 专用导航器 Key（main.dart 中注册到 MaterialApp）
 final toastNavigatorKey = GlobalKey<NavigatorState>();
@@ -87,11 +88,9 @@ class _ToastCardState extends State<_ToastCard>
     final baseStyle = Theme.of(context).textTheme.bodyMedium;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // 圆角：单行短文本保持胶囊造型；一旦换行（或多行）就改用固定 22，
-    // 否则 999 的超大半径在高度变大时会被压成畸形椭圆，圆角看起来是坏的。
-    final isPill =
-        !widget.message.contains('\n') && widget.message.length <= 18;
-    final radius = BorderRadius.circular(isPill ? 999 : 22);
+    // 圆角：Toast 是独立浮层，四角统一用全局大圆角。
+    // 不再用 999 胶囊半径 —— 高度变大时会被压成畸形椭圆。
+    final radius = AppShape.outer;
 
     return IgnorePointer(
       child: Align(
@@ -109,18 +108,12 @@ class _ToastCardState extends State<_ToastCard>
                   vertical: 14,
                 ),
                 decoration: BoxDecoration(
+                  // 浮层靠色差脱离页面：深色模式取比页面更亮一阶，
+                  // 浅色模式取比页面更暗一阶。
                   color: isDark
-                      ? const Color(0xFF2C2C2E)
+                      ? AppShape.overlayFill(Theme.of(context).colorScheme)
                       : const Color(0xFFECECEC),
                   borderRadius: radius,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? .45 : .16),
-                      blurRadius: 22,
-                      offset: const Offset(0, 8),
-                      spreadRadius: 0,
-                    ),
-                  ],
                 ),
                 child: Text(
                   widget.message,

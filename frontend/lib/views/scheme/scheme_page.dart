@@ -379,11 +379,11 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     final selected = _scheme == value;
     return InkWell(
       onTap: () => setState(() => _scheme = value),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: AppShape.inner,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShape.inner,
           color: selected
               ? cs.primary.withValues(alpha: .07)
               : Colors.transparent,
@@ -408,9 +408,10 @@ class _SchemePageState extends ConsumerState<SchemePage> {
 
   // ---------- 核心绩卡 ----------
 
-  Widget _buildCoreCard(ColorScheme cs) {
+  Widget _buildCoreCard(ColorScheme cs, {required BorderRadius radius}) {
     final invalid = _invalidShown(_coreCtrl.text);
     return GlassCard(
+      shape: radius,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -432,7 +433,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
                 decoration: BoxDecoration(
                   color: (_coreCustom ? AppTheme.warning : AppTheme.success)
                       .withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: AppShape.inner,
                 ),
                 child: Text(
                   _coreCustom ? '自定义' : '自动计算',
@@ -477,7 +478,7 @@ class _SchemePageState extends ConsumerState<SchemePage> {
       final value = _coreCtrl.text.trim();
       return InkWell(
         onDoubleTap: () => setState(() => _coreEditing = true),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: AppShape.inner,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,16 +544,30 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     final showCore = featureEnabled(FeatureGateService.flag1021CoreCard);
     final showManual = featureEnabled(FeatureGateService.flag1022Inputs);
 
+    // 三张卡横向拼成一个整体：只有最左卡的左上/左下与最右卡的右上/右下
+    // 是大圆角，中间卡与朝向内部的角一律小圆角（Material 3 Expressive 的
+    // 分组形状层级）。被 Flag 下线时首尾自动重算，不会留错角。
+    final specs = <_InputCardSpec>[
+      if (showCore) const _InputCardSpec(_InputKind.core),
+      if (showManual) const _InputCardSpec(_InputKind.academic),
+      if (showManual) const _InputCardSpec(_InputKind.comprehensive),
+    ];
+    if (specs.isEmpty) return const SizedBox.shrink();
     final cards = <Widget>[
-      if (showCore) Expanded(child: _buildCoreCard(cs)),
-      if (showManual)
-        Expanded(child: _dimBlock(_inputCard(cs, kind: _InputKind.academic))),
-      if (showManual)
+      for (var i = 0; i < specs.length; i++)
         Expanded(
-          child: _dimBlock(_inputCard(cs, kind: _InputKind.comprehensive)),
+          child: _dimBlock(
+            _inputCard(
+              cs,
+              kind: specs[i].kind,
+              radius: AppShape.gridRow(
+                first: i == 0,
+                last: i == specs.length - 1,
+              ),
+            ),
+          ),
         ),
     ];
-    if (cards.isEmpty) return const SizedBox.shrink();
 
     // 先用 IntrinsicHeight 把行高定为最高子卡的高度，再 stretch 各卡等高
     //（滚动上下文里直接 stretch 会给子项无界高度，必须先定高）
@@ -561,7 +576,8 @@ class _SchemePageState extends ConsumerState<SchemePage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (var i = 0; i < cards.length; i++) ...[
-            if (i > 0) const SizedBox(width: 10),
+            // 组内缝隙只露一线路底色，让三卡在视觉上拼成一个整体
+            if (i > 0) const SizedBox(width: AppShape.gapInner),
             cards[i],
           ],
         ],
@@ -569,12 +585,18 @@ class _SchemePageState extends ConsumerState<SchemePage> {
     );
   }
 
-  Widget _inputCard(ColorScheme cs, {required _InputKind kind}) {
+  Widget _inputCard(
+    ColorScheme cs, {
+    required _InputKind kind,
+    required BorderRadius radius,
+  }) {
+    if (kind == _InputKind.core) return _buildCoreCard(cs, radius: radius);
     final isAcademic = kind == _InputKind.academic;
     final ctrl = isAcademic ? _academicCtrl : _comprehensiveCtrl;
     final enabled = isAcademic || _scheme == '811';
     final invalid = _invalidShown(ctrl.text);
     return GlassCard(
+      shape: radius,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -758,4 +780,10 @@ class _SchemePageState extends ConsumerState<SchemePage> {
   }
 }
 
-enum _InputKind { academic, comprehensive }
+enum _InputKind { core, academic, comprehensive }
+
+/// 三卡一行里的一个位置：只用来承载顺序，圆角由所在位置推导。
+class _InputCardSpec {
+  const _InputCardSpec(this.kind);
+  final _InputKind kind;
+}

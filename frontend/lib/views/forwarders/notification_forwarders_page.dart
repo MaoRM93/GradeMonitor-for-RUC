@@ -303,17 +303,9 @@ class _NotificationForwardersPageState
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? cs.surface
-            : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .035),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        // 通道卡靠比页面高一阶的表面色与背景区分，不用阴影。
+        color: AppShape.groupFill(cs),
+        borderRadius: AppShape.outer,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -345,7 +337,10 @@ class _NotificationForwardersPageState
           ...fields,
           const SizedBox(height: 10),
           DefaultTextStyle(
+            // DefaultTextStyle 会整体替换父级样式，这里显式带上应用字体，
+            // 否则说明文字会退回系统默认字体，与页面其余文本不一致。
             style: TextStyle(
+              fontFamily: AppTheme.sansFontFamily,
               fontSize: 12,
               height: 1.55,
               color: cs.onSurface.withValues(alpha: .63),

@@ -551,7 +551,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                         // 深色模式自动跟随主题深色 surface，无需写死白色。
                         decoration: BoxDecoration(
                           color: colorScheme.surface,
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: AppShape.outer,
                         ),
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
@@ -680,9 +680,9 @@ class _GradesPageState extends ConsumerState<GradesPage> {
       height: height,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
+        // 输入框是页面上的凹槽：用比组底色更深一阶的色差表示，不用描边。
+        color: AppShape.insetFill(Theme.of(context).colorScheme),
+        borderRadius: AppShape.inner,
       ),
       child: child,
     );
@@ -712,8 +712,8 @@ class _GradesPageState extends ConsumerState<GradesPage> {
         height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
+          color: AppShape.insetFill(colorScheme),
+          borderRadius: AppShape.inner,
         ),
         child: Row(
           children: [
@@ -732,8 +732,8 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                 minimumSize: const Size(0, 36),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 side: BorderSide(color: borderColor),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: AppShape.inner,
                 ),
               ),
               icon: const Icon(Icons.calendar_month_outlined, size: 16),
@@ -742,7 +742,8 @@ class _GradesPageState extends ConsumerState<GradesPage> {
             const SizedBox(width: 16),
             Expanded(
               child: FittedBox(
-                alignment: Alignment.centerLeft,
+                // 计算结果贴在行尾，与左侧的操作入口形成两端对齐
+                alignment: Alignment.centerRight,
                 fit: BoxFit.scaleDown,
                 child: Text(
                   '选中学期平均绩点：$gpaText；核心课平均绩点：$coreGpaText',
@@ -792,7 +793,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                       color: selected
                           ? scheme.primary.withValues(alpha: .14)
                           : scheme.surface,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: AppShape.inner,
                       child: CheckboxListTile(
                         value: selected,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -883,12 +884,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                       SizedBox(
                         width: cardWidth,
                         height: 62,
-                        child: _semesterCard(
-                          colorScheme,
-                          chunk[j],
-                          first: i + j == 0,
-                          last: i + j == stats.length - 1,
-                        ),
+                        child: _semesterCard(colorScheme, chunk[j]),
                       ),
                     ],
                   ],
@@ -905,21 +901,15 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     );
   }
 
-  Widget _semesterCard(
-    ColorScheme colorScheme,
-    _SemesterStat s, {
-    required bool first,
-    required bool last,
-  }) {
+  /// 学期统计卡
+  ///
+  /// 这一组横向卡片是并列的独立模块，不是拼合的整体，因此每张卡都用
+  /// 标准圆角（[AppShape.outer]），不做"只有外侧四角大圆角"的分段处理。
+  Widget _semesterCard(ColorScheme colorScheme, _SemesterStat s) {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(first ? 24 : 4),
-          bottomLeft: Radius.circular(first ? 24 : 4),
-          topRight: Radius.circular(last ? 24 : 4),
-          bottomRight: Radius.circular(last ? 24 : 4),
-        ),
+        borderRadius: AppShape.outer,
         color: colorScheme.surface,
       ),
       child: Column(

@@ -274,10 +274,10 @@ class _DevButton extends StatelessWidget {
         color: enabled
             ? color.withValues(alpha: .08)
             : colorScheme.onSurface.withValues(alpha: .05),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppShape.inner,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShape.inner,
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(

@@ -7,6 +7,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../core/service/update_service.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Release 正文为空时的兜底文案（禁用页 / 提醒页共用）
 const String kReleaseBodyFallback = '本次更新说明为空，请前往 GitHub 发布页查看。';
@@ -62,7 +63,7 @@ MarkdownStyleSheet releaseNoticeMarkdownStyle(BuildContext context) {
     codeblockPadding: const EdgeInsets.all(12),
     codeblockDecoration: BoxDecoration(
       color: on.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: AppShape.inner,
     ),
     horizontalRuleDecoration: BoxDecoration(
       border: Border(top: BorderSide(color: on.withValues(alpha: .28))),
@@ -196,7 +197,7 @@ class _ReleaseNoticeScaffoldState extends State<ReleaseNoticeScaffold> {
                             clipBehavior: Clip.antiAlias,
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: .08),
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: AppShape.inner,
                             ),
                             padding: const EdgeInsets.fromLTRB(18, 4, 8, 4),
                             child: Scrollbar(
@@ -360,8 +361,8 @@ class _DisabledScreenState extends State<DisabledScreen> {
           backgroundColor: Colors.white,
           foregroundColor: _bgColor,
           padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 18),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+          shape: const RoundedRectangleBorder(
+            borderRadius: AppShape.inner,
           ),
         ),
         child: const Text(

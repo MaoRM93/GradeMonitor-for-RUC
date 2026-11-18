@@ -306,14 +306,14 @@ class AppTheme {
         color: surfaceContainerHighest,
         margin: EdgeInsets.zero,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: AppShape.outer),
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: surface,
         elevation: 0,
         indicatorColor: scheme.primaryContainer,
         indicatorShape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: AppShape.inner,
         ),
         selectedIconTheme: IconThemeData(
           color: scheme.onPrimaryContainer,
@@ -335,7 +335,7 @@ class AppTheme {
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: AppShape.outer),
       ),
       inputDecorationTheme: InputDecorationTheme(
         contentPadding: const EdgeInsets.symmetric(
@@ -344,19 +344,19 @@ class AppTheme {
         ),
         floatingLabelStyle: TextStyle(color: scheme.primary),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShape.inner,
           borderSide: BorderSide(color: outline),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShape.inner,
           borderSide: BorderSide(color: outline),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShape.inner,
           borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShape.inner,
           borderSide: const BorderSide(color: error),
         ),
       ),
@@ -381,10 +381,44 @@ class AppTheme {
               : scheme.surfaceContainerHighest,
         ),
       ),
+      // 按钮不是"容器"，不参与外轮廓的大小圆角层级：按 M3 默认形态走胶囊，
+      // 该大就大。把它压成 8px 的圆角矩形会让所有操作按钮退化成表格单元格。
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(shape: const StadiumBorder()),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(shape: const StadiumBorder()),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(shape: const StadiumBorder()),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          shape: const StadiumBorder(),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        shape: const StadiumBorder(),
+        side: BorderSide.none,
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: surfaceContainerHighest,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: AppShape.outer),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: Color.alphaBlend(
+          scheme.onSurface.withValues(alpha: dark ? .10 : .06),
+          surfaceContainerHighest,
+        ),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: AppShape.outer),
+      ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
           color: scheme.inverseSurface,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShape.inner,
         ),
         textStyle: TextStyle(fontSize: 12, color: scheme.onInverseSurface),
       ),
@@ -394,6 +428,110 @@ class AppTheme {
         displayColor: scheme.onSurface,
         bodyColor: scheme.onSurface,
       ),
+    );
+  }
+}
+
+/// 全程序统一的形状语言。
+///
+/// 一条规则贯穿所有界面：**只有容器最外侧的四角使用大圆角，其余全部小圆角**。
+/// 层级关系一律靠表面色差表达，不使用阴影 —— 阴影会在深色模式与
+/// 多种主题色下产生脏边，而色差在任何主题下都成立。
+class AppShape {
+  AppShape._();
+
+  /// 主页仪表板组合卡片专用的大圆角。
+  ///
+  /// 只有仪表板底部那组统计卡用这个值，其余所有容器一律用 [cornerLarge]。
+  static const double cornerHero = 32;
+
+  /// 除仪表板外，所有容器最外侧四角的大圆角。
+  static const double cornerLarge = 20;
+
+  /// 容器内部所有元素的小圆角。
+  static const double cornerSmall = 8;
+
+  /// 同组元素之间露出的底色缝隙。
+  static const double gapInner = 2;
+
+  /// 相邻内容组之间的间距。
+  static const double gapGroup = 14;
+
+  /// 相邻版块之间的间距。
+  static const double gapSection = 24;
+
+  static const Radius heroRadius = Radius.circular(cornerHero);
+  static const Radius largeRadius = Radius.circular(cornerLarge);
+  static const Radius smallRadius = Radius.circular(cornerSmall);
+
+  /// 仪表板组合卡片：四角全用 [cornerHero]。
+  static const BorderRadius hero = BorderRadius.all(heroRadius);
+
+  /// 独立容器：四角全大。
+  static const BorderRadius outer = BorderRadius.all(largeRadius);
+
+  /// 容器内部元素：四角全小。
+  static const BorderRadius inner = BorderRadius.all(smallRadius);
+
+  /// 竖向分段列表中的一项：整组首尾用大圆角，中间项全小。
+  static BorderRadius segmented({required bool first, required bool last}) {
+    return BorderRadius.only(
+      topLeft: first ? largeRadius : smallRadius,
+      topRight: first ? largeRadius : smallRadius,
+      bottomLeft: last ? largeRadius : smallRadius,
+      bottomRight: last ? largeRadius : smallRadius,
+    );
+  }
+
+  /// 单行多列组合中的一格：只有整组最左一格的左侧两角、最右一格的右侧
+  /// 两角用大圆角，其余（含中间的上下角）一律小圆角。
+  ///
+  /// 与 [gridCell] 的区别：那个按行列二维推导，这个只按一维左右推导。
+  static BorderRadius gridRow({required bool first, required bool last}) {
+    return BorderRadius.only(
+      topLeft: first ? largeRadius : smallRadius,
+      bottomLeft: first ? largeRadius : smallRadius,
+      topRight: last ? largeRadius : smallRadius,
+      bottomRight: last ? largeRadius : smallRadius,
+    );
+  }
+
+  /// 网格中的一格：只有整组最外侧的四角用大圆角。
+  ///
+  /// 目前只有主页仪表板的统计卡用它，因此取 [cornerHero]；
+  /// 其余容器走 [outer] / [segmented]，统一 [cornerLarge]。
+  static BorderRadius gridCell({
+    required bool topRow,
+    required bool bottomRow,
+    required bool first,
+    required bool last,
+  }) {
+    return BorderRadius.only(
+      topLeft: topRow && first ? heroRadius : smallRadius,
+      topRight: topRow && last ? heroRadius : smallRadius,
+      bottomLeft: bottomRow && first ? heroRadius : smallRadius,
+      bottomRight: bottomRow && last ? heroRadius : smallRadius,
+    );
+  }
+
+  /// 内容组底色：比页面底色高一阶。
+  static Color groupFill(ColorScheme scheme) => scheme.surfaceContainerHighest;
+
+  /// 组内嵌块底色：在组底色上再叠一阶，用来替代内部分割线。
+  static Color insetFill(ColorScheme scheme) {
+    final dark = scheme.brightness == Brightness.dark;
+    return Color.alphaBlend(
+      scheme.onSurface.withValues(alpha: dark ? .06 : .04),
+      scheme.surfaceContainerHighest,
+    );
+  }
+
+  /// 浮层底色：需要脱离页面的浮起元素靠这一档色差区分，不靠阴影。
+  static Color overlayFill(ColorScheme scheme) {
+    final dark = scheme.brightness == Brightness.dark;
+    return Color.alphaBlend(
+      scheme.onSurface.withValues(alpha: dark ? .10 : .06),
+      scheme.surfaceContainerHighest,
     );
   }
 }

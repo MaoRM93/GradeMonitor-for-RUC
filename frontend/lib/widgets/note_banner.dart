@@ -88,7 +88,7 @@ class _NoteBannerState extends State<NoteBanner> {
       padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
       decoration: BoxDecoration(
         color: mainColor.withValues(alpha: .08),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShape.inner,
       ),
       child: Stack(
         children: [

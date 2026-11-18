@@ -543,12 +543,7 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.only(
-      topLeft: Radius.circular(first ? 24 : 7),
-      topRight: Radius.circular(first ? 24 : 7),
-      bottomLeft: Radius.circular(last ? 24 : 7),
-      bottomRight: Radius.circular(last ? 24 : 7),
-    );
+    final radius = AppShape.segmented(first: first, last: last);
     final textColor = selected ? onColor : onColor.withValues(alpha: .68);
     return Material(
       color: selected ? selectedColor : groupColor,

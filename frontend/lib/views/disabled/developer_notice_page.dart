@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/service/update_service.dart';
+import '../../core/theme/app_theme.dart';
 import 'disabled_page.dart';
 
 /// 开发者重要提醒页（蓝色）：Release tag 114.515 存在时由 main.dart 切换显示
@@ -72,8 +73,8 @@ class _DeveloperNoticeScreenState extends State<DeveloperNoticeScreen> {
           backgroundColor: Colors.white,
           foregroundColor: _bgColor,
           padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 18),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+          shape: const RoundedRectangleBorder(
+            borderRadius: AppShape.inner,
           ),
         ),
         child: const Text(

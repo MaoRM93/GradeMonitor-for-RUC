@@ -30,6 +30,7 @@ class _NotificationForwardersPageState
   final Set<String> _dirty = {};
   final Map<String, String> _saveLabels = {};
   String? _savingChannel;
+  String? _togglingChannel;
   bool _bark = false, _meow = false, _ntfy = false, _loading = true;
   bool _barkConfigured = false,
       _meowConfigured = false,
@@ -62,19 +63,26 @@ class _NotificationForwardersPageState
           ntfy = d['ntfy'] as Map? ?? {};
       if (!mounted) return;
       setState(() {
-        _bark = bark['enabled'] == true;
-        _barkConfigured = bark['configured'] == true;
-        _meow = meow['enabled'] == true;
-        _meowConfigured = meow['configured'] == true;
-        _ntfy = ntfy['enabled'] == true;
-        _ntfyConfigured = ntfy['configured'] == true;
-        _barkUrl.text = _savedDrafts['bark']?['url'] ?? '';
-        _meowNickname.text = _savedDrafts['meow']?['nickname'] ?? '';
+        // 会话内草稿优先，其次是后端已落盘的凭据。开关是唯一能改 enabled 的
+        // 入口，所以开关状态一律取后端值，不在本地猜。
+        _barkUrl.text =
+            _savedDrafts['bark']?['url'] ?? bark['url']?.toString() ?? '';
+        _meowNickname.text =
+            _savedDrafts['meow']?['nickname'] ??
+            meow['nickname']?.toString() ??
+            '';
         _ntfyServer.text =
             _savedDrafts['ntfy']?['server'] ??
             ntfy['server']?.toString() ??
             'https://ntfy.sh';
-        _ntfyTopic.text = _savedDrafts['ntfy']?['topic'] ?? '';
+        _ntfyTopic.text =
+            _savedDrafts['ntfy']?['topic'] ?? ntfy['topic']?.toString() ?? '';
+        _bark = bark['enabled'] == true;
+        _meow = meow['enabled'] == true;
+        _ntfy = ntfy['enabled'] == true;
+        _barkConfigured = _barkUrl.text.trim().isNotEmpty;
+        _meowConfigured = _meowNickname.text.trim().isNotEmpty;
+        _ntfyConfigured = _ntfyTopic.text.trim().isNotEmpty;
         _loading = false;
       });
     } catch (_) {
@@ -87,36 +95,76 @@ class _NotificationForwardersPageState
     _saveLabels.remove(channel);
   });
 
+  /// 各通道可编辑的凭据字段。保存与开关都复用这一份，避免两套取值逻辑。
+  ///
+  /// 空值一律不提交：后端把空的 url/nickname/topic 视为「保留已保存配置」，
+  /// 少传与传空串等价；而 server 传空串会把默认服务器写成空，这里直接省略。
+  Map<String, String> _credentials(String channel) {
+    final raw = switch (channel) {
+      'bark' => {'url': _barkUrl.text.trim()},
+      'meow' => {'nickname': _meowNickname.text.trim()},
+      _ => {
+        'server': _ntfyServer.text.trim(),
+        'topic': _ntfyTopic.text.trim(),
+      },
+    };
+    return {
+      for (final e in raw.entries)
+        if (e.value.isNotEmpty) e.key: e.value,
+    };
+  }
+
+  /// 输入框里有值，或后端已存过该通道的凭据，都算可开启。
+  ///
+  /// 只看输入框会把「已保存过但本次会话回填失败」的通道误判为未配置。
+  bool _canEnable(String channel) => switch (channel) {
+    'bark' => _barkConfigured || _barkUrl.text.trim().isNotEmpty,
+    'meow' => _meowConfigured || _meowNickname.text.trim().isNotEmpty,
+    _ => _ntfyConfigured || _ntfyTopic.text.trim().isNotEmpty,
+  };
+
+  /// 用后端返回的完整快照刷新本通道状态。
+  ///
+  /// 开关值也以响应为准：开关是唯一能改 `enabled` 的入口，本地乐观值必须在
+  /// 落盘成功后与后端对齐，避免界面显示已开启而后端其实没开。
+  void _applyResponse(String channel, Map data) {
+    final forwarders = data['forwarders'] as Map?;
+    final entry = forwarders?[channel] as Map?;
+    final configured = entry?['configured'] == true;
+    final enabled = entry?['enabled'] == true;
+    if (channel == 'bark') {
+      _barkConfigured = configured;
+      _bark = enabled;
+    }
+    if (channel == 'meow') {
+      _meowConfigured = configured;
+      _meow = enabled;
+    }
+    if (channel == 'ntfy') {
+      _ntfyConfigured = configured;
+      _ntfy = enabled;
+    }
+  }
+
+  /// 仅保存凭据，不改变转发开关状态。
+  ///
+  /// 请求体里刻意不带 `enabled`：后端只在字段出现时才覆盖，缺失即保留已落盘
+  /// 的开关值。这样「保存」永远不会把用户已经打开的转发静默关掉，也不会在
+  /// 用户没点开关时提前开启转发。
   Future<void> _saveChannel(String channel) async {
     setState(() {
       _savingChannel = channel;
       _saveLabels.remove(channel);
     });
-    final value = switch (channel) {
-      'bark' => {'enabled': _bark, 'url': _barkUrl.text.trim()},
-      'meow' => {'enabled': _meow, 'nickname': _meowNickname.text.trim()},
-      _ => {
-        'enabled': _ntfy,
-        'server': _ntfyServer.text.trim(),
-        'topic': _ntfyTopic.text.trim(),
-      },
-    };
+    final credentials = _credentials(channel);
     try {
       final response = await _api.updateNotificationForwarders({
-        channel: value,
+        channel: credentials,
       });
-      final data = response.data as Map;
-      final configured =
-          ((data['forwarders'] as Map?)?[channel] as Map?)?['configured'] ==
-          true;
       if (!mounted) return;
       setState(() {
-        if (channel == 'bark') _barkConfigured = configured;
-        if (channel == 'meow') _meowConfigured = configured;
-        if (channel == 'ntfy') _ntfyConfigured = configured;
-        _savedDrafts[channel] = Map<String, String>.from(
-          value.map((k, v) => MapEntry(k, '$v')),
-        );
+        _applyResponse(channel, response.data as Map);
+        _savedDrafts[channel] = Map<String, String>.from(credentials);
         _dirty.remove(channel);
         _saveLabels[channel] = '已保存';
       });
@@ -127,11 +175,59 @@ class _NotificationForwardersPageState
     }
   }
 
+  /// 右上角开关：点击即落盘生效，不需要再点保存。
+  ///
+  /// 顺带把当前输入框里的凭据一起提交，避免「填了地址直接打开开关」时后端拿
+  /// 到的是上一次保存的旧值。失败时回滚开关显示，不伪造生效状态。
+  Future<void> _toggleChannel(String channel, bool next) async {
+    if (_togglingChannel != null || _savingChannel != null) return;
+    if (next && !_canEnable(channel)) {
+      ToastHost().show('请先填写该通道的配置，再开启转发');
+      return;
+    }
+    final previous = switch (channel) {
+      'bark' => _bark,
+      'meow' => _meow,
+      _ => _ntfy,
+    };
+    setState(() {
+      _togglingChannel = channel;
+      if (channel == 'bark') _bark = next;
+      if (channel == 'meow') _meow = next;
+      if (channel == 'ntfy') _ntfy = next;
+    });
+    final credentials = _credentials(channel);
+    try {
+      final response = await _api.updateNotificationForwarders({
+        channel: {'enabled': next, ...credentials},
+      });
+      if (!mounted) return;
+      setState(() {
+        _applyResponse(channel, response.data as Map);
+        _savedDrafts[channel] = Map<String, String>.from(credentials);
+        _dirty.remove(channel);
+        _saveLabels[channel] = '已保存';
+      });
+      ToastHost().show(next ? '已开启转发' : '已关闭转发');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        if (channel == 'bark') _bark = previous;
+        if (channel == 'meow') _meow = previous;
+        if (channel == 'ntfy') _ntfy = previous;
+      });
+      ToastHost().show('开关切换失败，请检查本机后端是否在运行');
+    } finally {
+      if (mounted) setState(() => _togglingChannel = null);
+    }
+  }
+
   Future<void> _test(String channel) async {
     try {
       final data = (await _api.testNotificationForwarder(channel)).data as Map;
-      if (mounted)
+      if (mounted) {
         ToastHost().show('${channel.toUpperCase()} 测试：${data['message']}');
+      }
     } catch (e) {
       if (mounted) ToastHost().show('测试失败：$e');
     }
@@ -139,12 +235,13 @@ class _NotificationForwardersPageState
 
   Future<void> _openLink(String url) async {
     try {
-      if (Platform.isMacOS)
+      if (Platform.isMacOS) {
         await Process.start('open', [url]);
-      else if (Platform.isWindows)
+      } else if (Platform.isWindows) {
         await Process.start('cmd', ['/c', 'start', '', url]);
-      else
+      } else {
         await Process.start('xdg-open', [url]);
+      }
     } catch (_) {
       if (mounted) ToastHost().show('无法打开链接');
     }
@@ -193,7 +290,6 @@ class _NotificationForwardersPageState
     required bool enabled,
     required bool configured,
     required String id,
-    required ValueChanged<bool> onChanged,
     required List<Widget> fields,
     required Widget description,
   }) {
@@ -201,6 +297,7 @@ class _NotificationForwardersPageState
     final canTest =
         configured && !_dirty.contains(id) && _savingChannel == null;
     final isSaving = _savingChannel == id;
+    final busy = _savingChannel != null || _togglingChannel != null;
     final label = isSaving ? '保存中…' : (_saveLabels[id] ?? '保存此通道');
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -235,12 +332,11 @@ class _NotificationForwardersPageState
                   ),
                 ),
               ),
+              // 开关即生效：点击后立刻落盘，不需要再点「保存此通道」。
+              // 请求进行中禁用点击，避免并发写入互相覆盖。
               ExpressiveSwitch(
                 value: enabled,
-                onChanged: (value) {
-                  onChanged(value);
-                  _markDirty(id);
-                },
+                onChanged: busy ? null : (value) => _toggleChannel(id, value),
                 height: 30,
               ),
             ],
@@ -260,7 +356,7 @@ class _NotificationForwardersPageState
           Row(
             children: [
               FilledButton.icon(
-                onPressed: isSaving ? null : () => _saveChannel(id),
+                onPressed: busy ? null : () => _saveChannel(id),
                 style: _saveLabels[id] == '已保存'
                     ? FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF16A34A),
@@ -326,7 +422,6 @@ class _NotificationForwardersPageState
                   enabled: _bark,
                   configured: _barkConfigured,
                   id: 'bark',
-                  onChanged: (v) => setState(() => _bark = v),
                   fields: [
                     TextField(
                       controller: _barkUrl,
@@ -358,7 +453,6 @@ class _NotificationForwardersPageState
                   enabled: _meow,
                   configured: _meowConfigured,
                   id: 'meow',
-                  onChanged: (v) => setState(() => _meow = v),
                   fields: [
                     TextField(
                       controller: _meowNickname,
@@ -391,7 +485,6 @@ class _NotificationForwardersPageState
                   enabled: _ntfy,
                   configured: _ntfyConfigured,
                   id: 'ntfy',
-                  onChanged: (v) => setState(() => _ntfy = v),
                   fields: [
                     TextField(
                       controller: _ntfyServer,

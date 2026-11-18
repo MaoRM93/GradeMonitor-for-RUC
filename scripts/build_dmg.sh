@@ -38,17 +38,18 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VOL_NAME="GradeMonitor"
 # Finder 窗口的内容区尺寸必须与背景图一致（make_dmg_background.py 的输出尺寸）。
 # 注意 Finder 的 window bounds 把标题栏也算在内，直接给 WIN_H 会裁掉背景底部一条。
-# 700x500 与设计稿 1484x1060（比例 1.4）同比例，否则 Finder 会把背景拉伸变形。
+# 700x525 与设计稿 1400x1050（比例 4:3）同比例，否则 Finder 会把背景拉伸变形。
 WIN_W=700
-WIN_H=500
+WIN_H=525
 TITLEBAR_H=28
 ICON_SIZE=128
-# 图标位置对齐设计稿里的箭头：箭头中心实测在 (0.501W, 0.525H)，
-# 即内容区 (351, 262)；两个图标分别落在箭头左右两侧，与箭头留出间距。
+# 图标位置对齐设计稿里的箭头：箭头中心实测在 (0.508W, 0.444H)，
+# 即内容区 (355, 233)；两个图标分别落在箭头左右两侧，与箭头留出间距。
+# 箭头在 x 方向占 0.421W~0.594W（内容区 295~416），图标中心放在其外侧。
 APP_X=160   # app 图标中心 x
-APP_Y=262   # app 图标中心 y
+APP_Y=233   # app 图标中心 y
 DIR_X=540   # Applications 图标中心 x
-DIR_Y=262
+DIR_Y=233
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "错误：找不到 App：$APP_PATH" >&2
@@ -130,16 +131,10 @@ if [[ -z "$ACTUAL_MOUNT" ]]; then
 fi
 echo "    挂载于: $ACTUAL_MOUNT"
 
-echo "==> 写入背景图与卷图标"
+echo "==> 写入背景图"
 mkdir -p "$ACTUAL_MOUNT/.background"
 cp "$BG_DIR/background.png" "$ACTUAL_MOUNT/.background/background.png"
 cp "$BG_DIR/background@2x.png" "$ACTUAL_MOUNT/.background/background@2x.png"
-# 卷图标（挂载后在 Finder 侧边栏/Dock 里显示 App 图标）
-ICNS="$PROJECT_ROOT/frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon.icns"
-if [[ -f "$ICNS" ]]; then
-  cp "$ICNS" "$ACTUAL_MOUNT/.VolumeIcon.icns"
-  SetFile -a C "$ACTUAL_MOUNT" || true
-fi
 
 echo "==> 用 Finder 写入窗口布局（图标位置 + 背景图）"
 # 这一步需要终端拥有"自动化 → Finder"权限。若被系统弹窗拒绝，
@@ -175,6 +170,15 @@ sleep 1
 
 if [[ ! -f "$ACTUAL_MOUNT/.DS_Store" ]]; then
   echo "    ⚠️  未生成 .DS_Store —— 镜像将没有自定义背景"
+fi
+
+# 卷图标必须在 Finder 布局**之后**写：Finder 打开/关闭卷时会重排根目录，
+# 提前放进去的 .VolumeIcon.icns 会连同自定义图标属性一起被清掉。
+ICNS="$PROJECT_ROOT/frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon.icns"
+if [[ -f "$ICNS" ]]; then
+  cp "$ICNS" "$ACTUAL_MOUNT/.VolumeIcon.icns"
+  SetFile -a C "$ACTUAL_MOUNT" || true
+  [[ -f "$ACTUAL_MOUNT/.VolumeIcon.icns" ]] || echo "    ⚠️  卷图标写入失败"
 fi
 
 echo "==> 卸载"

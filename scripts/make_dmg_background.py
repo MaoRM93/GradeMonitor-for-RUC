@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """生成 DMG 安装窗口的背景图。
 
-设计稿是 `scripts/dmg_background.png`（1484x1060，比例 1.4）。
+设计稿是 `scripts/dmg_background.png`（1400x1050，比例 4:3）。
 本脚本只负责把它缩放成 Finder 窗口内容区的尺寸，输出 1x 与 @2x 两档：
 
-    1x  -> 700x500   （= WIN_W x WIN_H，见 build_dmg.sh）
-    2x  -> 1400x1000 （Retina）
+    1x  -> 700x525   （= WIN_W x WIN_H，见 build_dmg.sh）
+    2x  -> 1400x1050 （Retina，与设计稿同尺寸，不会重采样）
 
 窗口尺寸必须与设计稿同比例，否则 Finder 会把背景拉伸变形。
-1484:1060 == 700:500 == 1.4，所以取 700x500。
+1400:1050 == 700:525 == 4:3，所以取 700x525。
 
 用法：
     python3 scripts/make_dmg_background.py <输出目录>
@@ -20,7 +20,7 @@ import sys
 from PIL import Image
 
 # 画布尺寸（= Finder 窗口的**内容区**尺寸，必须与 build_dmg.sh 的 WIN_W/WIN_H 一致）
-W, H = 700, 500
+W, H = 700, 525
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SOURCE = os.path.join(SCRIPT_DIR, "dmg_background.png")

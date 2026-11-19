@@ -1,8 +1,10 @@
-<img width="378" height="110" alt="image" src="https://github.com/user-attachments/assets/47fc2702-f0ce-4173-bd26-24ed84273a41" />
+<p align="center">
+  <img width="378" height="110" alt="GradeMonitor" src="https://github.com/user-attachments/assets/47fc2702-f0ce-4173-bd26-24ed84273a41" />
+</p>
 
 # GradeMonitor — 适用于 RUC 教务系统的成绩自动监控工具
 
-GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测工具。安装后，程序会根据您的设置在后台运行，成绩发布后及时发送通知，省去反复刷新教务系统网页的时间。
+GradeMonitor 是一款适配 macOS 与 Windows 的成绩排名自动检测工具。安装后，程序会根据您的设置在后台运行，成绩发布后及时发送通知，省去反复刷新教务系统网页的时间。
 
 此外，程序还可以帮助您整理、分析和排序各个科目、各个学期的成绩，并支持按照指定规则一键筛选核心绩。
 
@@ -21,78 +23,83 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 ### 全新的设置引导
 
-优化了程序的设置流程，更加简洁清晰。
-适配数智建设最新平台，但我们不卡顿。
-
+优化了程序的设置流程，更加简洁清晰，适配数智建设最新平台。
 
 ### 仪表板显示更直观
 
 - 在首页简单、直观地显示各项数据指标与最新的一门成绩，界面美观清晰。
 
-<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/3b285b73-4a09-4f6f-9fe7-06b7fa5c76dd" />
-
+<p align="center">
+  <img width="2200" height="1440" alt="仪表板界面" src="https://github.com/user-attachments/assets/3b285b73-4a09-4f6f-9fe7-06b7fa5c76dd" />
+</p>
 
 ### 自动监测更科学
 
-- 支持 **成绩监测** 和 **排名监测**，可独立开关。
+- 支持成绩监测和排名监测，可独立开关。
 - 可设定监测时间窗口（如 08:00–23:00），深夜不打扰，窗口外自动休眠。
 - 监测间隔可自定义（300–3600 秒），避免对学校服务器造成过大负担。
 - 支持添加随机查询，降低账号风险。
-  
 
 ### 通知推送更贴心
 
-- **详细模式**：直接在通知中显示课程名、绩点、专业排名、班级排名变化。
-
-- **简洁模式**：仅提示「您有成绩或排名更新」，保护隐私。
+- 详细模式：直接在通知中显示课程名、绩点、专业排名、班级排名变化。
+- 简洁模式：仅提示「您有成绩或排名更新」，保护隐私。
 
 ### 通知转发更自由
 
 - 除系统原生通知外，支持将成绩和排名变动转发到自己的设备。
-- **Bark**：面向 iPhone、iPad 的推送通道，填写 Bark 地址和设备 Key 后即可启用。
-- **Meow**：面向 HarmonyOS 的推送通道，支持使用自定义昵称接收提醒。
-- **ntfy**：面向 Android 及任意 ntfy 订阅端；可使用默认服务器或自建服务器，并通过自定义 Topic 接收通知。
+- Bark：面向 iPhone、iPad 的推送通道，填写 Bark 地址和设备 Key 后即可启用。
+- Meow：面向 HarmonyOS 的推送通道，支持使用自定义昵称接收提醒。
+- ntfy：面向 Android 及任意 ntfy 订阅端；可使用默认服务器或自建服务器，并通过自定义 Topic 接收通知。
 - 每个通道均可独立配置、启停和发送测试通知；敏感配置以掩码形式显示。
-<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/c711fa1e-0e80-4be0-b145-668065af4686" />
 
+<p align="center">
+  <img width="2200" height="1440" alt="通知转发设置" src="https://github.com/user-attachments/assets/c711fa1e-0e80-4be0-b145-668065af4686" />
+</p>
 
 ### 数据管理更直接
 
 - 用户可以一键筛选所需要的各种属性的科目成绩，并且支持按照各种方式排序。
 
-<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/dc93a314-880a-4caa-8d54-0ecc5f6b24ae" />
+<p align="center">
+  <img width="2200" height="1440" alt="成绩数据管理界面" src="https://github.com/user-attachments/assets/dc93a314-880a-4caa-8d54-0ecc5f6b24ae" />
+</p>
 
 - 用户可以直接看到各学期分别的成绩情况。
 - 支持按单个学期筛选成绩，也可在「抽取计算」中自行勾选多个学期，组合计算所选学期的平均绩点与核心课平均绩点，便于按学年或自定义时间范围汇总成绩。
 - 成绩表支持课程搜索、核心绩范围切换、隐藏未知课程，以及按学期、课程名、学分、平时/期末/加权成绩和绩点排序。
-<img width="948" height="824" alt="image" src="https://github.com/user-attachments/assets/5ee63f16-bd04-4f6a-8639-4a8304b10251" />
 
+<p align="center">
+  <img width="948" height="824" alt="自选学期抽取计算" src="https://github.com/user-attachments/assets/5ee63f16-bd04-4f6a-8639-4a8304b10251" />
+</p>
 
-  
 ### 更新检查更稳定
 
 - 我们优化了内置的应用更新检查和安装组件。现在，它可以正确解析 Markdown 格式的语法，并支持直接在程序内下载对应客户端的更新包。
 
-
 ### 升学规划更触达
 
 - 新增了“方案计算”模块，允许用户选择 811 或 82 方案计算用于升学的核心成绩。
-<img width="1742" height="1302" alt="image" src="https://github.com/user-attachments/assets/24b163aa-716d-4f8e-93a8-66451965df2d" />
+
+<p align="center">
+  <img width="1742" height="1302" alt="升学方案计算界面" src="https://github.com/user-attachments/assets/24b163aa-716d-4f8e-93a8-66451965df2d" />
+</p>
 
 ### Material 3 Expressive 设计
 
 - 以分组卡片、清晰的色彩层级、大圆角与微动效组织内容，让成绩、设置和监控状态更易于浏览。
 - 组件的颜色、边界和反馈均会随当前主题及明暗模式统一变化；支持浅色、深色和跟随系统三种显示模式。
 - 内置六套主题。
-<img width="1460" height="802" alt="image" src="https://github.com/user-attachments/assets/3891bb54-0ed1-48eb-8c7d-ac99f9249736" />
 
+<p align="center">
+  <img width="1460" height="802" alt="主题选择界面" src="https://github.com/user-attachments/assets/3891bb54-0ed1-48eb-8c7d-ac99f9249736" />
+</p>
 
 ### 其他特性
 
-- **托盘图标**：在系统托盘（Windows）或顶部菜单栏（macOS）显示小图标，点击可快速打开主界面或退出程序。新版本进一步优化了该部分的设计。
-- **深色模式适配**：自动跟随系统深色/浅色模式切换，夜间使用不刺眼。
-- **开机自启动**：支持设置程序随系统启动。
-
+- 托盘图标：在系统托盘（Windows）或顶部菜单栏（macOS）显示小图标，点击可快速打开主界面或退出程序。新版本进一步优化了该部分的设计。
+- 深色模式适配：自动跟随系统深色/浅色模式切换，夜间使用不刺眼。
+- 开机自启动：支持设置程序随系统启动。
 
 ## 如何使用？
 

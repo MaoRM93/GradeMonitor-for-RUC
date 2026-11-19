@@ -1,16 +1,16 @@
+<img width="378" height="110" alt="image" src="https://github.com/user-attachments/assets/47fc2702-f0ce-4173-bd26-24ed84273a41" />
+
 # GradeMonitor — 适用于 RUC 教务系统的成绩自动监控工具
 
 GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测工具。安装后，程序会根据您的设置在后台运行，成绩发布后及时发送通知，省去反复刷新教务系统网页的时间。
 
 此外，程序还可以帮助您整理、分析和排序各个科目、各个学期的成绩，并支持按照指定规则一键筛选核心绩。
 
-## 紧急更新（26.11.07，Version 108.1.0.xxx）
-
-> **配图待补充：紧急更新提示。**
-> 建议放置应用内更新提示或最新版主界面截图，宽度约 650px。请确保截图中遮挡学号、姓名、成绩、科目、排名等个人信息。
+## 公告（26.11.07，Version 108.1.0.xxx）
 
 - 适配了教务系统 11 月 6 日起接入统一身份验证平台后带来的一系列上游改动。
 - 警告：如您停留在 108.0.x.xxx 系列版本，您将无法获取到新的成绩单。
+- 本公示公示期一个月。过期后，此条目将被删除。
 
 ## 系统要求
 
@@ -21,14 +21,7 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 ### 全新的设置引导
 
-> **配图待补充：全新的设置引导。**
-> 放置欢迎引导或登录设置流程截图（建议宽度 650px）。
-
 优化了程序的设置流程，更加简洁清晰。
-
-> **配图待补充：平台适配设置界面。**
-> 放置平台选择或连接设置截图（建议宽度 420px）。
-
 适配数智建设最新平台，但我们不卡顿。
 
 
@@ -36,8 +29,7 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 - 在首页简单、直观地显示各项数据指标与最新的一门成绩，界面美观清晰。
 
-> **配图待补充：仪表板界面。**
-> 放置首页仪表板截图（建议宽度 650px）；务必用不透明色块遮挡成绩、课程名、专业/班级排名和个人身份信息。
+<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/3b285b73-4a09-4f6f-9fe7-06b7fa5c76dd" />
 
 
 ### 自动监测更科学
@@ -52,21 +44,14 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 
 - **详细模式**：直接在通知中显示课程名、绩点、专业排名、班级排名变化。
 
-> **配图待补充：详细通知模式。**
-> 放置详细通知示例（建议宽度 320px）；课程、分数和排名必须遮挡。
-
 - **简洁模式**：仅提示「您有成绩或排名更新」，保护隐私。
-
-> **配图待补充：简洁通知模式。**
-> 放置简洁通知示例（建议宽度 320px）。
 
 
 ### 数据管理更直接
 
 - 用户可以一键筛选所需要的各种属性的科目成绩，并且支持按照各种方式排序。
 
-> **配图待补充：成绩数据管理界面。**
-> 放置成绩单、搜索与筛选界面截图（建议宽度 650px）；课程、分数、绩点、学期和排名相关内容须用色块遮挡。
+<img width="2200" height="1440" alt="image" src="https://github.com/user-attachments/assets/dc93a314-880a-4caa-8d54-0ecc5f6b24ae" />
 
 - 用户可以直接看到各学期分别的成绩情况。
 
@@ -79,9 +64,7 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 ### 升学规划更触达
 
 - 新增了“方案计算”模块，允许用户选择 811 或 82 方案计算用于升学的核心成绩。
-
-> **配图待补充：升学方案计算界面。**
-> 放置方案计算页截图（建议宽度 650px）；所有课程、成绩、绩点和排名数据须用不透明色块遮挡。
+<img width="1742" height="1302" alt="image" src="https://github.com/user-attachments/assets/24b163aa-716d-4f8e-93a8-66451965df2d" />
 
 
 ### 其他特性
@@ -102,32 +85,6 @@ GradeMonitor 是一款适配 **macOS 与 Windows** 的成绩排名自动检测�
 5. 等待通知。
 
 > 关闭窗口不会退出程序。如需彻底退出，请通过系统托盘图标选择「退出」。
-
-### Windows 端构建（开发者）
-
-打包链路由 `scripts/build_windows.ps1` 统一驱动，需在本机具备：
-
-- Flutter SDK（3.47+）与 Visual Studio 2022 生成工具（含 C++ 桌面工作负载）
-- Inno Setup 6（`ISCC.exe`）
-- 任意 Python 3.10+（用于 `prepare_staging.py`，会用它生成便携运行时）
-
-```powershell
-# 首次 / 需要重建便携 Python 运行时
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -RebuildRuntime
-
-# 日常打包（复用已有 runtime\tools）
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows.ps1
-
-# 只跑 staging，不编译安装包
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -SkipFlutter -SkipInstaller
-```
-
-脚本会先校验版本号三处落点（`frontend/pubspec.yaml`、`frontend/windows/runner/Runner.rc`、
-`.data/setup.iss`）一致，再依次执行 `flutter build windows --release` → `.data/prepare_staging.py`
-→ `ISCC.exe`，产物为 `dist\GradeMonitor_Ver.<版本>_setup.exe`。
-
-> 注意：项目必须放在 **NTFS** 分区上构建。Flutter 会为插件创建符号链接，
-> exFAT/FAT32 上会报 `ERROR_INVALID_FUNCTION` 而构建失败。
 
 ### macOS 端
 

@@ -13,6 +13,7 @@ import '../../widgets/expressive_switch.dart';
 import '../../providers/settings_provider.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../widgets/toast_host.dart';
+import '../../widgets/window_controls.dart';
 
 const _termsText = '''
 # 免责声明
@@ -548,8 +549,12 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
       child: Builder(
         builder: (context) {
           final cs = Theme.of(context).colorScheme;
-          // macOS 红绿灯悬浮在内容左上角，留出紧凑顶部空间
-          final topInset = Platform.isMacOS ? 26.0 : 0.0;
+          // macOS 红绿灯悬浮在内容左上角，留出紧凑顶部空间；
+          // Windows 无系统标题栏，顶部由 WindowDragStrip 接管拖拽，
+          // 这里让出同样高度，避免返回按钮落在拖拽带上。
+          final topInset = Platform.isMacOS
+              ? 26.0
+              : (usesInWindowControls ? kWindowDragStripHeight : 0.0);
           return Scaffold(
             backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
             body: Stack(

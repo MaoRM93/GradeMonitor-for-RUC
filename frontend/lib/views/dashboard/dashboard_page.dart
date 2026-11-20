@@ -11,6 +11,94 @@ import '../../widgets/feature_gate.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/toast_host.dart';
 
+// ── 仪表板纵向节奏的标定基准 ──────────────────────────────────────
+//
+// 以下数值是「1100×720 窗口、100% 缩放」下的设计稿尺寸，**不能**直接当作
+// 固定行高使用：整页设计高度约 752px，默认 720px 高时装不下。早期版本把
+// 行高写死成设计值，于是第二行统计卡在默认窗口下被底边裁掉。
+//
+// 注：早期 Windows 端顶部还有 36px 自绘标题栏，内容区只剩 684px；该标题栏
+// 已移除（三键改为右上角悬浮胶囊，不再占版面高度），可用高度回到 720px。
+//
+// 现在这些常量只是 1.0 倍基准，实际尺寸由 [_DashMetrics.of] 按当前可用
+// 高度等比收敛；可用高度仍不足时（窗口被拖到最小）由外层滚动兜底。
+const double _designStatTopRowHeight = 145;
+const double _designStatBottomRowHeight = 112;
+const double _designPageTopPad = 44;
+const double _designPageBottomPad = 28;
+const double _designSectionGap = 18;
+const double _designTitleGap = 20;
+const double _designMonitorMargin = 20;
+const double _designLatestPadV = 24;
+
+/// 整页在 1.0 倍缩放下的标定高度，用于反推缩放系数
+const double _designPageHeight = 760;
+
+/// 缩放系数下限：再小就停止压缩、改用滚动，避免文字挤成一团
+const double _minLayoutScale = 0.82;
+
+/// 底部统计卡的网格常量。卡间缝隙固定 4px，两行用同一个值，
+/// 因此上下两行的左右边界天然对齐（等价于 CSS Grid 的 gap: 4px）。
+const double _statGap = 4;
+const double _statIconSize = 24;
+const double _statLabelSize = 15;
+
+/// 字号自适应下限：再窄也不低于这个值，溢出交给 FittedBox 兜底
+const double _statNumberMin = 26;
+
+/// 仪表板按可用高度收敛后的纵向尺寸。
+///
+/// 只压缩留白与统计卡行高，字号保持不变 —— 缩放文字会破坏视觉层级，
+/// 而 10% 幅度内的留白压缩几乎不可察觉。
+class _DashMetrics {
+  const _DashMetrics({
+    required this.scale,
+    required this.topPad,
+    required this.bottomPad,
+    required this.sectionGap,
+    required this.titleGap,
+    required this.monitorMargin,
+    required this.latestPadV,
+    required this.statTopRowHeight,
+    required this.statBottomRowHeight,
+    required this.bodyMaxLines,
+  });
+
+  /// 相对设计稿的缩放系数，1.0 表示完全按设计稿排版
+  final double scale;
+  final double topPad;
+  final double bottomPad;
+  final double sectionGap;
+  final double titleGap;
+  final double monitorMargin;
+  final double latestPadV;
+  final double statTopRowHeight;
+  final double statBottomRowHeight;
+
+  /// 最新出分正文行数：高度紧张时从 4 行收到 3 行，
+  /// 因为正文是固定字号的整块文本，光压留白腾不出这么多空间
+  final int bodyMaxLines;
+
+  /// 按当前可用高度推导实际尺寸。
+  factory _DashMetrics.of(double availableHeight) {
+    final scale = (availableHeight / _designPageHeight)
+        .clamp(_minLayoutScale, 1.0)
+        .toDouble();
+    return _DashMetrics(
+      scale: scale,
+      topPad: _designPageTopPad * scale,
+      bottomPad: _designPageBottomPad * scale,
+      sectionGap: _designSectionGap * scale,
+      titleGap: _designTitleGap * scale,
+      monitorMargin: _designMonitorMargin * scale,
+      latestPadV: _designLatestPadV * scale,
+      statTopRowHeight: _designStatTopRowHeight * scale,
+      statBottomRowHeight: _designStatBottomRowHeight * scale,
+      bodyMaxLines: scale >= 0.95 ? 4 : 3,
+    );
+  }
+}
+
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
   @override
@@ -18,18 +106,6 @@ class DashboardPage extends ConsumerStatefulWidget {
 }
 
 class _DashboardPageState extends ConsumerState<DashboardPage> {
-  /// 底部统计卡的网格常量。卡间缝隙固定 4px，两行用同一个值，
-  /// 因此上下两行的左右边界天然对齐（等价于 CSS Grid 的 gap: 4px）。
-  ///
-  /// 行高与字号按默认 1100×720 窗口标定：整页（标题 + 监控行 + 最新出分
-  /// + 两行统计卡）在默认窗口内不出现纵向滚动，布局比例保持不变。
-  static const double _statGap = 4;
-  static const double _statTopRowHeight = 145;
-  static const double _statBottomRowHeight = 112;
-  static const double _statIconSize = 24;
-  static const double _statLabelSize = 15;
-  /// 字号自适应下限：再窄也不低于这个值，溢出交给 FittedBox 兜底
-  static const double _statNumberMin = 26;
 
   bool _settingsReady = false;
   String? _lastUsername;
@@ -178,61 +254,75 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(28, 44, 28, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                '仪表板',
-                style: TextStyle(
-                  fontFamily: AppTheme.serifFontFamily,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: colorScheme.onSurface,
-                ),
+        // 整页高度必须显式交给 LayoutBuilder 计算：仪表板设计稿高约 752px，
+        // 1100×720 默认窗口下本来就装不下，早期版本因此把第二行统计卡裁在
+        // 了窗口底边。顶部 36px 自绘标题栏移除后可用高度回到 720px，
+        // 但仍不足以 1:1 排下设计稿，等比收敛逻辑必须保留。
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final metrics = _DashMetrics.of(constraints.maxHeight);
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                28,
+                metrics.topPad,
+                28,
+                metrics.bottomPad,
               ),
-              const SizedBox(height: 20),
-              FeatureGate(
-                flag: FeatureGateService.flag1001Monitor,
-                child: _buildMonitorCard(monitorState),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '仪表板',
+                    style: TextStyle(
+                      fontFamily: AppTheme.serifFontFamily,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  SizedBox(height: metrics.titleGap),
+                  FeatureGate(
+                    flag: FeatureGateService.flag1001Monitor,
+                    child: _buildMonitorCard(monitorState, metrics),
+                  ),
+                  FeatureGate(
+                    flag: FeatureGateService.flag1003LatestCard,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(height: metrics.sectionGap),
+                        _buildLatestCard(gradesAsync, metrics),
+                      ],
+                    ),
+                  ),
+                  FeatureGate(
+                    flag: FeatureGateService.flag1004StatTiles,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(height: metrics.sectionGap),
+                        _buildStatTiles(monitorState, rankAsync, metrics),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              FeatureGate(
-                flag: FeatureGateService.flag1003LatestCard,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(height: 18),
-                    _buildLatestCard(gradesAsync),
-                  ],
-                ),
-              ),
-              FeatureGate(
-                flag: FeatureGateService.flag1004StatTiles,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(height: 18),
-                    _buildStatTiles(monitorState, rankAsync),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
   }
 
   /// 监控状态卡（整行）：状态与按钮在同一行垂直居中，按钮靠右
-  Widget _buildMonitorCard(MonitorStatus status) {
+  Widget _buildMonitorCard(MonitorStatus status, _DashMetrics metrics) {
     final colorScheme = Theme.of(context).colorScheme;
 
     // 监控状态行不再套白底卡片：状态与按钮直接落在页面背景上，
     // 只靠文字颜色与两枚带浅色底的按钮区分层级。
     // 去掉卡片后需要自行补足上下留白，否则与标题、最新出分卡贴得过紧。
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 20),
+      margin: EdgeInsets.symmetric(vertical: metrics.monitorMargin),
       constraints: const BoxConstraints(minHeight: 56),
       alignment: Alignment.centerLeft,
       child: Row(
@@ -279,7 +369,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   /// 「最新出分」卡：展示最近一次成绩（或排名）变动的结构化内容。
   /// 数据源：后端 recent_change.json（courses 为结构化课程数组）。
-  Widget _buildLatestCard(AsyncValue<List<GradeCourse>> gradesAsync) {
+  Widget _buildLatestCard(
+    AsyncValue<List<GradeCourse>> gradesAsync,
+    _DashMetrics metrics,
+  ) {
     final cs = Theme.of(context).colorScheme;
     final settings = ref.read(settingsProvider);
     final tinyColor = cs.onSurface.withValues(alpha: .3);
@@ -348,7 +441,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return GlassCard(
       // 仪表板整页保持更大的组合圆角，与下方统计卡组同一套轮廓。
       borderRadius: AppShape.cornerHero,
-      padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+      padding: EdgeInsets.symmetric(
+        horizontal: 26,
+        vertical: metrics.latestPadV,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -394,7 +490,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           const SizedBox(height: 8),
           Text(
             body,
-            maxLines: 4,
+            // 高度紧张时收到 3 行：正文是固定字号的整块文本，
+            // 只压留白腾不出足够空间。
+            maxLines: metrics.bodyMaxLines,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 14,
@@ -504,6 +602,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   Widget _buildStatTiles(
     MonitorStatus status,
     AsyncValue<RankData?> rankAsync,
+    _DashMetrics metrics,
   ) {
     final rd = rankAsync.asData?.value;
 
@@ -556,7 +655,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: _statTopRowHeight,
+          height: metrics.statTopRowHeight,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: _statRow(
@@ -569,7 +668,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         ),
         const SizedBox(height: _statGap),
         SizedBox(
-          height: _statBottomRowHeight,
+          height: metrics.statBottomRowHeight,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: _statRow(

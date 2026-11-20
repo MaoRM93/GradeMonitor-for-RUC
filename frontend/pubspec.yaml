@@ -1,7 +1,7 @@
 name: grademonitor
 description: "GradeMonitor - 自动查成绩桌面小工具"
 publish_to: 'none'
-version: 109.0.0+214
+version: 109.0.0+215
 
 environment:
   sdk: ^3.12.2
@@ -26,6 +26,10 @@ dependencies:
   # macOS 原生拓展
   tray_manager: ^0.2.4
   window_manager: ^0.4.3
+
+  # 显示器信息（读取工作区尺寸，用于把初始窗口限制在屏幕可见范围内）。
+  # 原本只是 window_manager 的传递依赖，这里显式声明以便直接 import。
+  screen_retriever: ^0.2.2
 
   # 本地通知
   flutter_local_notifications: ^18.0.1

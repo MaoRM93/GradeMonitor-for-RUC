@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:window_manager/window_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../dashboard/dashboard_page.dart';
@@ -14,6 +12,7 @@ import 'developer_login_dialog.dart';
 import '../welcome/welcome_flow.dart';
 import '../../core/service/feature_gate_service.dart';
 import '../../widgets/feature_gate.dart';
+import '../../widgets/window_controls.dart';
 import '../../core/service/update_service.dart';
 import '../../core/service/nav_signal.dart';
 import '../../core/service/session_service.dart';
@@ -64,9 +63,8 @@ class AppNavigation extends StatefulWidget {
   State<AppNavigation> createState() => _AppNavigationState();
 }
 
-class _AppNavigationState extends State<AppNavigation> with WindowListener {
+class _AppNavigationState extends State<AppNavigation> {
   NavDestination _currentDest = NavDestination.dashboard;
-  bool _isMaximized = false;
   int _versionTapCount = 0;
   DateTime _lastVersionTap = DateTime.now();
   bool _welcomeChecked = false;
@@ -84,8 +82,6 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
   @override
   void initState() {
     super.initState();
-    // 监听窗口事件（同步最大化状态给标题栏按钮图标）
-    windowManager.addListener(this);
     // 自动检查（开启程序/每小时）发现更新 → 弹「发现新版本」
     UpdateService.updateFound.addListener(_onAutoUpdateFound);
     // 当前版本高于最新 Release → 弹「您可能在使用预发行版本」
@@ -125,7 +121,6 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
     UpdateService.updateFound.removeListener(_onAutoUpdateFound);
     UpdateService.preReleaseFound.removeListener(_onPreReleaseFound);
     SessionService.logoutSignal.removeListener(_onLoggedOut);
@@ -156,16 +151,6 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
       _currentDest = NavDestination.dashboard;
       _welcomePhase = 'welcome';
     });
-  }
-
-  @override
-  void onWindowMaximize() {
-    if (mounted) setState(() => _isMaximized = true);
-  }
-
-  @override
-  void onWindowUnmaximize() {
-    if (mounted) setState(() => _isMaximized = false);
   }
 
   /// 带重试的欢迎页检查（后端可能需要几秒才启动完毕）
@@ -211,79 +196,6 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
       _onAutoUpdateFound();
       _onPreReleaseFound();
     }
-  }
-
-  /// 自定义标题栏：拖拽区 + 应用名 + 最小化/最大化/关闭
-  Widget _buildTitleBar(ColorScheme colorScheme) {
-    // 自定义标题栏（最小化/最大化/关闭）仅供 Windows：
-    // macOS 由系统提供原生红绿灯与拖拽，不渲染 Windows 风格按钮
-    // Flag-1050：自绘标题栏可被远程静默下线（下线后由系统原生标题栏接管）
-    if (!Platform.isWindows ||
-        !featureEnabled(FeatureGateService.flag1050TitleBar)) {
-      return const SizedBox.shrink();
-    }
-    const barHeight = 36.0;
-    return Container(
-      height: barHeight,
-      color: colorScheme.surface.withValues(alpha: .4),
-      child: Row(
-        children: [
-          // 左侧拖拽区 + 应用名
-          Expanded(
-            child: GestureDetector(
-              onPanStart: (_) => windowManager.startDragging(),
-              onDoubleTap: () async {
-                if (await windowManager.isMaximized()) {
-                  windowManager.unmaximize();
-                } else {
-                  windowManager.maximize();
-                }
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(left: 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'GradeMonitor',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface.withValues(alpha: .55),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          // 窗口控制按钮（Windows 风格：矩形、无间距）
-          _TitleBarButton(
-            icon: Icons.remove_rounded,
-            tooltip: '最小化',
-            onTap: () => windowManager.minimize(),
-          ),
-          _TitleBarButton(
-            icon: _isMaximized
-                ? Icons.filter_none_rounded
-                : Icons.crop_square_rounded,
-            iconSize: _isMaximized ? 14 : 15,
-            tooltip: _isMaximized ? '还原' : '最大化',
-            onTap: () async {
-              if (await windowManager.isMaximized()) {
-                await windowManager.unmaximize();
-              } else {
-                await windowManager.maximize();
-              }
-            },
-          ),
-          _TitleBarButton(
-            icon: Icons.close_rounded,
-            tooltip: '关闭',
-            isClose: true,
-            onTap: () => windowManager.close(),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildPage(NavDestination dest) {
@@ -348,11 +260,13 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
         : colorScheme.primary.withValues(alpha: isDark ? .24 : .15);
 
     return Scaffold(
-      body: Column(
+      // 自绘标题栏已移除：内容直接铺满整个窗口，
+      // Windows 的最小化/最大化/关闭改为右上角悬浮胶囊（WindowControlsOverlay），
+      // 窗口拖拽由顶部透明拖拽带（WindowDragStrip）接管；
+      // macOS 不使用这两个浮层，继续走系统原生红绿灯与原生拖拽。
+      body: Stack(
         children: [
-          // 自定义标题栏：拖拽区 + 应用名 + 窗口控制按钮
-          _buildTitleBar(colorScheme),
-          Expanded(
+          Positioned.fill(
             child: _welcomePhase == 'checking'
                 ? Container(
                     // 检查中：与欢迎页同色底遮盖主区域，
@@ -361,7 +275,7 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                     width: double.infinity,
                   )
                 : _welcomePhase == 'welcome'
-                // 欢迎向导占满标题栏以下整个窗口（iPhone 激活式逐页设置）
+                // 欢迎向导占满整个窗口（iPhone 激活式逐页设置）
                 ? WelcomeFlow(
                     onCompleted: () {
                       setState(() => _welcomePhase = 'main');
@@ -476,6 +390,10 @@ class _AppNavigationState extends State<AppNavigation> with WindowListener {
                     ],
                   ),
           ),
+          // 顶部透明拖拽带：拖动移窗 / 双击最大化（Windows 专用）
+          const WindowDragStrip(),
+          // 右上角悬浮的最小化 / 最大化 / 关闭（Windows 专用）
+          const WindowControlsOverlay(),
         ],
       ),
     );
@@ -571,53 +489,6 @@ class _NavItem extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Windows 风格标题栏按钮：矩形热区，悬停变色（关闭键悬停变红）
-class _TitleBarButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  final bool isClose;
-  final double iconSize;
-
-  const _TitleBarButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.isClose = false,
-    this.iconSize = 16,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      waitDuration: const Duration(milliseconds: 600),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          hoverColor: isClose
-              ? AppTheme.error
-              : Colors.grey.withValues(alpha: .25),
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          child: SizedBox(
-            width: 44,
-            height: double.infinity,
-            child: Icon(
-              icon,
-              size: iconSize,
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: .75),
             ),
           ),
         ),

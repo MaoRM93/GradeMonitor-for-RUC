@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 import 'core/theme/app_theme.dart';
 import 'core/logger/app_logger.dart';
@@ -18,6 +19,7 @@ import 'views/disabled/developer_notice_page.dart';
 import 'views/notice/broadcast_toast.dart';
 import 'core/service/update_service.dart';
 import 'widgets/toast_host.dart';
+import 'widgets/window_controls.dart';
 
 /// 全局 WebSocket — 用于通知监听，独立于 UI 生命周期
 final _globalWs = WebSocketService();
@@ -99,11 +101,12 @@ void main() async {
 
   // 恢复 waitUntilReadyToShow，确保 NSWindowDelegate 正确挂载，
   // 使 WindowListener.onWindowClose 能被触发
+  final windowSize = await _resolveInitialWindowSize(log);
   await windowManager.waitUntilReadyToShow(
     WindowOptions(
       title: 'GradeMonitor',
-      size: const Size(1100, 720),
-      minimumSize: const Size(900, 600),
+      size: windowSize.size,
+      minimumSize: windowSize.minimum,
       center: true,
       titleBarStyle: TitleBarStyle.hidden,
       backgroundColor: Colors.transparent,
@@ -111,6 +114,15 @@ void main() async {
     // 回调中不调用 show()，等首帧渲染后再显示，避免黑屏
     () async {},
   );
+
+  // Flag-1050：自绘窗口控件可被远程静默下线。
+  // 下线后必须把标题栏真正交还系统（TitleBarStyle.normal），
+  // 否则会出现"既没有自绘三键、也没有系统标题栏"的死窗口。
+  // macOS 不受影响：macOS 的红绿灯始终由系统绘制。
+  if (Platform.isWindows &&
+      !gates.isEnabled(FeatureGateService.flag1050TitleBar)) {
+    await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+  }
 
   // 根据设置决定是否初始化托盘图标
   // Flag-1052：系统托盘可被远程静默下线
@@ -126,6 +138,77 @@ void main() async {
   await windowManager.show();
   await windowManager.focus();
   log.info('窗口已显示');
+}
+
+/// 初始窗口尺寸的计算结果。
+///
+/// 为什么需要它：Windows 上窗口尺寸是按**逻辑像素**解释的，而系统可能开着
+/// 150% 之类的显示缩放。此时 1280x800 的物理屏只有 853x501 逻辑像素，
+/// 写死的 1100x720 会让窗口比屏幕还大，底部内容被屏幕边缘裁掉——表现就是
+/// "下面的窗口被截断"。因此必须把设计尺寸夹到显示器工作区内。
+class _InitialWindowSize {
+  const _InitialWindowSize(this.size, this.minimum);
+
+  final Size size;
+  final Size minimum;
+}
+
+/// 设计基准尺寸：这是布局调优时假定的窗口大小。
+const Size _designWindowSize = Size(1100, 720);
+
+/// 设计基准最小尺寸：低于此值布局会明显拥挤，但为了适配小屏仍需继续下探。
+const Size _designMinimumSize = Size(900, 600);
+
+/// 计算把窗口完整放进屏幕所需的初始尺寸与最小尺寸。
+///
+/// 取值规则：
+/// - 优先使用显示器工作区（扣除任务栏），拿不到工作区时退回整屏尺寸；
+/// - 宽高都夹到工作区内，并留出少量边距，避免窗口边缘压到任务栏或屏幕边缘；
+/// - 最小尺寸同步下调，否则窗口管理器会拒绝收缩到比 minimumSize 更小。
+Future<_InitialWindowSize> _resolveInitialWindowSize(AppLogger log) async {
+  try {
+    final display = await screenRetriever.getPrimaryDisplay();
+    // visibleSize 是工作区（不含任务栏），个别平台可能为空，退回整屏尺寸。
+    final area = display.visibleSize ?? display.size;
+    if (area.width <= 0 || area.height <= 0) {
+      return const _InitialWindowSize(_designWindowSize, _designMinimumSize);
+    }
+
+    // 预留 24 逻辑像素边距，避免贴边。
+    final maxW = area.width - 24;
+    final maxH = area.height - 24;
+
+    final width = _designWindowSize.width < maxW
+        ? _designWindowSize.width
+        : maxW;
+    final height = _designWindowSize.height < maxH
+        ? _designWindowSize.height
+        : maxH;
+
+    // 最小尺寸同样不得超过工作区，否则无法缩小到屏幕内。
+    final minW = _designMinimumSize.width < width
+        ? _designMinimumSize.width
+        : width;
+    final minH = _designMinimumSize.height < height
+        ? _designMinimumSize.height
+        : height;
+
+    log.info(
+      '显示器工作区 ${area.width.toInt()}x${area.height.toInt()}'
+      '（缩放 ${display.scaleFactor ?? '-'}），'
+      '初始窗口 ${width.toInt()}x${height.toInt()}，'
+      '最小窗口 ${minW.toInt()}x${minH.toInt()}',
+    );
+
+    return _InitialWindowSize(
+      Size(width.floorToDouble(), height.floorToDouble()),
+      Size(minW.floorToDouble(), minH.floorToDouble()),
+    );
+  } catch (e) {
+    // 拿不到显示器信息时退回设计尺寸，至少不比原来更差。
+    log.warning('读取显示器尺寸失败，使用默认窗口尺寸: $e');
+    return const _InitialWindowSize(_designWindowSize, _designMinimumSize);
+  }
 }
 
 /// 从后端读取设置，决定是否显示托盘图标
@@ -209,10 +292,19 @@ class _GradeMonitorAppState extends State<GradeMonitorApp> with WindowListener {
               if (notice != null && notice.kind == NoticeKind.developerNotice) {
                 return DeveloperNoticeScreen(notice: notice);
               }
-              return const Stack(
+              // Windows 下右上角被悬浮三键胶囊占用（6+30px），
+              // 广播浮层要下移避让；macOS 无自绘三键，保持原位置。
+              final toastTop = Platform.isWindows
+                  ? kWindowControlsReservedHeight + 12
+                  : 30.0;
+              return Stack(
                 children: [
-                  AppNavigation(),
-                  Positioned(top: 30, right: 26, child: BroadcastToast()),
+                  const AppNavigation(),
+                  Positioned(
+                    top: toastTop,
+                    right: 26,
+                    child: const BroadcastToast(),
+                  ),
                 ],
               );
             },

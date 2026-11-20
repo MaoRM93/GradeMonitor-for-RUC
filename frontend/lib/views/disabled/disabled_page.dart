@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../core/service/update_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../widgets/window_controls.dart';
 
 /// Release 正文为空时的兜底文案（禁用页 / 提醒页共用）
 const String kReleaseBodyFallback = '本次更新说明为空，请前往 GitHub 发布页查看。';
@@ -153,117 +154,125 @@ class _ReleaseNoticeScaffoldState extends State<ReleaseNoticeScaffold> {
     return Scaffold(
       backgroundColor: widget.bgColor,
       body: SafeArea(
-        child: Column(
+        // 无边框窗口：Windows 下窗口三键下移到内容区右上角，
+        // 顶部同时提供透明拖拽带；macOS 走系统原生红绿灯，两个浮层自动隐藏。
+        child: Stack(
           children: [
-            Expanded(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(48, 72, 48, 0),
-                    // 内容块整体水平居中，文字左对齐
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 图标与标题固定在页面顶部，不随正文滚动
-                        Icon(widget.icon, size: 76, color: Colors.white),
-                        const SizedBox(height: 20),
-                        Text(
-                          widget.title,
-                          style: const TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w900,
-                            height: 1.2,
-                            color: Colors.white,
-                          ),
-                        ),
-                        if (widget.intro.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            widget.intro,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              height: 1.5,
-                              color: Colors.white,
+            Column(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 640),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(48, 72, 48, 0),
+                        // 内容块整体水平居中，文字左对齐
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 图标与标题固定在页面顶部，不随正文滚动
+                            Icon(widget.icon, size: 76, color: Colors.white),
+                            const SizedBox(height: 20),
+                            Text(
+                              widget.title,
+                              style: const TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                height: 1.2,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                        // 正文：固定在一个独立滚动框内，整页不滚动，
-                        // 保证底部「好」按钮始终立刻可见。
-                        Flexible(
-                          child: Container(
-                            width: double.infinity,
-                            clipBehavior: Clip.antiAlias,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: .08),
-                              borderRadius: AppShape.inner,
-                            ),
-                            padding: const EdgeInsets.fromLTRB(18, 4, 8, 4),
-                            child: Scrollbar(
-                              child: SingleChildScrollView(
-                                padding: const EdgeInsets.fromLTRB(
-                                  0,
-                                  10,
-                                  10,
-                                  10,
+                            if (widget.intro.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                widget.intro,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  height: 1.5,
+                                  color: Colors.white,
                                 ),
-                                child: MarkdownBody(
-                                  data: body.isEmpty
-                                      ? kReleaseBodyFallback
-                                      : body,
-                                  softLineBreak: true,
-                                  styleSheet: markdownStyle,
-                                  onTapLink: (text, href, title) {
-                                    final target = (href ?? '').trim();
-                                    if (target.isNotEmpty) {
-                                      UpdateService().openInBrowser(target);
-                                    }
-                                  },
+                              ),
+                            ],
+                            const SizedBox(height: 16),
+                            // 正文：固定在一个独立滚动框内，整页不滚动，
+                            // 保证底部「好」按钮始终立刻可见。
+                            Flexible(
+                              child: Container(
+                                width: double.infinity,
+                                clipBehavior: Clip.antiAlias,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: .08),
+                                  borderRadius: AppShape.inner,
+                                ),
+                                padding: const EdgeInsets.fromLTRB(18, 4, 8, 4),
+                                child: Scrollbar(
+                                  child: SingleChildScrollView(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      0,
+                                      10,
+                                      10,
+                                      10,
+                                    ),
+                                    child: MarkdownBody(
+                                      data: body.isEmpty
+                                          ? kReleaseBodyFallback
+                                          : body,
+                                      softLineBreak: true,
+                                      styleSheet: markdownStyle,
+                                      onTapLink: (text, href, title) {
+                                        final target = (href ?? '').trim();
+                                        if (target.isNotEmpty) {
+                                          UpdateService().openInBrowser(target);
+                                        }
+                                      },
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
+                            const SizedBox(height: 20),
+                            widget.action,
+                            const SizedBox(height: 12),
+                          ],
                         ),
-                        const SizedBox(height: 20),
-                        widget.action,
-                        const SizedBox(height: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                // 底部信息行：版本号 / 事件时间 / Github
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(48, 0, 48, 18),
+                  child: Text.rich(
+                    TextSpan(
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withValues(alpha: .75),
+                      ),
+                      children: [
+                        TextSpan(
+                          text: '版本号',
+                          recognizer: widget.versionLabelRecognizer,
+                        ),
+                        TextSpan(text: '：$versionText    事件时间：$_eventTime    '),
+                        TextSpan(
+                          text: 'Github',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                            decoration: TextDecoration.underline,
+                          ),
+                          recognizer: _githubRecognizer,
+                        ),
                       ],
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              ),
+              ],
             ),
-            // 底部信息行：版本号 / 事件时间 / Github
-            Padding(
-              padding: const EdgeInsets.fromLTRB(48, 0, 48, 18),
-              child: Text.rich(
-                TextSpan(
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white.withValues(alpha: .75),
-                  ),
-                  children: [
-                    TextSpan(
-                      text: '版本号',
-                      recognizer: widget.versionLabelRecognizer,
-                    ),
-                    TextSpan(text: '：$versionText    事件时间：$_eventTime    '),
-                    TextSpan(
-                      text: 'Github',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white,
-                        decoration: TextDecoration.underline,
-                      ),
-                      recognizer: _githubRecognizer,
-                    ),
-                  ],
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            const WindowDragStrip(),
+            const WindowControlsOverlay(),
           ],
         ),
       ),

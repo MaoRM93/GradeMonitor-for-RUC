@@ -27,6 +27,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
+SIGNING_PYTHON="${GM_SIGNING_PYTHON:-python3}"
 
 if [[ $# -ne 3 ]]; then
   echo "用法: $0 <安装包路径> <macos|windows> <版本号>" >&2
@@ -63,7 +64,7 @@ PAYLOAD="$TMPDIR_SIGN/payload.txt"
   echo "sha256=$SHA256"
 } > "$PAYLOAD"
 
-SIG_B64="$(python3 - "$PAYLOAD" <<'PY'
+SIG_B64="$("$SIGNING_PYTHON" - "$PAYLOAD" <<'PY'
 import base64, sys
 from backend.storage.signing_keys import release_private_key
 payload = open(sys.argv[1], 'rb').read()

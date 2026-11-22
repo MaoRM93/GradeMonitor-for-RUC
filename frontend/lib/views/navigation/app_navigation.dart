@@ -265,14 +265,15 @@ class _AppNavigationState extends State<AppNavigation> {
       // 窗口拖拽由顶部透明拖拽带（WindowDragStrip）接管；
       // macOS 不使用这两个浮层，继续走系统原生红绿灯与原生拖拽。
       body: Stack(
+        fit: StackFit.expand,
         children: [
           Positioned.fill(
             child: _welcomePhase == 'checking'
-                ? Container(
-                    // 检查中：与欢迎页同色底遮盖主区域，
-                    // 避免仪表板先渲染再被欢迎页覆盖造成闪烁
+                ? ColoredBox(
                     color: colorScheme.surface,
-                    width: double.infinity,
+                    child: const Center(
+                      child: CircularProgressIndicator(semanticsLabel: '正在启动'),
+                    ),
                   )
                 : _welcomePhase == 'welcome'
                 // 欢迎向导占满整个窗口（iPhone 激活式逐页设置）

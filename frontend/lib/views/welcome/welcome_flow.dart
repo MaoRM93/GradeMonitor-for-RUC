@@ -581,11 +581,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                       Expanded(
                         child: Align(
                           alignment: Alignment.topCenter,
-                          // Align 会向子项传递 loose 约束。若 AnimatedSize 按
-                          // 子项的最小固有宽度收缩，_contentGroup 的 Center 会
-                          // 变成 0 宽，导致首个欢迎页只剩溢出的图标和背景。
-                          // SizedBox 保持动画区占满可用宽度；与 Windows 顶栏、
-                          // 拖拽带和三键浮层无关。
                           child: SizedBox(
                             width: double.infinity,
                             child: AnimatedSize(

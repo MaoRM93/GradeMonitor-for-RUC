@@ -581,49 +581,56 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
                       Expanded(
                         child: Align(
                           alignment: Alignment.topCenter,
-                          child: AnimatedSize(
-                            duration: const Duration(milliseconds: 440),
-                            curve: Curves.easeInOutCubic,
-                            alignment: Alignment.topCenter,
-                            child: AnimatedBuilder(
-                              animation: _pageMotionController,
-                              child: RepaintBoundary(
-                                child: KeyedSubtree(
-                                  key: ValueKey(_page),
-                                  child: _buildPage(cs),
+                          // Align 会向子项传递 loose 约束。若 AnimatedSize 按
+                          // 子项的最小固有宽度收缩，_contentGroup 的 Center 会
+                          // 变成 0 宽，导致首个欢迎页只剩溢出的图标和背景。
+                          // SizedBox 保持动画区占满可用宽度；与 Windows 顶栏、
+                          // 拖拽带和三键浮层无关。
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: AnimatedSize(
+                              duration: const Duration(milliseconds: 440),
+                              curve: Curves.easeInOutCubic,
+                              alignment: Alignment.topCenter,
+                              child: AnimatedBuilder(
+                                animation: _pageMotionController,
+                                child: RepaintBoundary(
+                                  child: KeyedSubtree(
+                                    key: ValueKey(_page),
+                                    child: _buildPage(cs),
+                                  ),
                                 ),
+                                builder: (context, child) {
+                                  final t = _pageMotionController.value;
+                                  final progress = Curves.easeOutCubic
+                                      .transform(t);
+                                  final direction = _transitionDirection
+                                      .toDouble();
+                                  final offset = switch (_pageMotion) {
+                                    _WelcomePageMotion.exiting => Offset(
+                                      -.10 * direction * progress,
+                                      0,
+                                    ),
+                                    _WelcomePageMotion.entering => Offset(
+                                      .10 * direction * (1 - progress),
+                                      0,
+                                    ),
+                                    _WelcomePageMotion.idle => Offset.zero,
+                                  };
+                                  final opacity = switch (_pageMotion) {
+                                    _WelcomePageMotion.exiting => 1 - progress,
+                                    _WelcomePageMotion.entering => progress,
+                                    _WelcomePageMotion.idle => 1.0,
+                                  };
+                                  return Opacity(
+                                    opacity: opacity,
+                                    child: FractionalTranslation(
+                                      translation: offset,
+                                      child: child,
+                                    ),
+                                  );
+                                },
                               ),
-                              builder: (context, child) {
-                                final t = _pageMotionController.value;
-                                final progress = Curves.easeOutCubic.transform(
-                                  t,
-                                );
-                                final direction = _transitionDirection
-                                    .toDouble();
-                                final offset = switch (_pageMotion) {
-                                  _WelcomePageMotion.exiting => Offset(
-                                    -.10 * direction * progress,
-                                    0,
-                                  ),
-                                  _WelcomePageMotion.entering => Offset(
-                                    .10 * direction * (1 - progress),
-                                    0,
-                                  ),
-                                  _WelcomePageMotion.idle => Offset.zero,
-                                };
-                                final opacity = switch (_pageMotion) {
-                                  _WelcomePageMotion.exiting => 1 - progress,
-                                  _WelcomePageMotion.entering => progress,
-                                  _WelcomePageMotion.idle => 1.0,
-                                };
-                                return Opacity(
-                                  opacity: opacity,
-                                  child: FractionalTranslation(
-                                    translation: offset,
-                                    child: child,
-                                  ),
-                                );
-                              },
                             ),
                           ),
                         ),

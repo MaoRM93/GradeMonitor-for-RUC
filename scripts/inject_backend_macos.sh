@@ -79,23 +79,75 @@ rm -rf "$RES/runtime/python"
 rsync -a --exclude '.DS_Store' "$PY_SRC/" "$RES/runtime/python/"
 
 PY="$RES/runtime/python"
+# Homebrew Python 的原生扩展链接了开发机上的 OpenSSL、SQLite、xz 与
+# mpdecimal。将运行时库放进 Python.framework，并把扩展的加载路径改为
+# 相对路径，确保发布包不要求用户安装 Homebrew。
+PY_FRAMEWORK_LIB="$PY/Frameworks/Python.framework/Versions/3.11/lib"
+mkdir -p "$PY_FRAMEWORK_LIB"
+for source_lib in \
+  /opt/homebrew/opt/openssl@3/lib/libssl.3.dylib \
+  /opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib \
+  /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib \
+  /opt/homebrew/opt/xz/lib/liblzma.5.dylib \
+  /opt/homebrew/opt/mpdecimal/lib/libmpdec.4.dylib; do
+  if [[ ! -f "$source_lib" ]]; then
+    echo "错误：构建机缺少原生运行时库: $source_lib" >&2
+    exit 1
+  fi
+  cp -L "$source_lib" "$PY_FRAMEWORK_LIB/"
+done
+
+# lib-dynload 下的扩展与内嵌库均改为包内相对引用。扩展位于
+# .../lib/python3.11/lib-dynload，回到 framework lib 需 ../../。
+while IFS= read -r -d '' native_module; do
+  while IFS= read -r dependency; do
+    lib_name="$(basename "$dependency")"
+    [[ -f "$PY_FRAMEWORK_LIB/$lib_name" ]] || continue
+    install_name_tool -change "$dependency" "@loader_path/../../$lib_name" "$native_module" || true
+  done < <(otool -L "$native_module" | awk 'NR > 1 {print $1}' | grep '^/opt/homebrew/' || true)
+done < <(find "$PY_FRAMEWORK_LIB/python3.11/lib-dynload" -name '*.so' -type f -print0)
+
+# 被内嵌的库彼此也不能再引用 Homebrew 的绝对路径（目前仅 libssl →
+# libcrypto，但按检测结果处理可避免后续 Homebrew 升级再次引入此问题）。
+for embedded_lib in "$PY_FRAMEWORK_LIB"/*.dylib; do
+  [[ -f "$embedded_lib" ]] || continue
+  while IFS= read -r dependency; do
+    lib_name="$(basename "$dependency")"
+    [[ -f "$PY_FRAMEWORK_LIB/$lib_name" ]] || continue
+    install_name_tool -change "$dependency" "@loader_path/$lib_name" "$embedded_lib" || true
+  done < <(otool -L "$embedded_lib" | awk 'NR > 1 {print $1}' | grep '^/opt/homebrew/' || true)
+  codesign --force --sign - --timestamp=none "$embedded_lib" 2>/dev/null || true
+done
+find "$PY_FRAMEWORK_LIB/python3.11/lib-dynload" -name '*.so' -type f -print0 \
+  | xargs -0 -n 20 codesign --force --sign - --timestamp=none 2>/dev/null || true
+
 # Homebrew Python 的二进制默认链接到开发机绝对 Framework 路径。将其改成
 # 包内相对路径，并以启动器固定 PYTHONHOME，避免发布包依赖开发机环境。
 PY_BIN="$PY/bin/python3.11"
 if [[ -x "$PY_BIN" ]]; then
-  OLD_PY_FRAMEWORK="$(otool -L "$PY_BIN" | awk '/Python\.framework\/Versions\/3\.11\/Python/{print $1; exit}')"
-  if [[ -n "$OLD_PY_FRAMEWORK" ]]; then
-    # python3.11 位于 Framework 的 Versions/3.11/bin 下（bin 是符号链接）。
-    # dyld 会按真实目录计算 @loader_path，因此这里应回到同级的 Python，
-    # 不能写成从 runtime/python/bin 开始的相对路径。
-    install_name_tool -change "$OLD_PY_FRAMEWORK" \
-      '@loader_path/../Python' "$PY_BIN" || true
+  # Homebrew 的 framework 本体与 Python.app 启动器也会记录绝对 Cellar
+  # 路径；三者均须改为相对引用，才能在未安装 Homebrew Python 的电脑运行。
+  PY_FRAMEWORK="$PY/Frameworks/Python.framework/Versions/3.11/Python"
+  PY_APP_BIN="$PY/Frameworks/Python.framework/Versions/3.11/Resources/Python.app/Contents/MacOS/Python"
+  for target in "$PY_BIN" "$PY_FRAMEWORK" "$PY_APP_BIN"; do
+    [[ -x "$target" ]] || continue
+    OLD_PY_FRAMEWORK="$(otool -L "$target" | awk '/Python\.framework\/Versions\/3\.11\/Python/{print $1; exit}')"
+    [[ -n "$OLD_PY_FRAMEWORK" ]] || continue
+    case "$target" in
+      "$PY_APP_BIN") replacement='@loader_path/../../../../Python' ;;
+      *) replacement='@loader_path/../Python' ;;
+    esac
+    install_name_tool -change "$OLD_PY_FRAMEWORK" "$replacement" "$target" || true
     # install_name_tool 会使原签名失效；macOS 会在运行前杀掉这种二进制，
     # 所以冒烟测试之前先用 adhoc 签名恢复其可执行性。
-    codesign --force --sign - --timestamp=none "$PY_BIN" 2>/dev/null || true
-  fi
+    codesign --force --sign - --timestamp=none "$target" 2>/dev/null || true
+  done
   install -m 755 "$SCRIPT_DIR/runtime_python_launcher.sh" "$PY/bin/python3"
 fi
+# Python.framework 是一个嵌套 bundle；仅签各个二进制会留下外层封印失效，
+# 导致 macOS 以 Killed: 9 拒绝加载。冒烟前先重签整个 framework。
+codesign --force --deep --sign - --timestamp=none \
+  "$PY/Frameworks/Python.framework" 2>/dev/null || true
 # 裁剪：pip/setuptools 等打包期工具、测试与 GUI 相关模块在运行时一律用不到。
 # 保留 ensurepip 之外的一切标准库，避免误删 uvicorn 依赖。
 rm -rf \

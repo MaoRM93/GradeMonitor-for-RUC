@@ -81,7 +81,10 @@ class AppTheme {
   static const Color success = Color(0xFF10B981);
   static const Color warning = Color(0xFFF59E0B);
   static const Color error = Color(0xFFEF4444);
-  static const String sansFontFamily = 'SourceHanSansSC';
+
+  /// Windows 端显式使用系统自带的微软雅黑；macOS 会按 fallback 回退到苹方。
+  /// 这里必须保留为常量，页面中已有 const TextStyle 直接引用此字体名。
+  static const String sansFontFamily = 'Microsoft YaHei';
   static const String serifFontFamily = 'SourceHanSerifSC';
   static const String fontFamily = sansFontFamily;
   static const double fontScale = 1.12;
@@ -312,9 +315,7 @@ class AppTheme {
         backgroundColor: surface,
         elevation: 0,
         indicatorColor: scheme.primaryContainer,
-        indicatorShape: RoundedRectangleBorder(
-          borderRadius: AppShape.inner,
-        ),
+        indicatorShape: RoundedRectangleBorder(borderRadius: AppShape.inner),
         selectedIconTheme: IconThemeData(
           color: scheme.onPrimaryContainer,
           size: 22,

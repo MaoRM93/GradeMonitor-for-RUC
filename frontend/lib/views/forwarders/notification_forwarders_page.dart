@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -103,10 +104,7 @@ class _NotificationForwardersPageState
     final raw = switch (channel) {
       'bark' => {'url': _barkUrl.text.trim()},
       'meow' => {'nickname': _meowNickname.text.trim()},
-      _ => {
-        'server': _ntfyServer.text.trim(),
-        'topic': _ntfyTopic.text.trim(),
-      },
+      _ => {'server': _ntfyServer.text.trim(), 'topic': _ntfyTopic.text.trim()},
     };
     return {
       for (final e in raw.entries)
@@ -515,19 +513,7 @@ class _NotificationForwardersPageState
                       ),
                     ),
                   ],
-                  description: Wrap(
-                    children: [
-                      const Text(
-                        '适用于 Android 客户端，请您在应用商店下载 ntfy 软件，授予其适当的权限，点按右下角+添加订阅主题，名称自拟且必须具有较强的个性，否则您的成绩可能被配置同名的其他用户接收。自拟之后，勾选低功耗模式下实时推送复选框，然后点击右上角的“订阅”保存，随后将自拟的名称填写到本程序上面的 Topic 文本框。默认配置下无需配置服务器。请注意，国产 Android 手机厂商可能会杀掉 ntfy 的后台，为保证其适用性，请参阅 ',
-                      ),
-                      _link('dontkillmyapp.com', 'https://dontkillmyapp.com/'),
-                      const Text(
-                        ' 配置您的手机管家等软件。'
-                        '由于 ntfy 客户端限制标题字段必须为您自定义的 Topic 值，'
-                        '因此，您所收到的信息将与其它通道略有差异。具体以实际情况为准。',
-                      ),
-                    ],
-                  ),
+                  description: const _NtfyDescription(),
                 ),
               ),
               const SizedBox(height: 4),
@@ -552,6 +538,80 @@ class _NotificationForwardersPageState
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// ntfy 的说明文字必须作为同一段富文本排版：
+///
+/// [Wrap] 会把链接拆成独立 child，导致换行可能发生在链接前后；这里让前后
+/// 文字与链接处于同一个 TextSpan 流，并在域名内部插入零宽断行机会。这样窄窗
+/// 可以在链接中间换行，但不会留下孤立的「请参阅」或「配置」在相邻行。
+class _NtfyDescription extends StatefulWidget {
+  const _NtfyDescription();
+
+  @override
+  State<_NtfyDescription> createState() => _NtfyDescriptionState();
+}
+
+class _NtfyDescriptionState extends State<_NtfyDescription> {
+  late final TapGestureRecognizer _linkRecognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    _linkRecognizer = TapGestureRecognizer()
+      ..onTap = () => _open('https://dontkillmyapp.com/');
+  }
+
+  @override
+  void dispose() {
+    _linkRecognizer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _open(String url) async {
+    try {
+      if (Platform.isMacOS) {
+        await Process.start('open', [url]);
+      } else if (Platform.isWindows) {
+        await Process.start('cmd', ['/c', 'start', '', url]);
+      } else {
+        await Process.start('xdg-open', [url]);
+      }
+    } catch (_) {
+      if (mounted) ToastHost().show('无法打开链接');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = DefaultTextStyle.of(context).style;
+    final link = base.copyWith(
+      color: Theme.of(context).colorScheme.primary,
+      decoration: TextDecoration.underline,
+      decorationColor: Theme.of(context).colorScheme.primary,
+    );
+    return Text.rich(
+      TextSpan(
+        style: base,
+        children: [
+          const TextSpan(
+            text:
+                '适用于 Android 客户端，请您在应用商店下载 ntfy 软件，授予其适当的权限，点按右下角+添加订阅主题，名称自拟且必须具有较强的个性，否则您的成绩可能被配置同名的其他用户接收。自拟之后，勾选低功耗模式下实时推送复选框，然后点击右上角的“订阅”保存，随后将自拟的名称填写到本程序上面的 Topic 文本框。默认配置下无需配置服务器。请注意，国产 Android 手机厂商可能会杀掉 ntfy 的后台，为保证其适用性，请参阅\u2060',
+          ),
+          TextSpan(
+            // 零宽空格只允许域名内部断行；前后的 WORD JOINER 禁止边界断行。
+            text: 'dontkillmyapp\u200B.com ↗\u2060',
+            style: link,
+            recognizer: _linkRecognizer,
+          ),
+          const TextSpan(
+            text:
+                '配置您的手机管家等软件。由于 ntfy 客户端限制标题字段必须为您自定义的 Topic 值，因此，您所收到的信息将与其它通道略有差异。具体以实际情况为准。',
+          ),
+        ],
       ),
     );
   }

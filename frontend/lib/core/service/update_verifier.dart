@@ -119,7 +119,7 @@ class UpdateVerifier {
 
   /// Ed25519 公钥（raw 32 字节，base64）
   static const String publicKeyBase64 =
-      'OCd+5QCWpbuQ0QywgE32rQaPzOUaK3mow+CERXKCq88=';
+      '25U/1WLDiaNVcXFvj2CY6tet/vtRZDDo/yi6km1qsUs=';
 
   /// 清单块的起始标记行
   static const String manifestHeader = 'gm-release-v1';

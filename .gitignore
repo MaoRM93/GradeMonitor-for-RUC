@@ -37,3 +37,7 @@ docs/PROJECT_MEMORY.md
 
 # 含开发者 PAT 的内部操作手册：仅本地保留，不进公开仓库
 docs/DevelopDOC.docx
+
+# Flag 对照表：内部资料，仅本地保留，永远不进公开仓库
+docs/GradeMonitor_Flags.xlsx
+docs/GradeMonitor_功能Flag对照表.md

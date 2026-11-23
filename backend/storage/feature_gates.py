@@ -132,6 +132,17 @@ GATE_REGISTRY: dict[str, dict[str, str]] = {
         "desc": "按年级打开加密培养方案 PDF 的入口；受开发者开关 1.1 影响是否放开全部年级。",
         "group": "方案计算",
     },
+    "Flag-1025": {
+        "name": "修读进度",
+        "desc": "按年级与专业比对培养方案，展示模块与子项学分进度，含课程类别本地调整与免修记录。",
+        "group": "方案计算",
+    },
+    "Flag-1026": {
+        "name": "修读进度高级分类（Beta）",
+        "desc": "把「通识课程群」等粗粒度子项按成绩单原始类别再细拆一层（新生研讨课、心理健康教育、美育课程…）。"
+        "细化依赖成绩单类别名的完整程度，不同年级覆盖不一，故出厂关闭，仅供遥测与尝鲜。",
+        "group": "方案计算",
+    },
     # ---------- 1030–1039 通知转发 ----------
     "Flag-1030": {
         "name": "Bark 通道",
@@ -351,8 +362,14 @@ GATE_REGISTRY: dict[str, dict[str, str]] = {
     },
 }
 
-# 全部默认开启：功能组开关是下线闸门，出厂不能有残缺。
-DEFAULT_GATES: dict[str, bool] = {gid: True for gid in GATE_REGISTRY}
+# 出厂默认关闭的例外：Beta 能力的覆盖面取决于上游数据质量，开出来会让用户
+# 看到半成品，因此默认关，只由遥测/开发者面板显式打开。
+DEFAULT_GATES_OFF: frozenset[str] = frozenset({"Flag-1026"})
+
+# 其余全部默认开启：功能组开关是下线闸门，出厂不能有残缺。
+DEFAULT_GATES: dict[str, bool] = {
+    gid: gid not in DEFAULT_GATES_OFF for gid in GATE_REGISTRY
+}
 
 
 def _read_raw() -> dict:

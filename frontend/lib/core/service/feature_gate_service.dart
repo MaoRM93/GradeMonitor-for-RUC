@@ -41,6 +41,8 @@ class FeatureGateService {
   static const String flag1022Inputs = 'Flag-1022';
   static const String flag1023Result = 'Flag-1023';
   static const String flag1024Curriculum = 'Flag-1024';
+  static const String flag1025Progress = 'Flag-1025';
+  static const String flag1026ProgressBeta = 'Flag-1026';
 
   static const String flag1030Bark = 'Flag-1030';
   static const String flag1031Meow = 'Flag-1031';

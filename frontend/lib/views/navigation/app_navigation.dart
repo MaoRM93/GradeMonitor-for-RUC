@@ -6,6 +6,7 @@ import '../../core/network/api_client.dart';
 import '../dashboard/dashboard_page.dart';
 import '../grades/grades_page.dart';
 import '../scheme/scheme_page.dart';
+import '../progress/progress_page.dart';
 import '../settings/settings_page.dart';
 import '../forwarders/notification_forwarders_page.dart';
 import 'developer_login_dialog.dart';
@@ -13,6 +14,7 @@ import '../welcome/welcome_flow.dart';
 import '../../core/service/feature_gate_service.dart';
 import '../../widgets/feature_gate.dart';
 import '../../widgets/window_controls.dart';
+import '../../widgets/beta_badge.dart';
 import '../../core/service/update_service.dart';
 import '../../core/service/nav_signal.dart';
 import '../../core/service/session_service.dart';
@@ -21,17 +23,34 @@ enum NavDestination {
   dashboard(icon: Icons.dashboard, label: '仪表板'),
   grades(icon: Icons.school, label: '成绩单'),
   scheme(icon: Icons.calculate, label: '方案计算'),
+  progress(
+    icon: Icons.checklist_rtl,
+    label: '修读进度',
+    flag: FeatureGateService.flag1025Progress,
+    beta: true,
+  ),
   forwarders(icon: Icons.send_to_mobile_outlined, label: '通知转发'),
   settings(icon: Icons.settings, label: '设置');
 
   final IconData icon;
   final String label;
-  const NavDestination({required this.icon, required this.label});
+
+  /// 绑定的功能组开关；为空表示不受开关控制。
+  final String? flag;
+
+  /// 是否在名称后挂 Beta 标签（功能仍在打磨、口径可能调整）。
+  final bool beta;
+  const NavDestination({
+    required this.icon,
+    required this.label,
+    this.flag,
+    this.beta = false,
+  });
 }
 
 const _navigationGroups = <List<NavDestination>>[
   [NavDestination.dashboard, NavDestination.grades],
-  [NavDestination.scheme, NavDestination.forwarders],
+  [NavDestination.scheme, NavDestination.progress, NavDestination.forwarders],
   [NavDestination.settings],
 ];
 
@@ -198,6 +217,14 @@ class _AppNavigationState extends State<AppNavigation> {
     }
   }
 
+  /// 功能组开关下线某一项后，整组可能变空；空组不渲染，否则会留下空隙。
+  List<NavDestination>? _visibleGroup(int index) {
+    final group = _navigationGroups[index]
+        .where((d) => d.flag == null || featureEnabled(d.flag!))
+        .toList();
+    return group.isEmpty ? null : group;
+  }
+
   Widget _buildPage(NavDestination dest) {
     switch (dest) {
       case NavDestination.dashboard:
@@ -206,6 +233,8 @@ class _AppNavigationState extends State<AppNavigation> {
         return const GradesPage();
       case NavDestination.scheme:
         return const SchemePage();
+      case NavDestination.progress:
+        return const ProgressPage();
       case NavDestination.forwarders:
         return const NotificationForwardersPage();
       case NavDestination.settings:
@@ -336,24 +365,25 @@ class _AppNavigationState extends State<AppNavigation> {
                                               index < _navigationGroups.length;
                                               index++
                                             ) ...[
-                                              _NavGroup(
-                                                destinations:
-                                                    _navigationGroups[index],
-                                                current: _currentDest,
-                                                onColor: railOnSurface,
-                                                groupColor: isRucRed
-                                                    ? Colors.white.withValues(
-                                                        alpha: .08,
-                                                      )
-                                                    : colorScheme.surface
-                                                          .withValues(
-                                                            alpha: .62,
-                                                          ),
-                                                selectedColor: selectedSurface,
-                                                onSelect: (dest) => setState(
-                                                  () => _currentDest = dest,
+                                              if (_visibleGroup(index)
+                                                  case final group?)
+                                                _NavGroup(
+                                                  destinations: group,
+                                                  current: _currentDest,
+                                                  onColor: railOnSurface,
+                                                  groupColor: isRucRed
+                                                      ? Colors.white
+                                                            .withValues(alpha: .08)
+                                                      : colorScheme.surface
+                                                            .withValues(
+                                                              alpha: .62,
+                                                            ),
+                                                  selectedColor:
+                                                      selectedSurface,
+                                                  onSelect: (dest) => setState(
+                                                    () => _currentDest = dest,
+                                                  ),
                                                 ),
-                                              ),
                                               if (index !=
                                                   _navigationGroups.length - 1)
                                                 const SizedBox(height: 14),
@@ -481,14 +511,22 @@ class _NavItem extends StatelessWidget {
               children: [
                 Icon(destination.icon, size: 20, color: textColor),
                 const SizedBox(width: 13),
-                Text(
-                  destination.label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: textColor,
+                Flexible(
+                  child: Text(
+                    destination.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: textColor,
+                    ),
                   ),
                 ),
+                if (destination.beta) ...[
+                  const SizedBox(width: 6),
+                  const BetaBadge(fontSize: 9, padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1)),
+                ],
               ],
             ),
           ),

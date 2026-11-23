@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../core/service/ui_prefs_service.dart';
@@ -15,6 +16,9 @@ class NoteBanner extends StatefulWidget {
     required this.persistKey,
     required this.text,
     this.title = '注意',
+    this.dismissible = true,
+    this.linkText,
+    this.onLinkTap,
   }) : warning = true;
 
   const NoteBanner.info({
@@ -22,6 +26,9 @@ class NoteBanner extends StatefulWidget {
     required this.persistKey,
     required this.text,
     this.title = '提示',
+    this.dismissible = true,
+    this.linkText,
+    this.onLinkTap,
   }) : warning = false;
 
   /// 永久/单次隐藏的记录 key（各横条必须唯一）
@@ -36,16 +43,32 @@ class NoteBanner extends StatefulWidget {
   /// true = 红色警示条；false = 蓝色提示条
   final bool warning;
 
+  /// 是否允许关闭。合规类提示（例如「进度仅供参考」）必须常驻，
+  /// 传 false 时既不显示「不再显示」，也不显示「叉」，且忽略历史隐藏记录。
+  final bool dismissible;
+
+  /// 正文里要做成链接的那一段文字（必须原样出现在 [text] 里）。
+  final String? linkText;
+
+  /// 点击 [linkText] 的回调。
+  final VoidCallback? onLinkTap;
+
   @override
   State<NoteBanner> createState() => _NoteBannerState();
 }
 
 class _NoteBannerState extends State<NoteBanner> {
   bool _hidden = false;
+  TapGestureRecognizer? _linkTap;
 
   @override
   void initState() {
     super.initState();
+    final linkText = widget.linkText;
+    if (linkText != null && linkText.isNotEmpty && widget.onLinkTap != null) {
+      _linkTap = TapGestureRecognizer()..onTap = widget.onLinkTap;
+    }
+    if (!widget.dismissible) return;
     // 单次隐藏（会话内存）
     if (UiPrefsService.sessionDismissed.contains(widget.persistKey)) {
       _hidden = true;
@@ -64,6 +87,12 @@ class _NoteBannerState extends State<NoteBanner> {
     }
   }
 
+  @override
+  void dispose() {
+    _linkTap?.dispose();
+    super.dispose();
+  }
+
   void _dismissForSession() {
     UiPrefsService.dismissForSession(widget.persistKey);
     if (!mounted) return;
@@ -78,7 +107,7 @@ class _NoteBannerState extends State<NoteBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_hidden) return const SizedBox.shrink();
+    if (widget.dismissible && _hidden) return const SizedBox.shrink();
 
     final cs = Theme.of(context).colorScheme;
     final mainColor = widget.warning ? AppTheme.error : cs.primary;
@@ -119,52 +148,81 @@ class _NoteBannerState extends State<NoteBanner> {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(
-                widget.text,
-                style: TextStyle(
-                  fontSize: widget.warning ? 13 : 12.5,
-                  height: widget.warning ? 1.5 : 1.55,
-                  color: widget.warning
-                      ? AppTheme.error.withValues(alpha: .92)
-                      : cs.onSurface.withValues(alpha: .8),
-                ),
-              ),
+              _body(cs, mainColor),
             ],
           ),
-          Positioned(
-            right: 8,
-            top: 0,
-            child: Row(
+          if (widget.dismissible)
+            Positioned(
+              right: 8,
+              top: 0,
+              child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextButton(
-                  onPressed: _dismissPermanently,
-                  style: TextButton.styleFrom(
-                    foregroundColor: mainColor.withValues(alpha: .75),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    minimumSize: const Size(0, 30),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  TextButton(
+                    onPressed: _dismissPermanently,
+                    style: TextButton.styleFrom(
+                      foregroundColor: mainColor.withValues(alpha: .75),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      minimumSize: const Size(0, 30),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('不再显示', style: TextStyle(fontSize: 11.5)),
                   ),
-                  child: const Text('不再显示', style: TextStyle(fontSize: 11.5)),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 26,
-                    minHeight: 26,
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 26,
+                      minHeight: 26,
+                    ),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 15,
+                      color: mainColor.withValues(alpha: .65),
+                    ),
+                    tooltip: '本次不再显示',
+                    onPressed: _dismissForSession,
                   ),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    size: 15,
-                    color: mainColor.withValues(alpha: .65),
-                  ),
-                  tooltip: '本次不再显示',
-                  onPressed: _dismissForSession,
-                ),
-              ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 正文：默认纯文本；给了 [NoteBanner.linkText] 就把那一段做成链接。
+  Widget _body(ColorScheme cs, Color mainColor) {
+    final style = TextStyle(
+      fontSize: widget.warning ? 13 : 12.5,
+      height: widget.warning ? 1.5 : 1.55,
+      color: widget.warning
+          ? AppTheme.error.withValues(alpha: .92)
+          : cs.onSurface.withValues(alpha: .8),
+    );
+    final linkText = widget.linkText;
+    final recognizer = _linkTap;
+    if (linkText == null || linkText.isEmpty || recognizer == null) {
+      return Text(widget.text, style: style);
+    }
+    final at = widget.text.indexOf(linkText);
+    if (at < 0) return Text(widget.text, style: style);
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          if (at > 0) TextSpan(text: widget.text.substring(0, at)),
+          TextSpan(
+            text: linkText,
+            recognizer: recognizer,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: mainColor,
+              decoration: TextDecoration.underline,
+              decorationColor: mainColor,
             ),
           ),
+          TextSpan(text: widget.text.substring(at + linkText.length)),
         ],
       ),
     );

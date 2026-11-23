@@ -42,7 +42,14 @@ class UiPrefsService {
   static bool _loaded = false;
   static bool get loaded => _loaded;
 
+  /// 测试用：把落盘路径改到临时文件，避免测试写到真实用户的偏好里。
+  ///
+  /// 只在 `test/` 里设置；生产代码从不赋值，保持 null 即走正常路径。
+  static String? debugFilePath;
+
   static String? _resolvePath() {
+    final override = debugFilePath;
+    if (override != null && override.isNotEmpty) return override;
     if (Platform.isMacOS) {
       final home = Platform.environment['HOME'] ?? '';
       if (home.isEmpty) return null;

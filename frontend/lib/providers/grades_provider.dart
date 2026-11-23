@@ -18,6 +18,9 @@ class GradeCourse {
   /// 课程类别（kclbname，用于核心绩白名单分类）
   final String kclbname;
 
+  /// 修读性质（kcxzname：必修 / 选修）
+  final String kcxzname;
+
   /// 等级名称（zcjname1，用于识 PF/两级制课程）
   final String zcjname1;
 
@@ -32,6 +35,7 @@ class GradeCourse {
     this.xnxq = '',
     this.kcxz = '',
     this.kclbname = '',
+    this.kcxzname = '',
     this.zcjname1 = '',
   });
 
@@ -55,6 +59,7 @@ class GradeCourse {
       xnxq: json['xnxq']?.toString() ?? '',
       kcxz: json['kcxz']?.toString() ?? '',
       kclbname: json['kclbname']?.toString() ?? '',
+      kcxzname: json['kcxzname']?.toString() ?? '',
       zcjname1: json['zcjname1']?.toString() ?? '',
     );
   }

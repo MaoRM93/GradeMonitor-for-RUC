@@ -453,9 +453,8 @@ void main() {
     expect(find.text('修读进度'), findsOneWidget);
     expect(find.text('先选择专业，再查看修读进度'), findsOneWidget);
     expect(find.text('通识模块'), findsNothing);
-    // 大标题下的红色提示不允许关闭：既没有叉，也没有「不再显示」。
-    expect(find.text('不再显示'), findsNothing);
-    expect(find.byIcon(Icons.close), findsNothing);
+    // 合规提示常驻；另外两则页首通知仍允许用户按需关闭。
+    expect(find.text('不再显示'), findsNWidgets(2));
   });
 
   testWidgets('修读进度页可渲染并显示专业与模块', (tester) async {

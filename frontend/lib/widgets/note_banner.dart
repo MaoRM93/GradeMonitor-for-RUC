@@ -21,6 +21,7 @@ class NoteBanner extends StatefulWidget {
     this.onLinkTap,
     this.emphasisText,
     this.emphasisColor,
+    this.onVisibilityChanged,
   }) : warning = true;
 
   const NoteBanner.info({
@@ -33,6 +34,7 @@ class NoteBanner extends StatefulWidget {
     this.onLinkTap,
     this.emphasisText,
     this.emphasisColor,
+    this.onVisibilityChanged,
   }) : warning = false;
 
   /// 永久/单次隐藏的记录 key（各横条必须唯一）
@@ -63,6 +65,12 @@ class NoteBanner extends StatefulWidget {
   /// [emphasisText] 的文字颜色；未指定时使用提示条主色。
   final Color? emphasisColor;
 
+  /// 横条显示状态改变时通知父组件。
+  ///
+  /// 主要用于多个可关闭横条组成的区域，使父组件能在全部隐藏后回收它们
+  /// 与相邻内容之间的间距。
+  final ValueChanged<bool>? onVisibilityChanged;
+
   @override
   State<NoteBanner> createState() => _NoteBannerState();
 }
@@ -82,19 +90,28 @@ class _NoteBannerState extends State<NoteBanner> {
     // 单次隐藏（会话内存）
     if (UiPrefsService.sessionDismissed.contains(widget.persistKey)) {
       _hidden = true;
+      _notifyVisibilityAfterBuild();
       return;
     }
     // 永久隐藏（ui_prefs.json，异步载入）
     if (UiPrefsService.loaded) {
       _hidden = UiPrefsService.isPermanentlyDismissed(widget.persistKey);
+      _notifyVisibilityAfterBuild();
     } else {
       UiPrefsService.ensureLoaded().then((_) {
         if (!mounted) return;
         setState(() {
           _hidden = UiPrefsService.isPermanentlyDismissed(widget.persistKey);
         });
+        _notifyVisibilityAfterBuild();
       });
     }
+  }
+
+  void _notifyVisibilityAfterBuild() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onVisibilityChanged?.call(!_hidden);
+    });
   }
 
   @override
@@ -107,12 +124,14 @@ class _NoteBannerState extends State<NoteBanner> {
     UiPrefsService.dismissForSession(widget.persistKey);
     if (!mounted) return;
     setState(() => _hidden = true);
+    widget.onVisibilityChanged?.call(false);
   }
 
   Future<void> _dismissPermanently() async {
     await UiPrefsService.dismissPermanently(widget.persistKey);
     if (!mounted) return;
     setState(() => _hidden = true);
+    widget.onVisibilityChanged?.call(false);
   }
 
   @override

@@ -50,8 +50,15 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
   /// 开发者开关 `Enable_PYFA_EvyGrde`（1.1）：开启后每个年级各给一个入口。
   bool _anyGradeEnabled = false;
 
+  /// 顶部两则可关闭通知的实际显示状态。两者都隐藏时不保留通知区间距。
+  bool _graduationWarningVisible = true;
+  bool _aestheticReminderVisible = true;
+
   /// 已展开的子项 key（`模块/子项`），默认全部收起。
   final Set<String> _expanded = <String>{};
+
+  /// 「待归类课程」区域的页内跳转锚点。
+  final GlobalKey _unmatchedAnchorKey = GlobalKey();
 
   /// 体测计算器：大一到大四四个学年分的输入框，第五个是毕业成绩。
   final List<TextEditingController> _fitCtrl =
@@ -418,7 +425,8 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
               ),
               const SizedBox(height: 16),
               ..._buildProgressNotices(),
-              const SizedBox(height: 16),
+              if (_graduationWarningVisible || _aestheticReminderVisible)
+                const SizedBox(height: 16),
               _buildSelectors(cs),
               const SizedBox(height: 16),
               if (_loading)
@@ -641,6 +649,14 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
       excluded: _state.excluded,
       unclassified: _state.unclassified,
     );
+    final unmatchedEnabled = featureEnabled(
+      FeatureGateService.flag1097UnmatchedAssign,
+    );
+    final fitnessEnabled = featureEnabled(FeatureGateService.flag1027Fitness);
+    final rulesEnabled = featureEnabled(FeatureGateService.flag1028MatchRules);
+    final exemptionEnabled = featureEnabled(
+      FeatureGateService.flag1098ExemptionNote,
+    );
 
     return <Widget>[
       _buildOverall(cs, result),
@@ -649,47 +665,38 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
         _buildModule(cs, module),
         const SizedBox(height: AppShape.gapGroup),
       ],
-      if (result.unmatched.isNotEmpty) ...[
-        FeatureGate(
-          flag: FeatureGateService.flag1097UnmatchedAssign,
-          child: _buildUnmatched(cs, major, result.unmatched),
-        ),
+      if (result.unmatched.isNotEmpty && unmatchedEnabled) ...[
+        _buildUnmatched(cs, major, result.unmatched),
         const SizedBox(height: AppShape.gapGroup),
       ],
-      if (result.excluded.isNotEmpty) ...[
-        FeatureGate(
-          flag: FeatureGateService.flag1097UnmatchedAssign,
-          child: _buildExcluded(cs, result.excluded),
-        ),
+      if (result.excluded.isNotEmpty && unmatchedEnabled) ...[
+        _buildExcluded(cs, result.excluded),
         const SizedBox(height: AppShape.gapGroup),
       ],
-      FeatureGate(
-        flag: FeatureGateService.flag1027Fitness,
-        child: _buildFitness(cs),
-      ),
-      FeatureGate(
-        flag: FeatureGateService.flag1028MatchRules,
-        child: _buildRules(cs, major, grades),
-      ),
-      const SizedBox(height: AppShape.gapGroup),
-      FeatureGate(
-        flag: FeatureGateService.flag1098ExemptionNote,
-        child: _buildNote(cs),
-      ),
+      if (fitnessEnabled) _buildFitness(cs),
+      if (fitnessEnabled && rulesEnabled)
+        const SizedBox(height: AppShape.gapGroup),
+      if (rulesEnabled) _buildRules(cs, major, grades),
+      if ((fitnessEnabled || rulesEnabled) && exemptionEnabled)
+        const SizedBox(height: AppShape.gapGroup),
+      if (exemptionEnabled) _buildNote(cs),
     ];
   }
 
   /// 放在页首合规提示之后，确保用户先看到使用边界与分类规则。
   List<Widget> _buildProgressNotices() {
-    return const <Widget>[
+    return <Widget>[
       NoteBanner.warning(
         persistKey: 'progress_graduation_warning',
         title: '注意',
         text:
             '请关注劳动教育理论、劳动教育实践，职业生涯规划实践，'
             '体测四年加权成绩必须大于等于 50 分等可能造成毕业隐患的项目。',
+        onVisibilityChanged: (visible) =>
+            _setNoticeVisibility(graduationWarning: visible),
       ),
-      SizedBox(height: 16),
+      if (_graduationWarningVisible && _aestheticReminderVisible)
+        const SizedBox(height: 16),
       NoteBanner.info(
         persistKey: 'progress_aesthetic_practice_reminder',
         title: '温馨提示',
@@ -701,8 +708,27 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
             '5. 建议您自行着重核对美育、劳动、体育、职业生涯规划等表述差异较大或含糊不清的课程类别。',
         emphasisText: '请您手动校对每一门课程的归属，本程序不能作为认证毕业的依据，亦不对您错误使用本程序造成的任何后果承担任何责任。',
         emphasisColor: AppTheme.error,
+        onVisibilityChanged: (visible) =>
+            _setNoticeVisibility(aestheticReminder: visible),
       ),
     ];
+  }
+
+  void _setNoticeVisibility({
+    bool? graduationWarning,
+    bool? aestheticReminder,
+  }) {
+    final nextGraduation = graduationWarning ?? _graduationWarningVisible;
+    final nextAesthetic = aestheticReminder ?? _aestheticReminderVisible;
+    if (nextGraduation == _graduationWarningVisible &&
+        nextAesthetic == _aestheticReminderVisible) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _graduationWarningVisible = nextGraduation;
+      _aestheticReminderVisible = nextAesthetic;
+    });
   }
 
   Widget _buildOverall(ColorScheme cs, ProgressResult result) {
@@ -741,13 +767,34 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
                 _bar(cs, result.ratio),
                 if (result.unmatched.isNotEmpty) ...[
                   const SizedBox(height: 10),
-                  Text(
-                    '待归类 ${result.unmatched.length} 门课程',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.warning,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '待归类 ${result.unmatched.length} 门课程',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.warning,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _scrollToUnmatched,
+                        style: TextButton.styleFrom(
+                          foregroundColor: cs.primary,
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          minimumSize: const Size(0, 20),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          '，去归类 ↗',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -1168,73 +1215,90 @@ class _ProgressPageState extends ConsumerState<ProgressPage> {
     List<GradeCourse> courses,
   ) {
     final options = itemOptions(major);
-    return GlassCard(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                '待归类课程',
-                style: TextStyle(
-                  fontFamily: AppTheme.serifFontFamily,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: cs.onSurface.withValues(alpha: .85),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.warning.withValues(alpha: .12),
-                  borderRadius: AppShape.inner,
-                ),
-                child: Text(
-                  '可能需要更改课程类别',
+    return KeyedSubtree(
+      key: _unmatchedAnchorKey,
+      child: GlassCard(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  '待归类课程',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontFamily: AppTheme.serifFontFamily,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.warning,
+                    color: cs.onSurface.withValues(alpha: .85),
                   ),
                 ),
-              ),
-            ],
-          ),
-          for (final course in courses)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      course.kcname,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: cs.onSurface),
-                    ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${course.xf} 学分',
+                  decoration: BoxDecoration(
+                    color: AppTheme.warning.withValues(alpha: .12),
+                    borderRadius: AppShape.inner,
+                  ),
+                  child: Text(
+                    '可能需要更改课程类别',
                     style: TextStyle(
-                      fontSize: 12.5,
-                      color: cs.onSurface.withValues(alpha: .55),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.warning,
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  _assignMenu(cs, course.kth, options),
-                  _SymbolAction(
-                    icon: Icons.remove,
-                    tooltip: '排除',
-                    onTap: () => _exclude(course.kth),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-        ],
+            for (final course in courses)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        course.kcname,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: cs.onSurface),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${course.xf} 学分',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: cs.onSurface.withValues(alpha: .55),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    _assignMenu(cs, course.kth, options),
+                    _SymbolAction(
+                      icon: Icons.remove,
+                      tooltip: '排除',
+                      onTap: () => _exclude(course.kth),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
+    );
+  }
+
+  void _scrollToUnmatched() {
+    final targetContext = _unmatchedAnchorKey.currentContext;
+    if (targetContext == null) return;
+    Scrollable.ensureVisible(
+      targetContext,
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeOutCubic,
+      alignment: 0.08,
     );
   }
 

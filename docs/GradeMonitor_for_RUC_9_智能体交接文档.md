@@ -228,9 +228,12 @@ cd frontend && flutter pub get
 cd frontend && flutter analyze
 cd frontend && flutter test
 cd frontend && flutter build macos --release
+./scripts/inject_backend_macos.sh frontend/build/macos/Build/Products/Release/GradeMonitor.app
+# 版本号取 pubspec.yaml 的 version，把「+」替换为「.」；例如 109.0.1+115 → 109.0.1.115
+./scripts/build_dmg.sh /tmp/gm_signed/GradeMonitor.app 109.0.1.115
 ```
 
-从仓库根目录调用打包脚本的形式是 `./scripts/build_dmg.sh <app路径> <四段版本号> [输出路径]`。先核对后端注入脚本的用法和构建产物是否已经注入，确认包中有后端运行时。对照桌面 200 版，卷内应用必须是 `GradeMonitor.app`，包标识 `com.grademonitor.app`，含背景与 Applications 快捷方式，Finder 可按拖拽布局安装。别拿带版本后缀的临时 .app 直接作为镜像内容。复制到普通临时目录再校验签名可避免 iCloud 给框架附加 Finder 元数据。发布前挂载产物，核对名称、版本、架构、签名和卷内布局。
+从仓库根目录调用打包脚本的形式分别是 `./scripts/inject_backend_macos.sh <Flutter构建的app路径> [便携Python根目录]` 与 `./scripts/build_dmg.sh <app路径> <四段版本号> [输出路径]`。注入脚本的发布输入是 Flutter 生成的 `.app`，输出是 `/tmp/gm_signed/GradeMonitor.app`；DMG 必须以该干净、已签名的副本为输入。四段版本号由 `pubspec.yaml` 的 `x.y.z+build` 改写为 `x.y.z.build`。先核对后端注入脚本的用法和构建产物是否已经注入，确认包中有后端运行时。对照桌面 200 版，卷内应用必须是 `GradeMonitor.app`，包标识 `com.grademonitor.app`，含背景与 Applications 快捷方式，Finder 可按拖拽布局安装。别拿带版本后缀的临时 .app 直接作为镜像内容。仓库位于 iCloud Drive，不能用其中回写的 `.app` 生成发布 DMG：iCloud 可能重新附加扩展属性并破坏签名。发布前挂载产物，核对名称、版本、架构、签名和卷内布局。
 
 把打包、卸载和清数据分别理解。仅修改代码时不做发版操作。用户要求卸载才处理已确认的应用路径，明确要求清除才处理应用数据。先查 Application Support、偏好、缓存和沙盒容器；开发签名资料属于独立资产，不能把名称相似当作删除依据。受 macOS 保护的容器若只剩系统登记，照实记录。桌面 200 版是用户恢复的参照包。
 

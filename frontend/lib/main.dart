@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:screen_retriever/screen_retriever.dart';
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'core/theme/app_theme.dart';
 import 'core/logger/app_logger.dart';
@@ -27,6 +29,8 @@ final _globalWs = WebSocketService();
 /// 全局导航器 — 更新弹窗与全局 Toast 等无 BuildContext 场景使用
 final navigatorKey = toastNavigatorKey;
 
+const _launchChannel = MethodChannel('com.grademonitor.app/launch');
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -48,50 +52,6 @@ void main() async {
     log.error('未捕获异常: $error', error, stack);
     return true;
   };
-
-  // 初始化更新服务：读取完整版本号 + 静默检查远程停用开关
-  await UpdateService().init();
-
-  await BackendService().start();
-
-  // 功能组开关：必须在托盘/WebSocket/通知之前加载，
-  // 否则首帧会按"全开"初始化，被下线的能力仍会短暂生效。
-  await FeatureGateService.instance.ensureLoaded();
-  final gates = FeatureGateService.instance;
-
-  // 初始化通知服务（失败不影响 App 运行）
-  await NotificationService().init();
-
-  // 点击通知 → 显示/激活主窗口并置于前台。
-  // 关闭窗口只是 hide()，所以这里先 show() 再 focus()。
-  // window_manager 的 show() 在 macOS 上内部会 makeKeyAndOrderFront +
-  // NSApp.activate(ignoringOtherApps: true)，已足以把 App 提到前台。
-  NotificationService.onNotificationTap = () async {
-    // Flag-1054：通知点击唤起主窗口可被远程静默下线
-    if (!gates.isEnabled(FeatureGateService.flag1054NotificationTap)) return;
-    try {
-      if (!await windowManager.isVisible()) {
-        await windowManager.show();
-      }
-      await windowManager.focus();
-      log.info('通过通知点击激活主窗口');
-    } catch (e) {
-      log.warning('通知点击激活窗口失败: $e');
-    }
-  };
-
-  // 全局 WebSocket 通知监听（独立于任何页面生命周期）
-  // Flag-1074：实时推送通道可被远程静默下线
-  if (gates.isEnabled(FeatureGateService.flag1074WebSocket)) {
-    _globalWs.connect();
-    _globalWs.eventStream.listen((event) {
-      if (event.type == WsEventType.showNotification) {
-        final title = event.data['title'] as String? ?? '';
-        final message = event.data['message'] as String? ?? '';
-        NotificationService().show(title, message);
-      }
-    });
-  }
 
   await windowManager.ensureInitialized();
 
@@ -115,29 +75,67 @@ void main() async {
     () async {},
   );
 
-  // Flag-1050：自绘窗口控件可被远程静默下线。
-  // 下线后必须把标题栏真正交还系统（TitleBarStyle.normal），
-  // 否则会出现"既没有自绘三键、也没有系统标题栏"的死窗口。
-  // macOS 不受影响：macOS 的红绿灯始终由系统绘制。
-  if (Platform.isWindows &&
-      !gates.isEnabled(FeatureGateService.flag1050TitleBar)) {
-    await windowManager.setTitleBarStyle(TitleBarStyle.normal);
-  }
-
-  // 根据设置决定是否初始化托盘图标
-  // Flag-1052：系统托盘可被远程静默下线
-  if (gates.isEnabled(FeatureGateService.flag1052Tray) &&
-      await _shouldShowTray(log)) {
-    await TrayService().init();
-  }
-
   runApp(const ProviderScope(child: GradeMonitorApp()));
 
-  // 等待首帧渲染完毕再显示窗口，彻底避免黑屏闪烁
+  // 首帧真正落盘前不显示原生主窗口，避免 Dock 重开路径出现黑窗口。
   await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+  if (Platform.isMacOS) {
+    try {
+      await _launchChannel.invokeMethod<void>('firstFrameRendered');
+    } on PlatformException catch (e) {
+      log.warning('通知原生层首帧已就绪失败: $e');
+    }
+  }
   await windowManager.show();
   await windowManager.focus();
   log.info('窗口已显示');
+
+  // 后端与远程服务可能等待进程或网络，不能阻塞首个界面。
+  unawaited(_initializeBackgroundServices(log));
+}
+
+Future<void> _initializeBackgroundServices(AppLogger log) async {
+  try {
+    await UpdateService().init();
+    await BackendService().start();
+    await FeatureGateService.instance.ensureLoaded();
+    final gates = FeatureGateService.instance;
+
+    if (Platform.isWindows &&
+        !gates.isEnabled(FeatureGateService.flag1050TitleBar)) {
+      await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+    }
+
+    await NotificationService().init();
+    NotificationService.onNotificationTap = () async {
+      if (!gates.isEnabled(FeatureGateService.flag1054NotificationTap)) return;
+      try {
+        if (!await windowManager.isVisible()) await windowManager.show();
+        await windowManager.focus();
+        log.info('通过通知点击激活主窗口');
+      } catch (e) {
+        log.warning('通知点击激活窗口失败: $e');
+      }
+    };
+
+    if (gates.isEnabled(FeatureGateService.flag1074WebSocket)) {
+      _globalWs.connect();
+      _globalWs.eventStream.listen((event) {
+        if (event.type == WsEventType.showNotification) {
+          final title = event.data['title'] as String? ?? '';
+          final message = event.data['message'] as String? ?? '';
+          NotificationService().show(title, message);
+        }
+      });
+    }
+
+    if (gates.isEnabled(FeatureGateService.flag1052Tray) &&
+        await _shouldShowTray(log)) {
+      await TrayService().init();
+    }
+  } catch (e, stack) {
+    log.error('后台服务初始化失败', e, stack);
+  }
 }
 
 /// 初始窗口尺寸的计算结果。

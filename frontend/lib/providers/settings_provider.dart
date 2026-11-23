@@ -33,6 +33,9 @@ class AppSettings {
   final bool welcomeCompleted;
   final bool showWelcomeAlways;
 
+  /// 工作模式：full（自动检查 + 推送 + 查看与管理）/ view（仅查看与管理）
+  final String workMode;
+
   const AppSettings({
     this.username = '',
     this.password = '',
@@ -51,6 +54,7 @@ class AppSettings {
     this.randomIntervalEnabled = true,
     this.welcomeCompleted = false,
     this.showWelcomeAlways = false,
+    this.workMode = 'full',
   });
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -73,6 +77,7 @@ class AppSettings {
       randomIntervalEnabled: json['random_interval_enabled'] ?? true,
       welcomeCompleted: json['welcome_completed'] ?? false,
       showWelcomeAlways: json['show_welcome_always'] ?? false,
+      workMode: json['work_mode']?.toString() ?? 'full',
     );
   }
 
@@ -96,6 +101,7 @@ class AppSettings {
       'random_interval_enabled': randomIntervalEnabled,
       'welcome_completed': welcomeCompleted,
       'show_welcome_always': showWelcomeAlways,
+      'work_mode': workMode,
     };
   }
 
@@ -117,6 +123,7 @@ class AppSettings {
     bool? randomIntervalEnabled,
     bool? welcomeCompleted,
     bool? showWelcomeAlways,
+    String? workMode,
   }) {
     return AppSettings(
       username: username ?? this.username,
@@ -133,8 +140,11 @@ class AppSettings {
       rankMonitorEnabled: rankMonitorEnabled ?? this.rankMonitorEnabled,
       showMenubarIcon: showMenubarIcon ?? this.showMenubarIcon,
       hideUnknownCourses: hideUnknownCourses ?? this.hideUnknownCourses,
+      randomIntervalEnabled:
+          randomIntervalEnabled ?? this.randomIntervalEnabled,
       welcomeCompleted: welcomeCompleted ?? this.welcomeCompleted,
       showWelcomeAlways: showWelcomeAlways ?? this.showWelcomeAlways,
+      workMode: workMode ?? this.workMode,
     );
   }
 }

@@ -404,6 +404,14 @@ def _show(title: str, message: str, record: bool = True,
     中文标题到手机端会丢字，因此 ntfy 收到的是把关键信息压进正文的另一份
     文本。其余转发通道与系统通知仍用 title/message，不受影响。
     """
+    # 工作模式 view（仅查看与管理）：不投递系统通知，也不转发到移动端。
+    # 记录仍然写，仪表板「最新动态」照常可见。
+    try:
+        from backend.storage.settings import load_settings
+        view_only = load_settings().get("work_mode", "full") == "view"
+    except Exception:
+        view_only = False
+
     if record and gate_enabled("Flag-1072"):
         try:
             from datetime import datetime
@@ -432,6 +440,11 @@ def _show(title: str, message: str, record: bool = True,
             forward_notification(title, message, ntfy_message)
         except Exception as e:
             logger.debug(f"初始化移动端通知转发失败: {e}")
+
+    # 工作模式 view：只留 recent_change 记录，不弹系统通知。
+    if view_only:
+        logger.debug(f"工作模式为仅查看，跳过系统通知投递: {title}")
+        return
 
     # Flag-1053：系统通知的"弹出"环节可远程静默关闭。
     # 只挡投递，不挡上面的 recent_change 记录与移动端转发——否则关掉桌面

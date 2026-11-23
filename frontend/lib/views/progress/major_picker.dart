@@ -175,8 +175,7 @@ class _MajorPickerState extends State<_MajorPicker> {
                       ),
                     ),
                   ),
-                  if (selected)
-                    Icon(Icons.check, size: 16, color: cs.primary),
+                  if (selected) Icon(Icons.check, size: 16, color: cs.primary),
                 ],
               ),
             ),
@@ -190,7 +189,10 @@ class _MajorPickerState extends State<_MajorPicker> {
     return SingleChildScrollView(
       controller: _scroll,
       padding: const EdgeInsets.only(bottom: 16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: rows,
+      ),
     );
   }
 

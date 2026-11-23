@@ -43,6 +43,9 @@ class FeatureGateService {
   static const String flag1024Curriculum = 'Flag-1024';
   static const String flag1025Progress = 'Flag-1025';
   static const String flag1026ProgressBeta = 'Flag-1026';
+  static const String flag1027Fitness = 'Flag-1027';
+  static const String flag1028MatchRules = 'Flag-1028';
+  static const String flag1029FailedCourses = 'Flag-1029';
 
   static const String flag1030Bark = 'Flag-1030';
   static const String flag1031Meow = 'Flag-1031';
@@ -62,6 +65,7 @@ class FeatureGateService {
   static const String flag1053Notification = 'Flag-1053';
   static const String flag1054NotificationTap = 'Flag-1054';
   static const String flag1055AutoStart = 'Flag-1055';
+  static const String flag1056ProgressBetaBadge = 'Flag-1056';
 
   static const String flag1060CheckUpdate = 'Flag-1060';
   static const String flag1061Download = 'Flag-1061';
@@ -92,6 +96,10 @@ class FeatureGateService {
   static const String flag1093RandomInterval = 'Flag-1093';
   static const String flag1094FirstQuery = 'Flag-1094';
   static const String flag1095StartupNotice = 'Flag-1095';
+  static const String flag1096ItemDetail = 'Flag-1096';
+  static const String flag1097UnmatchedAssign = 'Flag-1097';
+  static const String flag1098ExemptionNote = 'Flag-1098';
+  static const String flag1099DashBar = 'Flag-1099';
 
   /// 当前开关表；订阅它即可跟随远程开关重绘。
   final ValueNotifier<Map<String, bool>> states =

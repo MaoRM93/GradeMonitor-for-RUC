@@ -19,6 +19,8 @@ class NoteBanner extends StatefulWidget {
     this.dismissible = true,
     this.linkText,
     this.onLinkTap,
+    this.emphasisText,
+    this.emphasisColor,
   }) : warning = true;
 
   const NoteBanner.info({
@@ -29,6 +31,8 @@ class NoteBanner extends StatefulWidget {
     this.dismissible = true,
     this.linkText,
     this.onLinkTap,
+    this.emphasisText,
+    this.emphasisColor,
   }) : warning = false;
 
   /// 永久/单次隐藏的记录 key（各横条必须唯一）
@@ -52,6 +56,12 @@ class NoteBanner extends StatefulWidget {
 
   /// 点击 [linkText] 的回调。
   final VoidCallback? onLinkTap;
+
+  /// 放在正文下方单独强调的一段文字。
+  final String? emphasisText;
+
+  /// [emphasisText] 的文字颜色；未指定时使用提示条主色。
+  final Color? emphasisColor;
 
   @override
   State<NoteBanner> createState() => _NoteBannerState();
@@ -149,6 +159,18 @@ class _NoteBannerState extends State<NoteBanner> {
               ),
               const SizedBox(height: 6),
               _body(cs, mainColor),
+              if (widget.emphasisText case final emphasisText?) ...[
+                const SizedBox(height: 8),
+                Text(
+                  emphasisText,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.55,
+                    fontWeight: FontWeight.w700,
+                    color: widget.emphasisColor ?? mainColor,
+                  ),
+                ),
+              ],
             ],
           ),
           if (widget.dismissible)
@@ -156,8 +178,8 @@ class _NoteBannerState extends State<NoteBanner> {
               right: 8,
               top: 0,
               child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   TextButton(
                     onPressed: _dismissPermanently,
                     style: TextButton.styleFrom(

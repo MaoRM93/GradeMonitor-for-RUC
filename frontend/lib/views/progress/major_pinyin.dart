@@ -76,7 +76,8 @@ const Map<String, String> kMajorPinyin = <String, String>{
   '数据计算及应用': 'shujujisuanjiyingyong',
   '数据科学': 'shujukexue',
   '数据科学与大数据技术': 'shujukexueyudashujujishu',
-  '数据科学与大数据技术（AI 与智慧治理方向）': 'shujukexueyudashujujishu（AIyuzhihuizhilifangxiang）',
+  '数据科学与大数据技术（AI 与智慧治理方向）':
+      'shujukexueyudashujujishu（AIyuzhihuizhilifangxiang）',
   '数学与应用数学': 'shuxueyuyingyongshuxue',
   '数字经济': 'shuzijingji',
   '数字媒体艺术': 'shuzimeitiyishu',

@@ -63,6 +63,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   bool get _showCaptcha => _modeNeedsCaptcha || _captchaRequiredByServer;
 
+  /// 工作模式：full（自动检查 + 推送 + 查看与管理）/ view（仅查看与管理）
+  String _workMode = 'full';
+
+  bool get _viewOnly => _workMode == 'view';
+
   // 监控设置
   bool _autoMonitor = false;
   bool _rankMonitor = false;
@@ -124,6 +129,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _hideUnknownCourses = s.hideUnknownCourses;
     _prevShowMenubarIcon = s.showMenubarIcon;
     _loginMode = s.loginMode;
+    _workMode = s.workMode;
     _loaded = true;
     setState(() {});
 
@@ -332,9 +338,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             current.randomIntervalEnabled,
         welcomeCompleted: current.welcomeCompleted,
         showWelcomeAlways: current.showWelcomeAlways,
+        workMode: (changes['work_mode'] as String?) ?? current.workMode,
       );
       await notifier.saveSettings(merged);
     } catch (_) {}
+  }
+
+  /// 切换工作模式。切到「仅查看与管理」时同时停掉两路监控，
+  /// 避免界面已经隐藏了开关、后台却还在自动查询。
+  Future<void> _onWorkModeChanged(String mode) async {
+    if (mode == _workMode) return;
+    setState(() {
+      _workMode = mode;
+      if (mode == 'view') {
+        _autoMonitor = false;
+        _rankMonitor = false;
+      }
+    });
+    await _saveSettings({'work_mode': mode});
+    if (mode == 'view') {
+      await _saveSettings({
+        'auto_monitor_enabled': false,
+        'rank_monitor_enabled': false,
+      });
+      await ref.read(monitorProvider.notifier).stopMonitor();
+    } else {
+      _syncMonitor();
+    }
   }
 
   // ── 账号区 ──
@@ -424,6 +454,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 child: DropdownButton<String>(
                   value: _loginMode,
                   isExpanded: true,
+                  dropdownColor: AppShape.overlayFill(colorScheme),
+                  elevation: 8,
+                  borderRadius: AppShape.inner,
                   underline: const SizedBox(),
                   items: _loginModes
                       .map(
@@ -988,175 +1021,204 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(height: 24),
 
-              // ---- ② 监控内容 ----
-              _SectionTitle(title: '监控内容', icon: Icons.timer_rounded),
+              // ---- ② 工作模式 ----
+              _SectionTitle(title: '工作模式', icon: Icons.workspaces_rounded),
               const SizedBox(height: 12),
               _SegmentedSettingsGroup(
                 children: [
-                  _SettingsToggleItem(
-                    title: '成绩自动监控',
-                    value: _autoMonitor,
-                    onChanged: _onAutoMonitorChanged,
-                  ),
-                  _SettingsToggleItem(
-                    title: '排名自动监控',
-                    value: _rankMonitor,
-                    onChanged: _onRankMonitorChanged,
-                  ),
+                  for (final mode in const [
+                    (
+                      'full',
+                      '完整模式',
+                      '程序将按照您的设置，为您开放查询、推送、分析自己学业状况的所有功能，使用不受限制。',
+                    ),
+                    (
+                      'view',
+                      '仅查看与管理',
+                      '为不需要随时关注的用户提供仅手动查询与分析的功能，自动查询与推送将被禁用。',
+                    ),
+                  ])
+                    _WorkModeTile(
+                      title: mode.$2,
+                      subtitle: mode.$3,
+                      selected: _workMode == mode.$1,
+                      onTap: () => _onWorkModeChanged(mode.$1),
+                    ),
                 ],
               ),
               const SizedBox(height: 24),
 
-              // ---- ③ 监控时间 ----
-              _SectionTitle(title: '监控时间', icon: Icons.schedule_rounded),
-              const SizedBox(height: 12),
-              _SettingsGroup(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              // ---- ③ 监控内容（仅查看模式整体隐藏）----
+              if (!_viewOnly) ...[
+                _SectionTitle(title: '监控内容', icon: Icons.timer_rounded),
+                const SizedBox(height: 12),
+                _SegmentedSettingsGroup(
                   children: [
-                    // 提示语放在开始/结束时间之上
-                    NoteBanner.info(
-                      persistKey: 'settings_monitor_time_tip',
-                      title: '提示',
-                      text:
-                          '通常，教师会在8:00至20:00之间录入并发布成绩。'
-                          '为避免给服务器造成过大负载，程序仅允许您最低设置 300 秒查询一次。',
-                    ),
-                    const SizedBox(height: 14),
-                    // 两个时间项：各自一张浅色圆角卡（标题在左上、大号时间在下、
-                    // 右下角一个展开箭头），中间用「至」连接，全程不画分割线
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _TimeFieldCard(
-                            title: '开始时间',
-                            value: _startTime.format(context),
-                            onTap: _pickStartTime,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Text(
-                            '至',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colorScheme.onSurface.withValues(
-                                alpha: .45,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: _TimeFieldCard(
-                            title: '结束时间',
-                            value: _endTime.format(context),
-                            onTap: _pickEndTime,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '轮询间隔: ${_intervalValue.toInt()} 秒',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colorScheme.onSurface.withValues(
-                                alpha: .5,
-                              ),
-                            ),
-                          ),
-                          Slider(
-                            value: _intervalValue,
-                            min: 300,
-                            max: 3600,
-                            divisions: 33,
-                            label: '${_intervalValue.toInt()}秒',
-                            onChanged: _onIntervalChanged,
-                            onChangeEnd: _onIntervalChangeEnd,
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                '300s',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: colorScheme.onSurface.withValues(
-                                    alpha: .3,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                '3600s',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: colorScheme.onSurface.withValues(
-                                    alpha: .3,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 4),
                     _SettingsToggleItem(
-                      title: '安全模式',
-                      subtitle: '在设定轮询间隔的 ±100 秒范围内随机取值查询，开启以降低账号被风控的风险。',
-                      value: _safeMode,
-                      onChanged: _onSafeModeChanged,
+                      title: '成绩自动监控',
+                      value: _autoMonitor,
+                      onChanged: _onAutoMonitorChanged,
+                    ),
+                    _SettingsToggleItem(
+                      title: '排名自动监控',
+                      value: _rankMonitor,
+                      onChanged: _onRankMonitorChanged,
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // ---- ④ 通知设置 ----
-              _SectionTitle(title: '通知设置', icon: Icons.notifications_rounded),
-              const SizedBox(height: 12),
-              _SegmentedSettingsGroup(
-                children: ['详细', '简洁'].map((mode) {
-                  return InkWell(
-                    onTap: () => _onNotifyModeChanged(mode),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
+                // ---- ④ 监控时间 ----
+                _SectionTitle(title: '监控时间', icon: Icons.schedule_rounded),
+                const SizedBox(height: 12),
+                _SettingsGroup(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 提示语放在开始/结束时间之上
+                      NoteBanner.info(
+                        persistKey: 'settings_monitor_time_tip',
+                        title: '提示',
+                        text:
+                            '通常，教师会在8:00至20:00之间录入并发布成绩。'
+                            '为避免给服务器造成过大负载，程序仅允许您最低设置 300 秒查询一次。',
                       ),
-                      child: Row(
+                      const SizedBox(height: 14),
+                      // 两个时间项：各自一张浅色圆角卡（标题在左上、大号时间在下、
+                      // 右下角一个展开箭头），中间用「至」连接，全程不画分割线
+                      Row(
                         children: [
-                          Radio<String>(
-                            value: mode,
-                            groupValue: _notifyMode,
-                            onChanged: (value) =>
-                                _onNotifyModeChanged(value ?? '详细'),
+                          Expanded(
+                            child: _TimeFieldCard(
+                              title: '开始时间',
+                              value: _startTime.format(context),
+                              onTap: _pickStartTime,
+                            ),
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            mode == '详细'
-                                ? '完整模式：显示课程名称、成绩与位次'
-                                : '简洁模式：仅显示有成绩或位次更新',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: Text(
+                              '至',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.onSurface.withValues(
+                                  alpha: .45,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: _TimeFieldCard(
+                              title: '结束时间',
+                              value: _endTime.format(context),
+                              onTap: _pickEndTime,
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 24),
+                      const SizedBox(height: 18),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '轮询间隔: ${_intervalValue.toInt()} 秒',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.onSurface.withValues(
+                                  alpha: .5,
+                                ),
+                              ),
+                            ),
+                            Slider(
+                              value: _intervalValue,
+                              min: 300,
+                              max: 3600,
+                              divisions: 33,
+                              label: '${_intervalValue.toInt()}秒',
+                              onChanged: _onIntervalChanged,
+                              onChangeEnd: _onIntervalChangeEnd,
+                            ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '300s',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: colorScheme.onSurface.withValues(
+                                      alpha: .3,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  '3600s',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: colorScheme.onSurface.withValues(
+                                      alpha: .3,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      _SettingsToggleItem(
+                        title: '安全模式',
+                        subtitle: '在设定轮询间隔的 ±100 秒范围内随机取值查询，开启以降低账号被风控的风险。',
+                        value: _safeMode,
+                        onChanged: _onSafeModeChanged,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
 
-              // ---- ⑤ 显示效果 ----
+                // ---- ⑤ 通知设置（仅查看模式整体隐藏）----
+                _SectionTitle(title: '通知设置', icon: Icons.notifications_rounded),
+                const SizedBox(height: 12),
+                _SegmentedSettingsGroup(
+                  children: ['详细', '简洁'].map((mode) {
+                    return InkWell(
+                      onTap: () => _onNotifyModeChanged(mode),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            Radio<String>(
+                              value: mode,
+                              groupValue: _notifyMode,
+                              onChanged: (value) =>
+                                  _onNotifyModeChanged(value ?? '详细'),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              mode == '详细'
+                                  ? '完整模式：显示课程名称、成绩与位次'
+                                  : '简洁模式：仅显示有成绩或位次更新',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 24),
+              ],
+
+              // ---- ⑥ 显示效果 ----
               _SectionTitle(title: '显示效果', icon: Icons.tune_rounded),
               const SizedBox(height: 12),
               _SegmentedSettingsGroup(
@@ -2101,6 +2163,80 @@ class _SegmentedSettingsItem extends StatelessWidget {
       borderRadius: radius,
       clipBehavior: Clip.antiAlias,
       child: child,
+    );
+  }
+}
+
+/// 工作模式选项：与登录入口同款单选卡（标题 + 说明 + 左侧单选圈）
+class _WorkModeTile extends StatelessWidget {
+  const _WorkModeTile({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? scheme.primary.withValues(alpha: .07)
+              : Colors.transparent,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 20,
+                color: selected
+                    ? scheme.primary
+                    : scheme.onSurface.withValues(alpha: .35),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: scheme.onSurface.withValues(alpha: .6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

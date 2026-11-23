@@ -51,6 +51,9 @@ DEFAULT_SETTINGS = {
     "rank_monitor_enabled": False,
     "show_menubar_icon": True,
     "no_auto_query": False,
+    # 工作模式：full（自动检查 + 推送 + 查看管理）/ view（仅查看与管理）。
+    # view 模式下不自动查询、不推送、不转发，相关设置项在界面隐藏。
+    "work_mode": "full",
     "hide_unknown_courses": True,
     "random_interval_enabled": True,
     "welcome_completed": False,

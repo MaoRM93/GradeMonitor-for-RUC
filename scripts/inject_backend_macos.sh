@@ -50,6 +50,18 @@ if [[ ! -d "$APP_PATH" || "$APP_PATH" != *.app ]]; then
   exit 1
 fi
 APP_PATH="$(cd "$(dirname "$APP_PATH")" && pwd)/$(basename "$APP_PATH")"
+ORIGIN_APP="$APP_PATH"
+
+# 本仓库位于 iCloud Drive 内，iCloud 会给文件持续打上 com.apple.provenance
+# 等扩展属性，codesign 会因此报 "resource fork, Finder information, or
+# similar detritus not allowed"，被改动过的 Python.app 签不上名 → 冒烟测试
+# 直接被 Killed: 9。所以整个注入流程在 /tmp 的干净副本上完成，最后再回写。
+WORK_ROOT="/tmp/gm_inject"
+mkdir -p "$WORK_ROOT"
+APP_PATH="$WORK_ROOT/$(basename "$ORIGIN_APP")"
+rm -rf "$APP_PATH"
+ditto "$ORIGIN_APP" "$APP_PATH"
+xattr -cr "$APP_PATH" 2>/dev/null || true
 RES="$APP_PATH/Contents/Resources"
 
 echo "==> 注入目标: $APP_PATH"
@@ -77,6 +89,10 @@ fi
 echo "==> [2/4] 复制便携 Python 运行时"
 rm -rf "$RES/runtime/python"
 rsync -a --exclude '.DS_Store' "$PY_SRC/" "$RES/runtime/python/"
+# 源运行时来自 iCloud，rsync 会把扩展属性一并带过来；不清掉会导致后面
+# 的 codesign 全部失败（签名无效 → 二进制被内核拒绝加载）。
+xattr -cr "$RES/runtime/python" 2>/dev/null || true
+xattr -cr "$RES/backend" 2>/dev/null || true
 
 PY="$RES/runtime/python"
 # Homebrew Python 的原生扩展链接了开发机上的 OpenSSL、SQLite、xz 与
@@ -145,9 +161,17 @@ if [[ -x "$PY_BIN" ]]; then
   install -m 755 "$SCRIPT_DIR/runtime_python_launcher.sh" "$PY/bin/python3"
 fi
 # Python.framework 是一个嵌套 bundle；仅签各个二进制会留下外层封印失效，
-# 导致 macOS 以 Killed: 9 拒绝加载。冒烟前先重签整个 framework。
-codesign --force --deep --sign - --timestamp=none \
-  "$PY/Frameworks/Python.framework" 2>/dev/null || true
+# 导致 macOS 以 Killed: 9 拒绝加载。冒烟前由内向外重签。
+#
+# 坑：这份 runtime 是 Homebrew 的 Python.framework 直接拷来的，缺少
+# Versions/Current、Python 等顶层符号链接，codesign 会把 framework 根目录
+# 判成 "bundle format unrecognized"；真正有效的 bundle 是 Versions/3.11，
+# 所以签它而不是签根目录，并把里面的 Python.app 一并深签。
+PY_FW_V="$PY/Frameworks/Python.framework/Versions/3.11"
+if [[ -d "$PY_FW_V" ]]; then
+  xattr -cr "$PY_FW_V" 2>/dev/null || true
+  codesign --force --deep --sign - --timestamp=none "$PY_FW_V" 2>/dev/null || true
+fi
 # 裁剪：pip/setuptools 等打包期工具、测试与 GUI 相关模块在运行时一律用不到。
 # 保留 ensurepip 之外的一切标准库，避免误删 uvicorn 依赖。
 rm -rf \
@@ -246,8 +270,8 @@ ditto "$WORK_APP" "$SIGNED_OUT"
 echo "    签名包已就绪: $SIGNED_OUT"
 
 # 同步回原位置（仅供本地调试运行；iCloud 环境下 verify 可能报扩展属性告警）
-rm -rf "$APP_PATH"
-ditto "$WORK_APP" "$APP_PATH" 2>/dev/null || true
+rm -rf "$ORIGIN_APP"
+ditto "$WORK_APP" "$ORIGIN_APP" 2>/dev/null || true
 
 SIZE="$(du -sh "$SIGNED_OUT" | awk '{print $1}')"
 echo ""

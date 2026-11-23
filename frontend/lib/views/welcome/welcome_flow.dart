@@ -63,19 +63,21 @@ class _ThemeMeta {
 }
 
 class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
-    // 本页同时驱动环境光与页面切换两个 AnimationController，
-    // SingleTickerProviderStateMixin 只允许一个 ticker，会直接断言失败。
-    with TickerProviderStateMixin {
+        // 本页同时驱动环境光与页面切换两个 AnimationController，
+        // SingleTickerProviderStateMixin 只允许一个 ticker，会直接断言失败。
+        with
+        TickerProviderStateMixin {
   // 页面序列：0 欢迎 → 1 法律性声明 → 2 选择登录入口 → 3 账号登录
-  // → 4 监控设置 → 5 通知设置 → 6 主题选择 → 7 完成
+  // → 4 选择功能（工作模式）→ 5 监控设置 → 6 通知设置 → 7 主题选择 → 8 完成
   static const int _pIntro = 0;
   static const int _pAgreement = 1;
   static const int _pLoginMode = 2;
   static const int _pAccount = 3;
-  static const int _pMonitor = 4;
-  static const int _pNotify = 5;
-  static const int _pTheme = 6;
-  static const int _pConfirm = 7;
+  static const int _pWorkMode = 4;
+  static const int _pMonitor = 5;
+  static const int _pNotify = 6;
+  static const int _pTheme = 7;
+  static const int _pConfirm = 8;
 
   /// 引导页「卡片级」容器统一圆角：与主按钮、全局输入框的 12 对齐。
   /// 4px 只用于「推荐 / 需验证码」小标签，不参与此常量。
@@ -128,6 +130,10 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
   double _intervalValue = 300;
   TimeOfDay _startTime = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _endTime = const TimeOfDay(hour: 23, minute: 0);
+
+  // ---- 工作模式页 ----
+  /// full：自动检查 + 推送 + 查看与管理；view：仅查看与管理
+  String _workMode = 'full';
 
   // ---- 通知设置页 ----
   String _notifyMode = '详细';
@@ -190,6 +196,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         return featureEnabled(FeatureGateService.flag1041LoginMode);
       case _pAccount:
         return featureEnabled(FeatureGateService.flag1042Account);
+      case _pWorkMode:
+        return true;
       case _pMonitor:
         return featureEnabled(FeatureGateService.flag1043MonitorStep);
       case _pNotify:
@@ -343,12 +351,14 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         return _modesLoading ? '正在加载...' : '下一步';
       case _pAccount:
         return _verifying ? '正在验证...' : '下一步';
+      case _pWorkMode:
+        return '确认';
       case _pMonitor:
       case _pNotify:
       case _pTheme:
         return '下一步';
       default:
-        return _saving ? '正在保存...' : '好';
+        return _saving ? '正在保存...' : '开始使用 →';
     }
   }
 
@@ -372,6 +382,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
           return base && _captchaCtrl.text.trim().isNotEmpty;
         }
         return base;
+      case _pWorkMode:
+        return true;
       case _pMonitor:
       case _pNotify:
       case _pTheme:
@@ -490,6 +502,19 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         }
         _advance();
         break;
+      case _pWorkMode:
+        // 「仅查看与管理」直接跳到主题选择，跳过监控与通知两步；
+        // 同时把两路自动监控归零，避免沿用上次的开启状态。
+        if (_workMode == 'view') {
+          setState(() {
+            _autoMonitor = false;
+            _rankMonitor = false;
+          });
+          _goto(_pTheme);
+        } else {
+          _advance();
+        }
+        break;
       case _pMonitor:
       case _pNotify:
       case _pTheme:
@@ -523,6 +548,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
       startTime: _formatTime(_startTime),
       endTime: _formatTime(_endTime),
       notifyMode: _notifyMode,
+      workMode: _workMode,
     );
     await notifier.saveSettings(updated);
     await ApiClient().completeWelcome();
@@ -676,9 +702,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
               height: 48,
               child: FilledButton(
                 onPressed: _primaryEnabled() ? _onPrimary : null,
-                style: FilledButton.styleFrom(
-                  shape: const StadiumBorder(),
-                ),
+                style: FilledButton.styleFrom(shape: const StadiumBorder()),
                 child: Text(
                   _primaryLabel(),
                   style: TextStyle(
@@ -722,9 +746,7 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         height: 48,
         child: FilledButton(
           onPressed: _primaryEnabled() ? _onPrimary : null,
-          style: FilledButton.styleFrom(
-            shape: const StadiumBorder(),
-          ),
+          style: FilledButton.styleFrom(shape: const StadiumBorder()),
           child: (_verifying || _saving)
               ? SizedBox(
                   width: 18,
@@ -759,6 +781,8 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
         return _buildLoginModePage(cs);
       case _pAccount:
         return _buildAccountPage(cs);
+      case _pWorkMode:
+        return _buildWorkModePage(cs);
       case _pMonitor:
         return _buildMonitorPage(cs);
       case _pNotify:
@@ -1295,7 +1319,122 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
     );
   }
 
-  // ---- Page 3: 监控设置 ----
+  // ---- Page 4: 选择功能（工作模式）----
+  Widget _buildWorkModePage(ColorScheme cs) {
+    return _contentGroup(
+      460,
+      SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _pageHeader(
+              cs,
+              Icons.widgets_rounded,
+              '选择工作模式',
+              null,
+              inkShift: 7.4,
+            ),
+            const SizedBox(height: 20),
+            for (var i = 0; i < _workModeOptions.length; i++)
+              _buildWorkModeTile(
+                cs,
+                _workModeOptions[i],
+                first: i == 0,
+                last: i == _workModeOptions.length - 1,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 工作模式选项（顺序即界面顺序，第一项为默认的完整功能）
+  static const List<({String id, String name, String description})>
+  _workModeOptions = [
+    (
+      id: 'full',
+      name: '完整模式',
+      description: '程序将按照您的设置，为您开放查询、推送、分析自己学业状况的所有功能，使用不受限制。',
+    ),
+    (
+      id: 'view',
+      name: '仅查看与管理',
+      description: '为不需要随时关注的用户提供仅手动查询与分析的功能，自动查询与推送将被禁用。',
+    ),
+  ];
+
+  Widget _buildWorkModeTile(
+    ColorScheme cs,
+    ({String id, String name, String description}) mode, {
+    required bool first,
+    required bool last,
+  }) {
+    final selected = _workMode == mode.id;
+    final radius = AppShape.segmented(first: first, last: last);
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 0 : AppShape.gapInner),
+      child: InkWell(
+        borderRadius: radius,
+        onTap: () => setState(() => _workMode = mode.id),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            color: selected
+                ? cs.primary.withValues(alpha: .07)
+                : AppShape.groupFill(cs),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 20,
+                  color: selected
+                      ? cs.primary
+                      : cs.onSurface.withValues(alpha: .35),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      mode.name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      mode.description,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.5,
+                        color: cs.onSurface.withValues(alpha: .6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---- Page 5: 监控设置 ----
   /// 统一卡片：监控时间段 → 轮询间隔 → 监控项目，三段用分割线隔开
   Widget _buildMonitorPage(ColorScheme cs) {
     return _contentGroup(
@@ -1747,14 +1886,9 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
   }
 
   // ---- Page 7: 完成设置 ----
+  // 完成页只保留「图标 + 标题 + 主按钮」三件套：中间的学号、监控项目、
+  // 时间等摘要一律不展示，图标也用纯线性勾（不带圆形底）。
   Widget _buildConfirmPage(ColorScheme cs) {
-    final monitorDesc = [];
-    if (_autoMonitor) monitorDesc.add('成绩监控');
-    if (_rankMonitor) monitorDesc.add('排名监控');
-    final monitorText = monitorDesc.isEmpty ? '未开启' : monitorDesc.join(' + ');
-    final timeText =
-        '${_startTime.format(context)} - ${_endTime.format(context)}';
-
     return _contentGroup(
       480,
       SingleChildScrollView(
@@ -1765,58 +1899,10 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
           children: [
             _pageHeader(
               cs,
-              Icons.task_alt_outlined,
+              Icons.check_rounded,
               '所有配置已完成',
               null,
               inkShift: 5.3,
-            ),
-            const SizedBox(height: 16),
-            // 设置摘要卡片（不显示密码，新增轮询间隔）
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppShape.groupFill(cs),
-                borderRadius: AppShape.outer,
-              ),
-              child: Column(
-                children: [
-                  _confirmRow(cs, '学号', _usernameCtrl.text.trim()),
-                  _confirmRow(cs, '监控项目', monitorText),
-                  _confirmRow(cs, '监控时间', timeText),
-                  _confirmRow(cs, '轮询间隔', '${_intervalValue.round()} 秒'),
-                  _confirmRow(
-                    cs,
-                    '通知模式',
-                    _notifyMode == '详细' ? '完整模式' : '简洁模式',
-                  ),
-                  _confirmRow(cs, '主题', _themeMeta(_selectedTheme).title),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: cs.primary.withValues(alpha: .08),
-                borderRadius: AppShape.outer,
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 18, color: cs.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '完成配置后，程序将自动开始在后台监测成绩与排名变动。'
-                      '所有数据仅保存在本地，请放心使用。',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: cs.onSurface.withValues(alpha: .7),
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
@@ -1824,37 +1910,6 @@ class _WelcomeFlowState extends ConsumerState<WelcomeFlow>
     );
   }
 
-  Widget _confirmRow(ColorScheme cs, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                height: 1.35,
-                color: cs.onSurface.withValues(alpha: .5),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value.isEmpty ? '未设置' : value,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                height: 1.35,
-                color: cs.onSurface,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _WelcomeAtmosphere extends StatelessWidget {

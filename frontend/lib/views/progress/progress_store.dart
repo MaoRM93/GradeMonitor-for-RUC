@@ -36,10 +36,14 @@ class ProgressState {
     Map<String, String>? overrides,
     Map<String, bool>? manual,
     List<CustomRule>? rules,
+    Map<String, bool>? excluded,
+    Map<String, bool>? unclassified,
     this.note = '',
   }) : overrides = overrides ?? <String, String>{},
        manual = manual ?? <String, bool>{},
-       rules = rules ?? <CustomRule>[];
+       rules = rules ?? <CustomRule>[],
+       excluded = excluded ?? <String, bool>{},
+       unclassified = unclassified ?? <String, bool>{};
 
   /// kth -> 培养方案子项 key（用户手工指定的课程类别）
   final Map<String, String> overrides;
@@ -50,6 +54,17 @@ class ProgressState {
   /// 自定义组合规则（左边 = 右边）
   final List<CustomRule> rules;
 
+  /// kth -> true：用户把这一门课从计算里排除。
+  ///
+  /// 排除只影响进度累加，成绩单原文照旧；课程仍在页面上，只是不参与计算。
+  final Map<String, bool> excluded;
+
+  /// kth -> true：用户把这一门课**取消归类**，踢回「待归类课程」。
+  ///
+  /// 自动规则本来会给它一个子项，用户不同意，于是记下"这门课别自动塞"，
+  /// 之后即使刷新成绩、重进页面也保持，直到用户重新指派或恢复自动归类。
+  final Map<String, bool> unclassified;
+
   /// 免修与替代说明（自由文本）
   String note;
 
@@ -57,6 +72,8 @@ class ProgressState {
     'overrides': overrides,
     'manual': manual,
     'rules': [for (final r in rules) r.toJson()],
+    'excluded': excluded,
+    'unclassified': unclassified,
     'note': note,
   };
 
@@ -64,6 +81,8 @@ class ProgressState {
     final overrides = <String, String>{};
     final manual = <String, bool>{};
     final rules = <CustomRule>[];
+    final excluded = <String, bool>{};
+    final unclassified = <String, bool>{};
     final rawOverrides = raw['overrides'];
     if (rawOverrides is Map) {
       for (final entry in rawOverrides.entries) {
@@ -83,10 +102,24 @@ class ProgressState {
         if (rule != null) rules.add(rule);
       }
     }
+    final rawExcluded = raw['excluded'];
+    if (rawExcluded is Map) {
+      for (final entry in rawExcluded.entries) {
+        if (entry.value == true) excluded[entry.key.toString()] = true;
+      }
+    }
+    final rawUnclassified = raw['unclassified'];
+    if (rawUnclassified is Map) {
+      for (final entry in rawUnclassified.entries) {
+        if (entry.value == true) unclassified[entry.key.toString()] = true;
+      }
+    }
     return ProgressState(
       overrides: overrides,
       manual: manual,
       rules: rules,
+      excluded: excluded,
+      unclassified: unclassified,
       note: raw['note']?.toString() ?? '',
     );
   }
@@ -109,7 +142,9 @@ class ProgressStore {
     if (raw == null || raw.isEmpty) return ProgressState();
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is Map<String, dynamic>) return ProgressState.fromJson(decoded);
+      if (decoded is Map<String, dynamic>) {
+        return ProgressState.fromJson(decoded);
+      }
       if (decoded is Map) {
         return ProgressState.fromJson(decoded.cast<String, dynamic>());
       }
@@ -125,7 +160,8 @@ class ProgressStore {
         jsonEncode(state.toJson()),
       );
 
-  static String? loadMajor(String year) => UiPrefsService.readPref(_majorKey(year));
+  static String? loadMajor(String year) =>
+      UiPrefsService.readPref(_majorKey(year));
 
   static Future<void> saveMajor(String year, String major) =>
       UiPrefsService.writePref(_majorKey(year), major);

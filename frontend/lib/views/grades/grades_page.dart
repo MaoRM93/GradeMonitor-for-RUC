@@ -303,7 +303,9 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                           child: DropdownButton<String>(
                             value: semesterValue,
                             style: dropdownStyle,
-                            dropdownColor: colorScheme.surfaceContainerHighest,
+                            dropdownColor: AppShape.overlayFill(colorScheme),
+                            elevation: 8,
+                            borderRadius: AppShape.inner,
                             menuMaxHeight: 300,
                             isExpanded: true,
                             alignment: AlignmentDirectional.centerStart,
@@ -341,7 +343,9 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                           child: DropdownButton<String>(
                             value: _scopeCore ? 'core' : 'all',
                             style: dropdownStyle,
-                            dropdownColor: colorScheme.surfaceContainerHighest,
+                            dropdownColor: AppShape.overlayFill(colorScheme),
+                            elevation: 8,
+                            borderRadius: AppShape.inner,
                             menuMaxHeight: 300,
                             isExpanded: true,
                             alignment: AlignmentDirectional.centerStart,
@@ -712,7 +716,8 @@ class _GradesPageState extends ConsumerState<GradesPage> {
         height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: AppShape.insetFill(colorScheme),
+          // 与紧随其后的学期统计卡共用同一层表面，避免抽取栏显得更灰一阶。
+          color: colorScheme.surface,
           borderRadius: AppShape.inner,
         ),
         child: Row(

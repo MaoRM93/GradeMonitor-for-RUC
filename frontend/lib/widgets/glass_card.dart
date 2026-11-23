@@ -161,10 +161,7 @@ class GpaBadge extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: AppShape.inner,
-      ),
+      decoration: BoxDecoration(color: bgColor, borderRadius: AppShape.inner),
       child: Text(
         value,
         style: TextStyle(

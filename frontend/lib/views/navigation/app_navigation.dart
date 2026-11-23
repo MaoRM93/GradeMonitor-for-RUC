@@ -1,6 +1,9 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../core/network/api_client.dart';
 import '../dashboard/dashboard_page.dart';
@@ -18,6 +21,7 @@ import '../../widgets/beta_badge.dart';
 import '../../core/service/update_service.dart';
 import '../../core/service/nav_signal.dart';
 import '../../core/service/session_service.dart';
+import '../../providers/settings_provider.dart';
 
 enum NavDestination {
   dashboard(icon: Icons.dashboard, label: '仪表板'),
@@ -76,13 +80,13 @@ class _LogoColorMapper extends ColorMapper {
   }
 }
 
-class AppNavigation extends StatefulWidget {
+class AppNavigation extends ConsumerStatefulWidget {
   const AppNavigation({super.key});
   @override
-  State<AppNavigation> createState() => _AppNavigationState();
+  ConsumerState<AppNavigation> createState() => _AppNavigationState();
 }
 
-class _AppNavigationState extends State<AppNavigation> {
+class _AppNavigationState extends ConsumerState<AppNavigation> {
   NavDestination _currentDest = NavDestination.dashboard;
   int _versionTapCount = 0;
   DateTime _lastVersionTap = DateTime.now();
@@ -218,9 +222,13 @@ class _AppNavigationState extends State<AppNavigation> {
   }
 
   /// 功能组开关下线某一项后，整组可能变空；空组不渲染，否则会留下空隙。
-  List<NavDestination>? _visibleGroup(int index) {
+  ///
+  /// 「仅查看与管理」工作模式下，通知转发没有意义（不会自动查询、不会推送），
+  /// 入口一并隐藏，避免用户配置了通道却收不到任何消息。
+  List<NavDestination>? _visibleGroup(int index, {required bool viewOnly}) {
     final group = _navigationGroups[index]
         .where((d) => d.flag == null || featureEnabled(d.flag!))
+        .where((d) => !(viewOnly && d == NavDestination.forwarders))
         .toList();
     return group.isEmpty ? null : group;
   }
@@ -272,6 +280,7 @@ class _AppNavigationState extends State<AppNavigation> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final viewOnly = ref.watch(settingsProvider).workMode == 'view';
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isRucRed = ThemeController.instance.preset == ThemePreset.rucRed;
     final navigationSurface = Color.alphaBlend(
@@ -365,15 +374,19 @@ class _AppNavigationState extends State<AppNavigation> {
                                               index < _navigationGroups.length;
                                               index++
                                             ) ...[
-                                              if (_visibleGroup(index)
+                                              if (_visibleGroup(
+                                                    index,
+                                                    viewOnly: viewOnly,
+                                                  )
                                                   case final group?)
                                                 _NavGroup(
                                                   destinations: group,
                                                   current: _currentDest,
                                                   onColor: railOnSurface,
                                                   groupColor: isRucRed
-                                                      ? Colors.white
-                                                            .withValues(alpha: .08)
+                                                      ? Colors.white.withValues(
+                                                          alpha: .08,
+                                                        )
                                                       : colorScheme.surface
                                                             .withValues(
                                                               alpha: .62,
@@ -523,9 +536,15 @@ class _NavItem extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (destination.beta) ...[
+                if (destination.beta &&
+                    featureEnabled(
+                      FeatureGateService.flag1056ProgressBetaBadge,
+                    )) ...[
                   const SizedBox(width: 6),
-                  const BetaBadge(fontSize: 9, padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1)),
+                  const BetaBadge(
+                    fontSize: 9,
+                    padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  ),
                 ],
               ],
             ),

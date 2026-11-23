@@ -106,7 +106,6 @@ class DashboardPage extends ConsumerStatefulWidget {
 }
 
 class _DashboardPageState extends ConsumerState<DashboardPage> {
-
   bool _settingsReady = false;
   String? _lastUsername;
   bool _isQuerying = false;
@@ -144,7 +143,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     // 如果开启了自动监控但未运行，自动启动
     if (!mounted) return;
     final status = ref.read(monitorProvider);
-    if ((settings.autoMonitorEnabled || settings.rankMonitorEnabled) &&
+    // 工作模式为「仅查看与管理」时不自动拉起监控
+    if (settings.workMode != 'view' &&
+        (settings.autoMonitorEnabled || settings.rankMonitorEnabled) &&
         !status.isRunning &&
         settings.username.isNotEmpty) {
       try {
@@ -178,19 +179,54 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
   }
 
+  /// 手动查询一次。
+  ///
+  /// 结果反馈统一走 Toast，三态文案固定：
+  /// · 有新变化（成绩新增/变动，或排名变动）→「查询成功」
+  /// · 查询完成但没有差异 →「查询成功，没有新的变动」
+  /// · 请求异常或后端报错 →「查询失败，请稍后再试」
   Future<void> _queryOnce() async {
+    if (_isQuerying) return;
     setState(() => _isQuerying = true);
     final api = ref.read(apiClientProvider);
     try {
-      await api.queryOnce();
+      final resp = await api.queryOnce();
       await _refreshAll();
-    } catch (e) {
       if (mounted) {
-        ToastHost().show('查询失败: $e');
+        ToastHost().show(
+          _hasNewChange(resp.data) ? '查询成功' : '查询成功，没有新的变动',
+        );
       }
+    } catch (_) {
+      if (mounted) ToastHost().show('查询失败，请稍后再试');
     } finally {
       if (mounted) setState(() => _isQuerying = false);
     }
+  }
+
+  /// 解析 /api/dev/query-once 的 results，判断本次查询是否真的产生了变化。
+  ///
+  /// 后端结构：{"results": {"grades": {"new_count", "changed_count"},
+  /// "rank": {"changes": [...]}, "grades_error", "rank_error"}}。
+  /// 任一侧有新增/变动即视为「有新变化」；解析不出来时按「没有新的变动」处理，
+  /// 避免把异常数据说成成功更新。
+  bool _hasNewChange(dynamic data) {
+    if (data is! Map) return false;
+    final results = data['results'];
+    if (results is! Map) return false;
+    final grades = results['grades'];
+    if (grades is Map) {
+      final added = grades['new_count'];
+      final changed = grades['changed_count'];
+      if (added is int && added > 0) return true;
+      if (changed is int && changed > 0) return true;
+    }
+    final rank = results['rank'];
+    if (rank is Map) {
+      final changes = rank['changes'];
+      if (changes is List && changes.isNotEmpty) return true;
+    }
+    return false;
   }
 
   /// 启动/停止监控（带 loading 与结果反馈）
@@ -208,29 +244,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               s.copyWith(autoMonitorEnabled: false, rankMonitorEnabled: false),
             );
         await ref.read(monitorProvider.notifier).stopMonitor();
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('监控已停止')));
-        }
+        if (mounted) ToastHost().show('监控已停止');
       } else {
         // 启动监控 + 打开设置中的成绩自动监控开关
         await ref
             .read(settingsProvider.notifier)
             .saveSettings(s.copyWith(autoMonitorEnabled: true));
         await ref.read(monitorProvider.notifier).startMonitor();
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('监控已启动，将按间隔自动查询')));
-        }
+        if (mounted) ToastHost().show('监控已启动，将按间隔自动查询');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('操作失败: $e'), backgroundColor: AppTheme.error),
-        );
-      }
+      if (mounted) ToastHost().show('操作失败: $e');
     } finally {
       await ref.read(monitorProvider.notifier).fetchStatus();
       if (mounted) setState(() => _isTogglingMonitor = false);
@@ -252,70 +276,120 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       Future.microtask(_refreshAll);
     }
 
+    // 「仅查看与管理」模式：仪表板不再展示任何数据卡，只保留一枚「立即查询」
+    // 按钮（几何位置与完整模式完全一致），并在屏幕正中给出模式提示。
+    final viewOnly = settings.workMode == 'view';
+
     return Scaffold(
       body: SafeArea(
         // 整页高度必须显式交给 LayoutBuilder 计算：仪表板设计稿高约 752px，
         // 1100×720 默认窗口下本来就装不下，早期版本因此把第二行统计卡裁在
         // 了窗口底边。顶部 36px 自绘标题栏移除后可用高度回到 720px，
         // 但仍不足以 1:1 排下设计稿，等比收敛逻辑必须保留。
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final metrics = _DashMetrics.of(constraints.maxHeight);
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                28,
-                metrics.topPad,
-                28,
-                metrics.bottomPad,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    '仪表板',
-                    style: TextStyle(
-                      fontFamily: AppTheme.serifFontFamily,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                    ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final metrics = _DashMetrics.of(constraints.maxHeight);
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    28,
+                    metrics.topPad,
+                    28,
+                    metrics.bottomPad,
                   ),
-                  SizedBox(height: metrics.titleGap),
-                  FeatureGate(
-                    flag: FeatureGateService.flag1001Monitor,
-                    child: _buildMonitorCard(monitorState, metrics),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '仪表板',
+                        style: TextStyle(
+                          fontFamily: AppTheme.serifFontFamily,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                      SizedBox(height: metrics.titleGap),
+                      // 监控行始终保留：即使只看不推，用户也需要一枚手动查询入口。
+                      FeatureGate(
+                        flag: FeatureGateService.flag1001Monitor,
+                        child: _buildMonitorCard(
+                          monitorState,
+                          metrics,
+                          viewOnly: viewOnly,
+                        ),
+                      ),
+                      if (!viewOnly) ...[
+                        FeatureGate(
+                          flag: FeatureGateService.flag1003LatestCard,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(height: metrics.sectionGap),
+                              _buildLatestCard(gradesAsync, metrics),
+                            ],
+                          ),
+                        ),
+                        FeatureGate(
+                          flag: FeatureGateService.flag1004StatTiles,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(height: metrics.sectionGap),
+                              _buildStatTiles(monitorState, rankAsync, metrics),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  FeatureGate(
-                    flag: FeatureGateService.flag1003LatestCard,
+                );
+              },
+            ),
+            if (viewOnly)
+              // 居中提示：不拦截点击，保证「立即查询」始终可操作。
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Center(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(height: metrics.sectionGap),
-                        _buildLatestCard(gradesAsync, metrics),
+                        Icon(
+                          Icons.info_outline,
+                          size: 48,
+                          color: colorScheme.primary.withValues(alpha: .45),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '开启完整模式以激活其余功能',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: colorScheme.onSurface.withValues(alpha: .55),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  FeatureGate(
-                    flag: FeatureGateService.flag1004StatTiles,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(height: metrics.sectionGap),
-                        _buildStatTiles(monitorState, rankAsync, metrics),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            );
-          },
+          ],
         ),
       ),
     );
   }
 
   /// 监控状态卡（整行）：状态与按钮在同一行垂直居中，按钮靠右
-  Widget _buildMonitorCard(MonitorStatus status, _DashMetrics metrics) {
+  ///
+  /// [viewOnly] 为 true（「仅查看与管理」工作模式）时：状态圆点、状态文字与
+  /// 启动/停止监控按钮全部不显示，但「立即查询」按钮仍留在原来的位置上——
+  /// 用等尺寸的透明占位保住它的坐标，保证两种模式下按钮位置完全一致。
+  Widget _buildMonitorCard(
+    MonitorStatus status,
+    _DashMetrics metrics, {
+    bool viewOnly = false,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
 
     // 监控状态行不再套白底卡片：状态与按钮直接落在页面背景上，
@@ -327,19 +401,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       alignment: Alignment.centerLeft,
       child: Row(
         children: [
-          PulsingStatusDot(active: status.isRunning),
-          const SizedBox(width: 12),
-          Text(
-            status.isRunning ? '监控运行中' : '监控已停止',
-            style: TextStyle(
-              fontFamily: AppTheme.serifFontFamily,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: status.isRunning
-                  ? AppTheme.success
-                  : colorScheme.onSurface.withValues(alpha: .5),
+          if (!viewOnly) ...[
+            PulsingStatusDot(active: status.isRunning),
+            const SizedBox(width: 12),
+            Text(
+              status.isRunning ? '监控运行中' : '监控已停止',
+              style: TextStyle(
+                fontFamily: AppTheme.serifFontFamily,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: status.isRunning
+                    ? AppTheme.success
+                    : colorScheme.onSurface.withValues(alpha: .5),
+              ),
             ),
-          ),
+          ],
           const Spacer(),
           // Flag-1002：立即查询按钮可被远程静默下线
           FeatureGate(
@@ -353,14 +429,22 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             ),
           ),
           const SizedBox(width: 10),
-          _ControlButton(
-            icon: status.isRunning
-                ? Icons.stop_rounded
-                : Icons.play_arrow_rounded,
-            label: status.isRunning ? '停止监控' : '启动监控',
-            color: status.isRunning ? AppTheme.error : AppTheme.success,
-            loading: _isTogglingMonitor,
-            onTap: _isTogglingMonitor ? null : _toggleMonitor,
+          // 仅查看模式下启动/停止监控没有意义：占位保留尺寸，按钮本身不可见，
+          // 也不会响应点击。
+          Visibility(
+            visible: !viewOnly,
+            maintainSize: true,
+            maintainAnimation: true,
+            maintainState: true,
+            child: _ControlButton(
+              icon: status.isRunning
+                  ? Icons.stop_rounded
+                  : Icons.play_arrow_rounded,
+              label: status.isRunning ? '停止监控' : '启动监控',
+              color: status.isRunning ? AppTheme.error : AppTheme.success,
+              loading: _isTogglingMonitor,
+              onTap: _isTogglingMonitor ? null : _toggleMonitor,
+            ),
           ),
         ],
       ),
@@ -751,7 +835,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             children: [
               _statHeader(tile, cs),
               const Spacer(),
-              _statNumber(tile.value, size, cs, decimalSmall: tile.decimalSmall),
+              _statNumber(
+                tile.value,
+                size,
+                cs,
+                decimalSmall: tile.decimalSmall,
+              ),
             ],
           );
         },

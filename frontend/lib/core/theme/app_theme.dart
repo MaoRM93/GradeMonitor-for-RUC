@@ -404,9 +404,14 @@ class AppTheme {
         side: BorderSide.none,
       ),
       popupMenuTheme: PopupMenuThemeData(
-        color: surfaceContainerHighest,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: AppShape.outer),
+        // 弹出列表必须是独立的表面：不能再与页面的分组底色共用同一档，
+        // 否则长列表会像直接铺在页面上一样，边界难以辨认。
+        color: AppShape.overlayFill(scheme),
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppShape.outer,
+          side: BorderSide(color: scheme.outline.withValues(alpha: .72)),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: Color.alphaBlend(

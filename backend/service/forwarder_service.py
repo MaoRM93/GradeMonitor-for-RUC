@@ -128,10 +128,19 @@ _CHANNEL_GATES = {
 
 
 def _enabled_config() -> dict:
-    """读取转发配置并剔除被功能组下线的通道。"""
+    """读取转发配置并剔除被功能组下线的通道。
+
+    工作模式为 view（仅查看与管理）时，所有通道一律视为关闭：
+    该模式下不自动查询、不推送，转发入口在界面也已隐藏。
+    """
     cfg = _config()
+    from backend.storage.settings import load_settings
+    try:
+        view_only = load_settings().get("work_mode", "full") == "view"
+    except Exception:
+        view_only = False
     for channel, gid in _CHANNEL_GATES.items():
-        if channel in cfg and not gate_enabled(gid):
+        if channel in cfg and (view_only or not gate_enabled(gid)):
             cfg[channel] = dict(cfg[channel], enabled=False)
     return cfg
 

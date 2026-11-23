@@ -306,6 +306,7 @@ class SettingsUpdate(BaseModel):
     rank_monitor_enabled: Optional[bool] = None
     show_menubar_icon: Optional[bool] = None
     no_auto_query: Optional[bool] = None
+    work_mode: Optional[str] = None
     hide_unknown_courses: Optional[bool] = None
     welcome_completed: Optional[bool] = None
     show_welcome_always: Optional[bool] = None
@@ -813,6 +814,17 @@ async def update_settings(update: SettingsUpdate):
         interval = int(changed["interval_seconds"])
         if not 60 <= interval <= 86400:
             raise HTTPException(status_code=400, detail="轮询间隔必须在 60 至 86400 秒之间")
+
+    # 工作模式只允许 full / view 两个取值；切到 view 时顺带关掉两路自动监控，
+    # 避免界面隐藏了开关但后台仍在查询。
+    if "work_mode" in changed:
+        mode = str(changed["work_mode"])
+        if mode not in ("full", "view"):
+            raise HTTPException(status_code=400, detail="工作模式只能是 full 或 view")
+        changed["work_mode"] = mode
+        if mode == "view":
+            current["auto_monitor_enabled"] = False
+            current["rank_monitor_enabled"] = False
 
     # 密码单独处理：只有前端显式传了非空 password 才更新；传空串表示清除。
     # 未传（None/exclude_none 后不存在）则保持安全存储中的既有密码不变。

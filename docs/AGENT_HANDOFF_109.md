@@ -188,14 +188,15 @@ cd frontend && flutter pub get
 cd frontend && flutter analyze
 cd frontend && flutter test
 cd frontend && flutter build macos --release
-../scripts/inject_backend_macos.sh
-../scripts/build_dmg.sh
+../scripts/inject_backend_macos.sh build/macos/Build/Products/Release/GradeMonitor.app
+# 版本号取 pubspec.yaml 的 version，把「+」替换为「.」；例如 109.0.1+115 → 109.0.1.115
+../scripts/build_dmg.sh /tmp/gm_signed/GradeMonitor.app 109.0.1.115
 ```
 
 说明：
 
-- `inject_backend_macos.sh` 会把便携式 Python 后端和 Keychain helper 注入 macOS 应用包；不能遗漏，否则安装后监测功能无法正常运行。
-- `build_dmg.sh` 从当前版本号产生桌面 DMG。每次构建前确认旧 DMG 的删除范围，绝不使用宽泛的删除命令。
+- `inject_backend_macos.sh` 必须显式传入 Flutter 构建出的 `.app` 路径；它会将便携式 Python 后端和 Keychain helper 注入其中，并把已签名的干净包输出到 `/tmp/gm_signed/GradeMonitor.app`。不能遗漏，否则安装后监测功能无法正常运行。
+- `build_dmg.sh` 必须显式传入这个 `/tmp/gm_signed/GradeMonitor.app` 和四段版本号；版本号由 `pubspec.yaml` 的 `x.y.z+build` 改写为 `x.y.z.build`。不要以仓库（iCloud Drive）内的 `.app` 作为发布输入，iCloud 的扩展属性会破坏签名。
 - 如用户明确要求“清理缓存、卸载旧版、删除旧 DMG”，必须先确认精确路径，再使用可审计的范围进行清理。
 - 发布前至少运行与变更相关的 Flutter/Python 检查；涉及签名、控制下发或安装包时，要额外验证失败路径不会改变本地状态。
 

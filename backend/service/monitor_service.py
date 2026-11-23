@@ -135,6 +135,12 @@ class MonitorService:
                 except Exception:
                     is_first_ever_query = False
 
+                # 工作模式：view（仅查看与管理）不自动查询，等下一轮再看。
+                # 界面已经隐藏了开关，这里再兜一层，防止旧配置残留导致后台偷跑。
+                if settings.get("work_mode", "full") == "view":
+                    await asyncio.sleep(30)
+                    continue
+
                 # 无凭据时跳过
                 if not username or not password:
                     logger.info("[自动监控] 无登录凭据，等待 30s 后重试")
@@ -227,7 +233,7 @@ class MonitorService:
             logger.info(f"[自动监控] 本地JSON中有 {len(old_grades)} 门课程")
 
             service = GradeService(username, password)
-            result = service.fetch_grade_json()
+            result = await asyncio.to_thread(service.fetch_grade_json)
 
             new_grades: dict = {}
             for course in result.get("data", []):
@@ -284,7 +290,8 @@ class MonitorService:
             logger.info(f"[自动监控] 本地排名: pm={old_rank.get('pm') if old_rank else 'None'}")
 
             service = RankService(username, password)
-            new_rank = service.fetch_latest_rank(derive_semesters_from_local_grades())
+            semesters = derive_semesters_from_local_grades()
+            new_rank = await asyncio.to_thread(service.fetch_latest_rank, semesters)
             if not new_rank:
                 logger.info("[自动监控] 服务器未返回排名数据")
                 return

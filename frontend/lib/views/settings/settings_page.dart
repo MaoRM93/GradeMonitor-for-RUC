@@ -1621,6 +1621,8 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
 
   _DownloadPhase _phase = _DownloadPhase.idle;
   double _progress = 0; // 0..1
+  DateTime? _lastProgressUpdateAt;
+  double _lastRenderedProgress = 0;
   String? _savedPath;
   String _errorText = '';
 
@@ -1662,13 +1664,28 @@ class _UpdateInfoDialogState extends State<_UpdateInfoDialog> {
       _errorText = '';
       _verifyFailed = false;
       _progress = 0;
+      _lastProgressUpdateAt = null;
+      _lastRenderedProgress = 0;
     });
     try {
       final path = await UpdateService().downloadRelease(
         _asset,
         onProgress: (received, total) {
           if (!mounted) return;
-          setState(() => _progress = total > 0 ? received / total : 0);
+          final progress = total > 0 ? received / total : 0.0;
+          final now = DateTime.now();
+          final elapsed = _lastProgressUpdateAt == null
+              ? null
+              : now.difference(_lastProgressUpdateAt!);
+          final shouldRender =
+              progress >= 1 ||
+              elapsed == null ||
+              elapsed >= const Duration(milliseconds: 150) ||
+              progress - _lastRenderedProgress >= 0.005;
+          if (!shouldRender) return;
+          _lastProgressUpdateAt = now;
+          _lastRenderedProgress = progress;
+          setState(() => _progress = progress.clamp(0.0, 1.0));
         },
       );
       if (!mounted) return;

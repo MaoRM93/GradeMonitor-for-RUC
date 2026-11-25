@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Directory, File, Platform, Process;
+import 'dart:io' show Directory, File, HttpClient, Platform, Process;
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -1016,9 +1017,10 @@ class UpdateService {
   Future<String> downloadRelease(
     ReleaseAsset asset, {
     void Function(int received, int total)? onProgress,
+    @visibleForTesting Directory? destinationDirectory,
   }) async {
-    final dirPath = _downloadsDir();
-    final dir = Directory(dirPath);
+    final dir = destinationDirectory ?? Directory(_downloadsDir());
+    final dirPath = dir.path;
     if (!dir.existsSync()) dir.createSync(recursive: true);
 
     // 从 URL 推导文件名，异常时用时间戳兜底
@@ -1053,6 +1055,20 @@ class UpdateService {
     final tmpPath = '$targetPath.part';
     final tmpFile = File(tmpPath);
 
+    // 上次中断留下的 .part 文件可直接续传。大于发布资产标称大小的
+    // 临时文件不可能有效，避免 Range 起点落在文件末尾之后。
+    var resumeOffset = tmpFile.existsSync() ? tmpFile.lengthSync() : 0;
+    if (asset.size > 0 && resumeOffset > asset.size) {
+      tmpFile.deleteSync();
+      resumeOffset = 0;
+    }
+    if (asset.size > 0 && resumeOffset == asset.size) {
+      tmpFile.renameSync(targetPath);
+      _log.info('更新包已从完整的临时文件恢复: $targetPath');
+      onProgress?.call(asset.size, asset.size);
+      return targetPath;
+    }
+
     final dio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 30),
@@ -1061,27 +1077,73 @@ class UpdateService {
         validateStatus: (status) => status != null && status < 400,
       ),
     );
-    try {
+    // Dart 桌面端不保证自动继承浏览器的代理路径。显式读取
+    // HTTP_PROXY / HTTPS_PROXY / NO_PROXY，使常见的系统代理启动器和
+    // 命令行环境与应用内下载保持一致。
+    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+      final client = HttpClient();
+      client.findProxy = (uri) => HttpClient.findProxyFromEnvironment(
+        uri,
+        environment: Platform.environment,
+      );
+      return client;
+    };
+
+    Future<void> runDownload(int offset) async {
+      final resuming = offset > 0;
       await dio.download(
         asset.url,
         tmpPath,
-        onReceiveProgress: onProgress,
-        options: Options(responseType: ResponseType.bytes),
+        onReceiveProgress: (received, total) {
+          final overallReceived = offset + received;
+          final overallTotal = total > 0
+              ? offset + total
+              : (asset.size > 0 ? asset.size : total);
+          onProgress?.call(overallReceived, overallTotal);
+        },
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: resuming ? {'Range': 'bytes=$offset-'} : null,
+          // 续传必须得到 206。若服务器忽略 Range 返回 200，
+          // Dio 会在写文件前拒绝该响应，防止把整包追加两次。
+          validateStatus: (status) => resuming
+              ? status == 206
+              : status != null && status >= 200 && status < 300,
+        ),
+        fileAccessMode: resuming ? FileAccessMode.append : FileAccessMode.write,
+        // 保留已下载内容，下次从断点继续。
+        deleteOnError: false,
       );
+    }
+
+    try {
+      try {
+        await runDownload(resumeOffset);
+      } on DioException catch (e) {
+        // 一些 CDN 不支持 Range，或签名 URL 变化后不接受旧断点。
+        // 仅在“续传请求已到达服务器但未获得 206”时从头下载；
+        // DNS、连接中断等错误仍保留断点。
+        if (resumeOffset > 0 && e.response?.statusCode != null) {
+          if (tmpFile.existsSync()) tmpFile.deleteSync();
+          resumeOffset = 0;
+          await runDownload(0);
+        } else {
+          rethrow;
+        }
+      }
       final tmp = File(tmpPath);
       if (!tmp.existsSync()) {
         throw Exception('下载未完成（临时文件丢失）');
+      }
+      final downloadedSize = tmp.lengthSync();
+      if (asset.size > 0 && downloadedSize != asset.size) {
+        throw Exception('下载文件大小不符（$downloadedSize / ${asset.size} 字节）');
       }
       tmp.renameSync(targetPath);
       _log.info('更新包已下载: $targetPath');
       return targetPath;
     } catch (e) {
-      if (tmpFile.existsSync()) {
-        try {
-          tmpFile.deleteSync();
-        } catch (_) {}
-      }
-      _log.warning('下载更新包失败: $e');
+      _log.warning('下载更新包失败（已保留断点）: $e');
       rethrow;
     } finally {
       dio.close();
